@@ -151,10 +151,27 @@ export function sortMenuRowState(
   orders: SpaceOrders | undefined
 ): { show: boolean; checked: boolean } {
   const hidden = { show: false, checked: false };
+  // This gate dominates both conditions below. With ordering off the drag is
+  // blocked by the setting, not by the override, so the row would promise an
+  // escape that changes nothing.
   if (!orderingEnabledFor(sel, settings)) return hidden;
+  const overridden = isOverridden(sel, overrides);
   const map = sel.kind === "all" ? orders?.all : orders?.bySpaceId?.[sel.id];
   // An empty map, or one holding only empty arrays, is not a saved order. Both
   // shapes occur: `compact` can empty a folder's list without removing the key.
-  if (!map || !Object.values(map).some((list) => list.length > 0)) return hidden;
-  return { show: true, checked: !isOverridden(sel, overrides) };
+  const saved = !!map && Object.values(map).some((list) => list.length > 0);
+  // An override shows the row even with nothing ever reordered, which a saved
+  // order alone would not. Otherwise the two conditions hold each other in
+  // place: the override suppresses drag-to-reorder, so no saved order can be
+  // created, so the row stays hidden, and the row is the discoverable way to
+  // clear the override. `Restore saved ordering` escapes it but nothing on
+  // screen says so. Reproduced on 0.3.1 with a fresh folder space and one
+  // click on a sort mode.
+  //
+  // Shown UNTICKED in that case, which keeps the invariant this whole mode
+  // exists for: exactly one item is ticked and it names what is on screen.
+  // Obsidian's sort is what renders, one of its six carries the tick, and
+  // this row advertises a mode rather than claiming to be in effect.
+  if (!saved && !overridden) return hidden;
+  return { show: true, checked: !overridden };
 }

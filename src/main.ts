@@ -2517,27 +2517,20 @@ export default class SpacesPlugin extends Plugin {
         // re-timed: an accepted cost of not doing DOM surgery on host markup.
         const live = this.blockedDragNotice;
         const reusable = live !== null && live.messageEl.isConnected;
-        // Names whichever route actually exists right now, rather than one
-        // that usually does. The row is conditional on a saved order
-        // existing and this Notice is not: overriding without ever having
-        // reordered anything is reachable, and a drag cannot create that first
-        // order because it is inert while overridden — so the row is absent in
-        // exactly that state. Naming it unconditionally would send the user to
-        // a menu entry that is not there; naming the command unconditionally
-        // sends them to the command palette when the fix is one click away in
-        // the menu they were probably just in. So ask.
+        // The sort menu is named unconditionally, and that is now sound.
+        // This Notice fires only when `shouldExplainBlockedDrag` holds, which
+        // is override AND ordering-enabled, and `sortMenuRowState` shows the
+        // row under exactly that pair. It used to ask, because the row was
+        // conditional on a saved order existing and an override with nothing
+        // ever reordered left it absent — the state that made the two hold
+        // each other in place. The row is shown there now, so the branch that
+        // sent the user to the command palette instead was unreachable and
+        // has gone rather than lingering as a defensive fallback.
         //
-        // "Right-click the space" would be unfollowable
-        // in *All* — the switcher's contextmenu listener is gated on
-        // `entry.key.kind === "space"`, so *All* has no context menu
-        // at all. Both wordings below work for either surface.
-        const defs = this.defs.get();
-        const rowAvailable = sortMenuRowState(
-          sel,
-          this.runtime.getSortOverrides(),
-          defs.settings,
-          defs.orders
-        ).show;
+        // "Right-click the space" would be unfollowable in *All* — the
+        // switcher's contextmenu listener is gated on
+        // `entry.key.kind === "space"`, so *All* has no context menu at all.
+        // Naming the sort menu works for either surface.
         // The middle sentence is not decoration. Declining a drag does NOT
         // stop it: `DragOrdering` deliberately leaves `dragstart` without
         // `preventDefault`, so Obsidian keeps the gesture and its own handler
@@ -2548,9 +2541,7 @@ export default class SpacesPlugin extends Plugin {
         const message =
           "Spaces: reordering is paused while the tree shows Obsidian's sort order. " +
           "Dropping onto a folder still moves the file. " +
-          (rowAvailable
-            ? `Pick "${SORT_MENU_MODE}" in the sort menu to resume.`
-            : 'Run "Restore saved ordering" to resume.');
+          `Pick "${SORT_MENU_MODE}" in the sort menu to resume.`;
         if (reusable && live) {
           live.setMessage(message);
         } else {
