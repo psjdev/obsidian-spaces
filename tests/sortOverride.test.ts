@@ -252,6 +252,46 @@ describe("sortMenuRowState", () => {
     });
   });
 
+  it("shows the row UNTICKED when overridden with nothing ever reordered", () => {
+    // The trap this closes. The override suppresses drag-to-reorder, so no
+    // saved order can be created; with the row hidden on "no saved order"
+    // there was then nothing in the menu that cleared the override, and the
+    // two conditions held each other in place. Reproduced against 0.3.1: a
+    // fresh folder space, one click on a sort mode, and the menu offers
+    // Obsidian's six and nothing else.
+    //
+    // Unticked, not ticked: an Obsidian mode is what renders, and the row is
+    // advertising a mode rather than claiming to be the one in effect.
+    const overridden = withOverride(none, { kind: "space", id: "s1" }, true);
+    expect(sortMenuRowState({ kind: "space", id: "s1" }, overridden, settings, {})).toEqual({
+      show: true,
+      checked: false,
+    });
+  });
+
+  it("shows the row UNTICKED when overridden and the stored map is empty", () => {
+    // `compact` can empty a folder's list without removing the key, so "has a
+    // map" and "has an order" are different questions. Neither is an order,
+    // and the override still needs its way out.
+    const overridden = withOverride(none, { kind: "all" }, true);
+    expect(sortMenuRowState({ kind: "all" }, overridden, settings, { all: { "": [] } })).toEqual({
+      show: true,
+      checked: false,
+    });
+  });
+
+  it("stays hidden when ordering is off, even while overridden", () => {
+    // The ordering gate dominates. Offering the row here would promise an
+    // escape that changes nothing: the drag is blocked by the setting, not
+    // by the override, so clearing the override would not unblock it.
+    const off = { allowReordering: false, allowReorderingAll: false };
+    const overridden = withOverride(none, { kind: "space", id: "s1" }, true);
+    expect(sortMenuRowState({ kind: "space", id: "s1" }, overridden, off, {})).toEqual({
+      show: false,
+      checked: false,
+    });
+  });
+
   it("hides the row when ordering is switched off", () => {
     // Same rule as every other surface: an option that cannot change what
     // renders must not be offered.
