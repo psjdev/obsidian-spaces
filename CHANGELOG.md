@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2 — 2026-09-20
+
+Fixes a regression introduced in 0.2.0: a space created after Obsidian started
+did not appear in Settings until Obsidian was restarted.
+
+0.2.0 moved the settings tab to Obsidian's declarative API. Obsidian asks a
+declarative tab for its definitions once, when the tab is registered, and then
+renders what it was given. The method that used to be called every time the tab
+was opened, `display()`, is not called at all for a tab that supplies
+definitions, so nothing re-read the space list. Deleting a space still worked,
+because the delete button asked for a redraw itself; creating one from the
+explorer did not, because nothing in the settings tab was watching.
+
+The tab now refreshes from the plugin's existing definition subscription,
+whenever the space list changes: added, removed, renamed or reordered. It
+deliberately does not refresh on anything else, so flipping a toggle no longer
+risks redrawing the panel under your cursor.
+
 ## 0.2.1 — 2026-09-20
 
 A label fix and the documentation for a feature that was already there.
