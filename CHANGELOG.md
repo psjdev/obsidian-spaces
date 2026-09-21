@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.1 — 2026-09-20
+
+A label fix and the documentation for a feature that was already there.
+
+- The entry Spaces adds to Obsidian's sort menu reads **User ordered** rather
+  than "User Ordered". It sits among Obsidian's own six modes, all of which are
+  sentence case, and Title Case made it look like it came from somewhere else.
+- The README has a **Sorting** section. A space can be shown in one of
+  Obsidian's sort modes instead of your saved order by picking that mode from
+  the file explorer's own sort button, and nothing said so. The only previous
+  mention was a commands-table row explaining how to come back from a place the
+  README never told you how to reach.
+
+The new section is explicit about two limits, because both are easy to assume
+away: what Spaces remembers per space is whether to show your order or
+Obsidian's sort, not which sort, so two spaces cannot sit in two different
+native modes at once; and saved orders sync with your vault while the choice
+between them is local to each device.
+
+No behaviour change.
+
 ## 0.2.0 — 2026-09-15
 
 The settings tab is declared rather than drawn, which is what puts it in
