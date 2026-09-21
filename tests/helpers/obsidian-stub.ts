@@ -339,6 +339,55 @@ export class Modal {
 }
 
 /**
+ * `SuggestModal<T>` as `obsidian.d.ts:6861` declares it: a `Modal` subclass
+ * whose `getSuggestions`, `renderSuggestion` and `onChooseSuggestion` are
+ * abstract and therefore supplied by the subclass under test.
+ *
+ * It exists here so `src/ui/SpaceSuggestModal.ts` can be DEFINED. Extending
+ * a missing export is `class extends undefined`, which throws while the
+ * module is still loading -- so without this every test file that reaches
+ * `main.ts`, however indirectly, fails to collect. Nine of them did.
+ *
+ * `setPlaceholder` records its argument rather than rendering one, the same
+ * bargain `setIcon` makes below: what `src/` ASKED for is a fact worth
+ * keeping, what Obsidian draws in response is not this stub's to invent.
+ */
+export class SuggestModal<T> extends Modal {
+  /** The exact string `src/` passed, for a test that cares to read it. */
+  placeholder = "";
+  /** Declared so the generic parameter is used, as the real class uses it. */
+  protected readonly suggestions: T[] = [];
+
+  setPlaceholder(placeholder: string): void {
+    this.placeholder = placeholder;
+  }
+}
+
+/**
+ * `prepareFuzzySearch` (`obsidian.d.ts:5252`) and `renderResults`
+ * (`obsidian.d.ts:5428`).
+ *
+ * Exported so the imports in `SpaceSuggestModal.ts` resolve, and deliberately
+ * NOT implemented. Obsidian's fuzzy scoring and its match highlighting are
+ * real algorithms whose output this stub cannot reproduce, and a plausible
+ * imitation would make every ranking assertion written against it worthless.
+ * `spaceSuggest.ts` takes its scorer as a parameter precisely so the ordering
+ * rules can be tested without either of these.
+ */
+export function prepareFuzzySearch(_query: string): (text: string) => never {
+  return () =>
+    notModelled(
+      "prepareFuzzySearch()",
+      "Obsidian's fuzzy scoring cannot be reproduced here. Inject a scorer " +
+        "into `spaceSuggestions` instead, which is why it takes one."
+    );
+}
+
+export function renderResults(_el: HTMLElement, _text: string, _result: unknown): void {
+  notModelled("renderResults()", "Match highlighting is a Layer 4 concern.");
+}
+
+/**
  * `Platform` as `obsidian.d.ts:4823` declares it, defaulted to **desktop**.
  *
  * `src/ui/SwitcherView.ts` imports it for touch gating and reads

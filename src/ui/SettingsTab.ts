@@ -7,8 +7,9 @@ import {
   type SettingDefinitionItem,
 } from "obsidian";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
-import type { SpacesDefinitions } from "../types";
+import type { SpacesDefinitions, StripPlacement } from "../types";
 import { deleteSpace, renameSpace, type SpaceLifecycleHooks } from "../actions/spaceLifecycle";
+import { setStripPlacement } from "../actions/stripPlacement";
 import { memberRows, missingCount, spaceRowSummary } from "./memberList";
 import {
   MAX_PATTERNS,
@@ -126,7 +127,11 @@ export class SpacesSettingTab extends PluginSettingTab {
     private defs: DefinitionStore,
     private hooks?: SpaceLifecycleHooks,
     private getEffectiveRestore?: () => EffectiveRestoreState,
-    private getOrderingStatus?: () => OrderingStatus
+    private getOrderingStatus?: () => OrderingStatus,
+    // A callback, not the switcher itself: this tab is built before the
+    // switcher exists, in `onload()`, and only ever needs the one thing on
+    // it that a placement change must cancel first.
+    private cancelStripDrag?: () => void
   ) {
     super(app, plugin);
   }
@@ -177,6 +182,15 @@ export class SpacesSettingTab extends PluginSettingTab {
 
   /** The matching write. `save` reports failure exactly as it did before. */
   override setControlValue(key: string, value: unknown): void {
+    if (key === "stripPlacement") {
+      // Routed through the shared setter rather than the generic write path
+      // below, so Settings, the four commands and a completed drag can never
+      // disagree about where the strip is. Cancels a drag in flight before
+      // writing, so choosing a placement from Settings mid-gesture ends the
+      // gesture cleanly rather than racing it.
+      void setStripPlacement(this.defs, value as StripPlacement, () => this.cancelStripDrag?.());
+      return;
+    }
     this.save(
       (d) => {
         (d.settings as unknown as Record<string, unknown>)[key] = value;
@@ -287,6 +301,22 @@ export class SpacesSettingTab extends PluginSettingTab {
               "Keeps All in place while the other space icons scroll past it, " +
               "the way the + button stays pinned to the right.",
             control: { type: "toggle", key: "pinAllSpace" },
+          },
+          {
+            name: "Space strip position",
+            desc:
+              "Where the strip of space icons sits in the file explorer. Left and " +
+              "right show it as a vertical ribbon.",
+            control: {
+              type: "dropdown",
+              key: "stripPlacement",
+              options: {
+                bottom: "Bottom",
+                top: "Top",
+                left: "Left",
+                right: "Right",
+              },
+            },
           },
           {
             name: "Assign a colour to new spaces",

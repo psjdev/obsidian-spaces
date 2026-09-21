@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 — 2026-09-21
+
+The space strip can now sit on any of the four sides of the file explorer, not just the bottom.
+
+Top, left and right join bottom, the existing default. Left and right render the strip as a full height vertical ribbon down the side of the pane. Top sits it between Obsidian's own toolbar row and the space header, and Obsidian's toolbar stays above the strip in every placement. Whichever edge you pick is saved per vault in `data.json`, so it survives a restart and travels with the vault.
+
+There are three ways to move it, all routed through the same setter so they can never disagree with each other. A new **Space strip position** dropdown sits in Settings → Appearance, next to the toggles it joins. Four new commands, `Move the space strip to the top/bottom/left/right`, do the same from the palette or a hotkey. The strip can also be dragged by hand, behind a new **Unlock the space strip** command: unlocking reveals a grab handle at the strip's leading edge, dragging it toward an edge lights up the region the strip would occupy there, and releasing over it drops the strip in place. **Lock the space strip** ends that mode again, from the palette or by right-clicking the handle.
+
+The unlocked state is deliberately a mode rather than a setting. It lives only in memory, never appears in Settings, and always starts locked again the next time Obsidian loads the plugin, so a vault never opens with a stray handle sitting in the explorer.
+
+A vertical strip lines itself up with the pane beside it. With *All* pinned, the pinned control centres on Obsidian's toolbar row and the first space below it centres on the space header -- or on the first row of the file tree when the header is turned off. Only the start of the strip aligns: its icons and the tree's rows step at different rates, and they are not parallel lists, so matching them further along would only look stretched.
+
+A new **Switch to space** command opens a search box: type part of a space's name and pick it from the results. It is unbound by default, so give it whatever hotkey suits you. With nothing typed it offers *All* and your first five spaces; once you type, it searches every space, *All* included. This is the route that keeps working in a vault with more spaces than fit on screen, where the strip is a long scroll and the header's list is a long list.
+
+A horizontal strip scrolls with the mouse wheel. The rail has always overflowed and scrolled correctly on every edge, but a wheel reports its movement as a vertical delta and Chromium will not apply that to a strip that scrolls sideways, so with more spaces than fit, a strip docked top or bottom had no way to reach the ones past the edge. The wheel now scrolls it along its own axis. A strip that is already at one end keeps out of the way, so the file tree underneath still scrolls.
+
 ## 0.2.2 — 2026-09-20
 
 Fixes a regression introduced in 0.2.0: a space created after Obsidian started

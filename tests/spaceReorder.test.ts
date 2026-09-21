@@ -10,10 +10,10 @@ import {
 
 /** Four 28px icons with a 4px gap, matching `.spaces-switcher-item`. */
 const boxes = [
-  { left: 0, width: 28 },
-  { left: 32, width: 28 },
-  { left: 64, width: 28 },
-  { left: 96, width: 28 },
+  { start: 0, size: 28 },
+  { start: 32, size: 28 },
+  { start: 64, size: 28 },
+  { start: 96, size: 28 },
 ];
 
 describe("insertionIndexAt", () => {
@@ -107,37 +107,37 @@ describe("isNoOpMove", () => {
 });
 
 describe("edgeScrollStep", () => {
-  const rail = { left: 100, width: 200 };
+  const rail = { start: 100, size: 200 };
 
   it("does not scroll while the pointer is away from both edges", () => {
     expect(edgeScrollStep(200, rail)).toBe(0);
   });
 
   it("scrolls left, negatively, near the left edge", () => {
-    expect(edgeScrollStep(rail.left + 2, rail)).toBeLessThan(0);
+    expect(edgeScrollStep(rail.start + 2, rail)).toBeLessThan(0);
   });
 
   it("scrolls right, positively, near the right edge", () => {
-    expect(edgeScrollStep(rail.left + rail.width - 2, rail)).toBeGreaterThan(0);
+    expect(edgeScrollStep(rail.start + rail.size - 2, rail)).toBeGreaterThan(0);
   });
 
   it("scrolls faster the deeper into the edge zone the pointer is", () => {
     // A flat step makes a long rail tedious and a short one uncontrollable.
-    const shallow = Math.abs(edgeScrollStep(rail.left + EDGE_ZONE_PX - 1, rail));
-    const deep = Math.abs(edgeScrollStep(rail.left, rail));
+    const shallow = Math.abs(edgeScrollStep(rail.start + EDGE_ZONE_PX - 1, rail));
+    const deep = Math.abs(edgeScrollStep(rail.start, rail));
     expect(deep).toBeGreaterThan(shallow);
   });
 
   it("still scrolls when the pointer runs past the rail entirely", () => {
     // Dragging beyond the strip must not stall the scroll — that is exactly
     // when the user is reaching for something off-screen.
-    expect(edgeScrollStep(rail.left - 500, rail)).toBeLessThan(0);
-    expect(edgeScrollStep(rail.left + rail.width + 500, rail)).toBeGreaterThan(0);
+    expect(edgeScrollStep(rail.start - 500, rail)).toBeLessThan(0);
+    expect(edgeScrollStep(rail.start + rail.size + 500, rail)).toBeGreaterThan(0);
   });
 
   it("clamps to a maximum step in both directions", () => {
-    const farLeft = edgeScrollStep(rail.left - 5000, rail);
-    const farRight = edgeScrollStep(rail.left + rail.width + 5000, rail);
+    const farLeft = edgeScrollStep(rail.start - 5000, rail);
+    const farRight = edgeScrollStep(rail.start + rail.size + 5000, rail);
     expect(farLeft).toBe(-farRight);
     expect(Math.abs(farLeft)).toBeLessThanOrEqual(24);
   });
@@ -151,15 +151,38 @@ describe("gapCenterAt", () => {
   });
 
   it("sits just before the first icon at index 0", () => {
-    expect(gapCenterAt(0, boxes)).toBeLessThan(boxes[0].left);
+    expect(gapCenterAt(0, boxes)).toBeLessThan(boxes[0].start);
   });
 
   it("sits just after the last icon at the end index", () => {
     const last = boxes[boxes.length - 1];
-    expect(gapCenterAt(boxes.length, boxes)).toBeGreaterThan(last.left + last.width);
+    expect(gapCenterAt(boxes.length, boxes)).toBeGreaterThan(last.start + last.size);
   });
 
   it("returns 0 for an empty strip", () => {
     expect(gapCenterAt(0, [])).toBe(0);
+  });
+});
+
+describe("the same arithmetic serves a vertical rail", () => {
+  it("inserts by the midpoint along whichever axis it is given", () => {
+    const boxes = [
+      { start: 0, size: 30 },
+      { start: 30, size: 30 },
+      { start: 60, size: 30 },
+    ];
+    expect(insertionIndexAt(10, boxes)).toBe(0);
+    // Box 1 spans 30..60, midpoint 45; 50 is past it, same as the midpoint
+    // rule proven above for the horizontal boxes.
+    expect(insertionIndexAt(50, boxes)).toBe(2);
+    expect(insertionIndexAt(80, boxes)).toBe(3);
+    expect(insertionIndexAt(200, boxes)).toBe(3);
+  });
+
+  it("autoscrolls at both ends of a span that does not start at zero", () => {
+    const rail = { start: 100, size: 200 };
+    expect(edgeScrollStep(105, rail)).toBeLessThan(0);
+    expect(edgeScrollStep(295, rail)).toBeGreaterThan(0);
+    expect(edgeScrollStep(200, rail)).toBe(0);
   });
 });

@@ -3,6 +3,11 @@
  * strip. Pure — no DOM, no `"obsidian"` import. The view measures and renders;
  * every rule lives here, where it is tested.
  *
+ * The numbers here run along an axis the caller chooses — `start` and `size`
+ * say nothing about x or y. The view projects a rect or a pointer event onto
+ * whichever axis the strip's current placement uses before calling in; this
+ * file never branches on that.
+ *
  * Deliberately NOT built on `DragOrdering`/`dropIntent`. Those are shaped
  * around the file tree — `describeRow(path)`, folder parents, `moveInto`,
  * stored-versus-displayed order, and the subtree guards none of which have any
@@ -16,6 +21,8 @@
  * never a dead zone, and a drop that changes nothing draws no line.
  */
 
+import type { Span } from "./stripAxis";
+
 /** How close to the rail's edge the pointer must be before it scrolls. */
 export const EDGE_ZONE_PX = 36;
 /** Fastest auto-scroll, in px per animation frame. */
@@ -24,9 +31,9 @@ const MAX_STEP_PX = 24;
 const MIN_STEP_PX = 2;
 
 export interface ItemBox {
-  /** Left edge in the same coordinate space as the pointer reading. */
-  left: number;
-  width: number;
+  /** Start edge, along the axis, in the same coordinate space as the pointer reading. */
+  start: number;
+  size: number;
 }
 
 /**
@@ -36,13 +43,13 @@ export interface ItemBox {
  * Resolved by MIDPOINT rather than by hit-testing the items, which is what
  * keeps the gap from ever being a dead zone — exact hit-testing leaves the gap
  * between two icons unclaimed and the line blinks out as the pointer crosses
- * it. Every x,
+ * it. Every position along the axis,
  * including one far outside the strip, resolves to a gap.
  */
-export function insertionIndexAt(pointerX: number, boxes: readonly ItemBox[]): number {
+export function insertionIndexAt(pointer: number, boxes: readonly ItemBox[]): number {
   let index = 0;
   for (const box of boxes) {
-    if (pointerX < box.left + box.width / 2) break;
+    if (pointer < box.start + box.size / 2) break;
     index++;
   }
   return index;
@@ -75,18 +82,19 @@ export function isNoOpMove(from: number, insertionIndex: number): boolean {
 }
 
 /**
- * How far to scroll the rail this frame, signed: negative scrolls left.
+ * How far to scroll the rail this frame, signed: negative scrolls toward the
+ * start of the axis.
  *
  * Proportional to depth into the edge zone rather than flat, because a flat
  * step is either too slow to cross a long rail or too fast to stop on the
  * right gap. Past the rail entirely it saturates instead of stopping — running
  * off the end is exactly when the user is reaching for something out of view.
  */
-export function edgeScrollStep(pointerX: number, rail: { left: number; width: number }): number {
-  const fromLeft = pointerX - rail.left;
-  const fromRight = rail.left + rail.width - pointerX;
-  if (fromLeft < EDGE_ZONE_PX) return -stepFor(fromLeft);
-  if (fromRight < EDGE_ZONE_PX) return stepFor(fromRight);
+export function edgeScrollStep(pointer: number, rail: Span): number {
+  const fromStart = pointer - rail.start;
+  const fromEnd = rail.start + rail.size - pointer;
+  if (fromStart < EDGE_ZONE_PX) return -stepFor(fromStart);
+  if (fromEnd < EDGE_ZONE_PX) return stepFor(fromEnd);
   return 0;
 }
 
@@ -108,12 +116,12 @@ function stepFor(distance: number): number {
 export function gapCenterAt(index: number, boxes: readonly ItemBox[]): number {
   if (boxes.length === 0) return 0;
   const first = boxes[0];
-  if (index <= 0) return first.left - EDGE_LINE_INSET_PX;
+  if (index <= 0) return first.start - EDGE_LINE_INSET_PX;
   const last = boxes[boxes.length - 1];
-  if (index >= boxes.length) return last.left + last.width + EDGE_LINE_INSET_PX;
+  if (index >= boxes.length) return last.start + last.size + EDGE_LINE_INSET_PX;
   const prev = boxes[index - 1];
   const cur = boxes[index];
-  return (prev.left + prev.width + cur.left) / 2;
+  return (prev.start + prev.size + cur.start) / 2;
 }
 
 /** How far outside the strip the first and last positions sit. */

@@ -5,6 +5,7 @@ import {
   type SpaceOrders,
   type SpaceDefinition,
   type SpacesDefinitions,
+  type StripPlacement,
 } from "../types";
 
 export type ValidationResult =
@@ -12,6 +13,7 @@ export type ValidationResult =
   | { ok: false; error: string; futureSchema: boolean };
 
 const COLOR = /^#[0-9a-f]{6}$/i;
+const STRIP_PLACEMENTS = new Set(["bottom", "top", "left", "right"]);
 /** The same cap the picker enforces, applied to hand-edited documents. */
 const MAX_CUSTOM_COLORS = 12;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -246,6 +248,13 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // above — `showSpaceHeader: 0` must not read as true.
         showSpaceHeader:
           st.showSpaceHeader === undefined ? true : st.showSpaceHeader === true,
+        // Degrades rather than rejects, exactly like `revealVisitors` above: a
+        // hand-edited or future-version value must never cost someone their
+        // spaces, and a strip in the wrong corner is a cosmetic complaint.
+        stripPlacement:
+          typeof st.stripPlacement === "string" && STRIP_PLACEMENTS.has(st.stripPlacement)
+            ? (st.stripPlacement as StripPlacement)
+            : "bottom",
         // Defaults to FALSE, so absent and non-boolean collapse to the
         // same answer and no `undefined` branch is needed. Strict for the same
         // reason as the keys above — `pinAllSpace: 1` must not read as true.

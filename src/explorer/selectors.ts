@@ -68,6 +68,20 @@ export const SEL = {
    * behaviour returns — the intended failure, same as the sort row.
    */
   newFolderButtonIcon: "svg.lucide-folder-plus",
+  /**
+   * Obsidian's toolbar row above the file tree, and the first row of the
+   * tree itself. Both are read ONLY to measure where they sit: the vertical
+   * strip lines its pinned control and its rail up with them
+   * (`stripAlign.ts`). Rulers, not handles -- never clicked, classed or
+   * mutated.
+   *
+   * Matching neither is a supported outcome, the same way the ribbon's is:
+   * a theme can hide the toolbar, and a space with no visible rows has no
+   * first row. The alignment simply does not apply, and the stylesheet's own
+   * spacing stands.
+   */
+  navHeader: ".nav-header",
+  treeRow: ".tree-item-self",
 } as const;
 
 /**

@@ -46,7 +46,7 @@ The two overlap on tabs, so Spaces defers. If the core Workspaces plugin is enab
 
 **Lets you open anything.** Open a note that is not in the current space and it appears anyway, dimmed and italic, as a *visitor*. Links never lead to nowhere. Visitors last as long as you keep them open in a tab.
 
-**Reorder as you see fit.** Drag rows in the tree to arrange them, remembered separately for each space. Drag the icons in the switcher strip to reorder your spaces.
+**Reorder as you see fit.** Drag rows in the tree to arrange them, remembered separately for each space. Drag the icons in the space strip to reorder your spaces.
 
 ## Requirements
 
@@ -70,7 +70,7 @@ If your vault uses a custom config folder, substitute it for `.obsidian`.
 
 ## Quick start
 
-1. Enable the plugin. The **switcher strip** appears along the bottom of the file explorer, with **All** at the left.
+1. Enable the plugin. The **space strip** appears along the bottom of the file explorer, with **All** at the left.
 2. Click **`+`** at the right of the strip, or run the **Create space** command. The explorer pane turns into a creation form.
 3. Type a name. Optionally click the dashed square to the left of the name to choose an icon, and **Choose icon colour** to set its colour.
 4. Choose what goes in it:
@@ -93,7 +93,7 @@ Right-click a row in the file tree:
 - Inside a space, **Remove from *space*** removes a member. A row that is in the space because you added its parent folder shows a disabled entry naming the folder it came from. Remove the folder, or use **Stop showing here** to dismiss a visitor.
 - On a folder in **All**, **Create folder pinned space** builds a space pinned to it in one step.
 
-Right-click a space's icon in the switcher strip for **Rename space…**, **Change space icon…**, **Change space colour…**, and **Restore saved ordering**.
+Right-click a space's icon in the space strip for **Rename space…**, **Change space icon…**, **Change space colour…**, and **Restore saved ordering**.
 
 | A row in the file tree | A space's icon in the strip |
 |---|---|
@@ -125,6 +125,32 @@ Two things worth knowing:
 
 While a space is showing Obsidian's sort, dragging rows in it is switched off, and Spaces says so once rather than silently ignoring the drag.
 
+## Space strip placement
+
+The space strip can sit along the bottom of the file explorer, which is the default, or move to the top, left or right.
+
+Left and right show it as a full height vertical ribbon down the side of the pane.
+
+Top puts it between Obsidian's own toolbar row and the space header. Obsidian's toolbar stays above the strip in every placement.
+
+Placement is saved per vault in `data.json`, so it survives a restart and travels with the vault.
+
+There are three ways to change it, and all three go through the same setter, so a hotkey, the dropdown and a drag can never disagree about where the strip ends up.
+
+**The Space strip position dropdown**, in Settings → Appearance, sets it directly.
+
+**Four commands** in the palette, `Move the space strip to the top/bottom/left/right`, do the same without opening Settings.
+
+**Dragging** moves it by hand, but only once you ask for it.
+
+The strip stays locked most of the time. Locked is the default, and it is also always the state you find it in after a restart, whatever it was left at before. Locked shows no handle and no extra chrome at all.
+
+Run **Unlock the space strip** and a grab handle appears at the strip's leading edge, pushing **All** and the rest of the icons along to make room for it. Drag the handle toward an edge and the region the strip would occupy there lights up; release over it to drop the strip in place. Run **Lock the space strip** to end the mode and hide the handle again, or right-click the handle and choose **Lock the space strip** from there instead.
+
+The palette only ever offers one half of that pair at a time: **Unlock the space strip** while it is locked, **Lock the space strip** while it is unlocked, never both.
+
+The lock is a mode, not a setting. It lives only for as long as Obsidian is open, is deliberately absent from Settings, and always starts locked again the next time Obsidian loads the plugin.
+
 ## Commands
 
 All available from the command palette, and bindable to hotkeys.
@@ -132,6 +158,7 @@ All available from the command palette, and bindable to hotkeys.
 | Command | What it does |
 |---|---|
 | Switch to All | Leaves the active space and shows the whole vault |
+| Switch to space | Opens a search box; type a space's name to switch to it |
 | Next space / Previous space | Cycles through your spaces |
 | Create space | Opens the creation form in the explorer pane |
 | New note in active space | Creates a note, in the pinned folder if the space has one |
@@ -139,6 +166,9 @@ All available from the command palette, and bindable to hotkeys.
 | Add active file to space | Adds the file you are editing to a space you choose |
 | Pause or resume space filtering | Releases the explorer entirely, showing Obsidian's own unfiltered tree |
 | Restore saved ordering | Returns to your own row order after switching to one of Obsidian's sort modes (see [Sorting](#sorting)) |
+| Move the space strip to the top / bottom / left / right | Repositions the space strip, the same as the Space strip position setting below |
+| Unlock the space strip | Shows a grab handle for moving the strip by hand |
+| Lock the space strip | Hides the grab handle again |
 
 ## Settings
 
@@ -149,6 +179,7 @@ Settings → Spaces has two pages. **Preferences** holds the toggles below; **Sp
 | Show the space name above the file tree | On | A header row naming the active space |
 | Mark folder pinned spaces with a pin | Off | Adds a pin to that header for a folder pinned space; hover it for the folder |
 | All stays at the left of the space strip | Off | Keeps **All** in place while the other icons scroll |
+| Space strip position | Bottom | Where the strip of space icons sits in the file explorer. Left and right show it as a vertical ribbon |
 | Assign a colour to new spaces | On | New spaces take the next palette colour. Off, they start neutral and you pick |
 | Show files you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
 | Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A file you added explicitly is still shown |

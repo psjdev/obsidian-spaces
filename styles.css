@@ -94,7 +94,13 @@
   width: 1px;
   align-self: stretch;
   margin: 2px 2px;
-  background: var(--background-modifier-border);
+  /* A step up from `--background-modifier-border`: #555 against #333 in the
+     default dark theme. Still a semantic token, so it tracks the theme
+     rather than pinning a grey. At 1px, squeezed between two icons, the
+     fainter token read as a smudge rather than a rule -- most visible in a
+     vertical strip, where alignment leaves only 2.5px of clearance either
+     side, but the same weight is wanted in every orientation. */
+  background: var(--background-modifier-border-focus);
 }
 .spaces-switcher-item {
   display: flex;
@@ -981,4 +987,170 @@ body.spaces-switching
   color: var(--text-normal);
   font-weight: var(--font-medium);
   border-bottom-color: var(--interactive-accent);
+}
+
+/* ---------- Space strip placement ----------------------------------------
+   One class on the explorer pane decides where the strip paints. The strip
+   itself never moves in the DOM, so nothing here depends on child order
+   beyond what flexbox already gives us.
+
+   `--spaces-strip-size` is the vertical placements' WIDTH and the pane
+   padding that reserves room for it. The two must never disagree, so they
+   read one value. Horizontal height stays content-driven: 41px at bottom and
+   42px at top, from the 28px icon plus padding and borders, and forcing a
+   number on it would fight the existing rule. */
+.spaces-dock-top,
+.spaces-dock-left,
+.spaces-dock-right {
+  --spaces-strip-size: 38px;
+}
+
+/* TOP: between Obsidian's toolbar row and the space header. The toolbar takes
+   -2 and the strip -1; everything else defaults to 0 and keeps DOM order, so
+   a node another plugin adds still lands below both. */
+.spaces-dock-top > .nav-header {
+  order: -2;
+}
+.spaces-dock-top > .spaces-switcher {
+  order: -1;
+  /* Both edges: neither neighbour draws one. `.nav-header` computes
+     `0px none` on its bottom and the space header has no top border, so a
+     single divider would leave the strip merged into one side. */
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* LEFT / RIGHT: a full-height ribbon. Absolute positioning plus pane padding
+   rather than a wrapper element, because `changeLayout()` destroys and
+   recreates `.nav-files-container` and a wrapper would have to survive that. */
+.spaces-dock-left,
+.spaces-dock-right {
+  position: relative;
+  box-sizing: border-box;
+}
+.spaces-dock-left {
+  padding-left: var(--spaces-strip-size);
+}
+.spaces-dock-right {
+  padding-right: var(--spaces-strip-size);
+}
+.spaces-dock-left > .spaces-switcher,
+.spaces-dock-right > .spaces-switcher {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--spaces-strip-size);
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  /* Top padding is solved at runtime by `stripAlign.ts` so the pinned *All*
+     control centres on Obsidian's toolbar row. The fallback is the design
+     value, used whenever there is no toolbar to align to. */
+  padding: var(--spaces-strip-pad-top, 6px) 4px 6px;
+  border-top: none;
+}
+.spaces-dock-left > .spaces-switcher {
+  left: 0;
+  border-right: 1px solid var(--background-modifier-border);
+}
+.spaces-dock-right > .spaces-switcher {
+  right: 0;
+  border-left: 1px solid var(--background-modifier-border);
+}
+.spaces-dock-left > .spaces-switcher > .spaces-switcher-rail,
+.spaces-dock-right > .spaces-switcher > .spaces-switcher-rail {
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Without this the rail refuses to shrink below its content and pushes the
+     + button out of the strip entirely on a short pane. */
+  min-height: 0;
+}
+/* The divider's margins carry the whole pinned-to-rail gap, so that one
+   number positions the rail's first icon AND keeps the divider centred in
+   whatever space is left. The strip's own 4px flex gap sits either side of
+   the divider and its 1px, hence the -9: at the 17px fallback the margins
+   work out to the 4px they have always been, and at the 1px floor they reach
+   -4px, which exactly cancels the flex gaps and never overlaps a sibling. */
+.spaces-dock-left > .spaces-switcher > .spaces-switcher-divider,
+.spaces-dock-right > .spaces-switcher > .spaces-switcher-divider {
+  /* Spans the icon column rather than an inset 60%, the same way the
+     horizontal divider stretches to the strip's content height. Alignment
+     leaves it only 2.5px of clearance either side -- the 6px gap is what
+     puts the first icon on the header row, so the clearance cannot grow --
+     and a 17px hairline in that little space stopped reading as a rule at
+     all. Colour is shared with the base rule; length is this rule's half. */
+  align-self: stretch;
+  width: auto;
+  height: 1px;
+  min-height: 1px;
+  margin: calc((var(--spaces-strip-rail-gap, 17px) - 9px) / 2) 0;
+}
+/* §9.11, vertical rail: the insertion line becomes a horizontal bar, so its
+   thickness and length swap and it anchors to the rail's left edge instead
+   of its top. Static, so it lives here rather than as an inline style next
+   to the one coordinate (`top`) that actually moves with the drag. */
+.spaces-dock-left .spaces-space-drop-line,
+.spaces-dock-right .spaces-space-drop-line {
+  top: auto;
+  left: 0;
+  width: 28px;
+  height: 2px;
+}
+
+/* The grab handle, present only while unlocked. Nothing hover-revealed: a
+   handle that appears under the pointer would reflow the strip every time
+   the pointer crossed it. */
+.spaces-strip-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 24px;
+  margin-right: 2px;
+  border-radius: var(--radius-s);
+  color: var(--text-faint);
+  cursor: grab;
+}
+.spaces-strip-grip:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+.spaces-strip-grip:active {
+  cursor: grabbing;
+}
+.spaces-dock-left > .spaces-switcher > .spaces-strip-grip,
+.spaces-dock-right > .spaces-switcher > .spaces-strip-grip {
+  width: 24px;
+  height: 18px;
+  margin-right: 0;
+  margin-bottom: 2px;
+}
+/* `is-unlocked` is set on the strip while the mode is active, but carries no
+   appearance of its own: the grab handle appearing is the cue, and tinting the
+   whole strip on top of that reads as an error state rather than an
+   affordance. The class stays as a hook for themes that want their own. */
+
+/* The drag preview: one translucent band per candidate placement, the
+   nearest one lit. Coordinates are set inline per drag frame -- they are
+   computed from the pane's live rect, not static, so that is not a
+   `no-static-styles-assignment` violation. */
+.spaces-strip-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-popover);
+  pointer-events: none;
+}
+.spaces-strip-drop-zone {
+  position: fixed;
+  background: var(--interactive-accent);
+  opacity: 0;
+  border-radius: var(--radius-s);
+  transition: opacity 80ms ease-in-out;
+}
+.spaces-strip-drop-zone.is-active {
+  opacity: 0.35;
 }
