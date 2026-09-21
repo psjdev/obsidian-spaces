@@ -5,11 +5,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Question, or not sure whether it is a bug
     url: https://github.com/psjdev/obsidian-spaces/discussions
-    about: >-
-      Ask in Discussions. "Can Spaces do X?" is almost always faster answered
-      there, and the answer has more than once been yes.
+    about: "Ask in Discussions."
   - name: Documentation
     url: https://github.com/psjdev/obsidian-spaces#readme
-    about: >-
-      Spaces, membership, sorting, the space strip and every command are
-      documented in the README.
+    about: "Features, settings, sorting and every command."
