@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2 — 2026-09-21
+
+Fixes a state you could get stuck in. Choosing one of Obsidian's sort modes
+inside a space pauses your own ordering until you switch back, and **User
+ordered** in the sort menu is how you switch back. That entry only appeared
+once a space had an order saved, so a space you had never reordered by hand
+offered no way back: the paused ordering blocked the drag that would have
+created the first order, and without an order the menu entry stayed hidden.
+
+**User ordered** now appears whenever your ordering is paused, unticked,
+whether or not anything has been reordered yet. Picking it resumes dragging.
+The **Restore saved ordering** command always worked here and still does.
+
 ## 0.3.1 — 2026-09-21
 
 Fixes sorting inside a space pinned to a folder. Obsidian's sort modes had no
