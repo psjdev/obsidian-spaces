@@ -1,0 +1,78 @@
+name: Bug report
+description: Spaces behaves differently from how it is documented
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. The fields below are the ones that have
+        actually decided past bugs — a version number turned out to be the
+        whole diagnosis for the last one.
+
+  - type: input
+    id: spaces-version
+    attributes:
+      label: Spaces version
+      description: "Settings → Community plugins → Spaces shows it next to the name."
+      placeholder: "0.3.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: isolated
+    attributes:
+      label: Does it still happen with only Spaces enabled?
+      description: >-
+        Settings → Community plugins, turn the others off, and try again. Most
+        plugin bugs turn out to be two plugins disagreeing, so this one answer
+        usually decides where the fault is.
+      options:
+        - "Yes — it still happens with only Spaces enabled"
+        - "No — it goes away when I disable another plugin"
+        - "I have not tried yet"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, in the order you did it.
+      placeholder: |
+        1. Create a space called Garden
+        2. Pin it to a folder
+        3. Open Settings → Spaces
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: debug-info
+    attributes:
+      label: Obsidian debug info
+      description: >-
+        Run **Show debug info** from the command palette and paste the result.
+        It carries your Obsidian version, operating system and the list of
+        enabled plugins, which is what makes a report reproducible.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: >-
+        Optional, and often decisive. Press Ctrl+Shift+I (Cmd+Option+I on
+        macOS), open the Console tab, reproduce the problem, and paste anything
+        red that mentions Spaces.
+      render: text
+    validations:
+      required: false
