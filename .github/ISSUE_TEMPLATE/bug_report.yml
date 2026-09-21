@@ -7,8 +7,8 @@ body:
     attributes:
       value: |
         Thanks for reporting this. The fields below are the ones that have
-        actually decided past bugs — a version number turned out to be the
-        whole diagnosis for the last one.
+        actually decided past bugs. For the last one, the version number was
+        the whole diagnosis.
 
   - type: input
     id: spaces-version
@@ -28,8 +28,8 @@ body:
         plugin bugs turn out to be two plugins disagreeing, so this one answer
         usually decides where the fault is.
       options:
-        - "Yes — it still happens with only Spaces enabled"
-        - "No — it goes away when I disable another plugin"
+        - "Yes, it still happens with only Spaces enabled"
+        - "No, it goes away when I disable another plugin"
         - "I have not tried yet"
     validations:
       required: true
