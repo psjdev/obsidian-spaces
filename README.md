@@ -101,6 +101,30 @@ Right-click a space's icon in the switcher strip for **Rename space…**, **Chan
 
 Only spaces that can take the row are offered: a folder pinned space is a window onto its own folder, so it never appears in **Add to space**.
 
+## Sorting
+
+Drag a row in the file tree and that arrangement is saved for the space you are in. Spaces keeps those orders separately for each space and for **All**, and nothing moves on disk.
+
+You are not stuck with a hand-made order. Use the file explorer's own sort button and pick any of Obsidian's modes, and the space renders with that instead. Your saved order is set aside, not discarded, and it comes back untouched.
+
+| 1. Your order | 2. Obsidian's sort menu | 3. One of its modes |
+|---|---|---|
+| <img src="docs/media/sort-manual.png" width="240" alt="A space called Bookshelf with Reference above Reading, and inside Reference, Wine Notes above Sourdough Ratios."> | <img src="docs/media/sort-menu.png" width="240" alt="Obsidian's sort menu showing its six modes with a seventh entry, User ordered, ticked at the bottom."> | <img src="docs/media/sort-alphabetical.png" width="240" alt="The same space sorted A to Z, so Reading now comes before Reference and Sourdough Ratios before Wine Notes."> |
+
+Spaces adds **User ordered** to that menu as a seventh mode, ticked when your saved order is what you are looking at. Picking it is one of three ways back:
+
+- **User ordered** in the sort menu. It appears once the space has an order to return to, so a space you have never dragged a row in will not show it.
+- **Restore saved ordering** on the right-click menu of a space's icon in the strip.
+- The **Restore saved ordering** command, which also covers **All**.
+
+Two things worth knowing:
+
+**Which mode is Obsidian's, not the space's.** What Spaces remembers per space is whether to show your order or Obsidian's sort. The sort mode itself is Obsidian's single setting, so putting one space in A to Z and another in modified-time at the same time is not something this can do. One space on your order and another on Obsidian's sort works fine.
+
+**Your orders sync; the choice between them does not.** Saved orders live in `data.json` and travel with your vault. Which spaces are currently showing Obsidian's sort is local to each device, so the same space can show your order on one machine and Obsidian's sort on another.
+
+While a space is showing Obsidian's sort, dragging rows in it is switched off, and Spaces says so once rather than silently ignoring the drag.
+
 ## Commands
 
 All available from the command palette, and bindable to hotkeys.
@@ -114,7 +138,7 @@ All available from the command palette, and bindable to hotkeys.
 | New folder in active space | Creates a folder, in the pinned folder if the space has one |
 | Add active file to space | Adds the file you are editing to a space you choose |
 | Pause or resume space filtering | Releases the explorer entirely, showing Obsidian's own unfiltered tree |
-| Restore saved ordering | Returns to your own row order after switching to one of Obsidian's sort modes |
+| Restore saved ordering | Returns to your own row order after switching to one of Obsidian's sort modes (see [Sorting](#sorting)) |
 
 ## Settings
 
