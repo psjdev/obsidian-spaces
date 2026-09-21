@@ -1,0 +1,52 @@
+name: Feature request
+description: Something you want Spaces to do that it does not do yet
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lead with the problem rather than the solution. Knowing what you were
+        trying to get done often turns up an answer that is simpler than the
+        feature — or one that already exists.
+
+  - type: checkboxes
+    id: checked-readme
+    attributes:
+      label: Before you file
+      options:
+        - label: >-
+            I have looked through the README's features and this is not already
+            possible.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >-
+        The task, and what makes it awkward today. Not the feature you have in
+        mind — that goes below.
+      placeholder: >-
+        I keep a space per client. When I switch to one I still have to scroll
+        the file tree to find this week's notes, because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What did you have in mind?
+      description: Optional. A rough shape is fine; it does not need to be a design.
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How do you work around it now?
+      description: >-
+        Optional, and genuinely useful — a workaround shows how much the
+        problem costs, and sometimes turns out to be the better answer.
+    validations:
+      required: false
