@@ -102,7 +102,7 @@ import type {
  * points at it by name, and a Notice naming a menu entry that reads differently
  * is worse than one naming no entry at all.
  */
-const SORT_MENU_MODE = "User Ordered";
+const SORT_MENU_MODE = "User ordered";
 
 /**
  * What the last re-sort was FOR: the transform's own inputs, read back
@@ -2227,7 +2227,7 @@ export default class SpacesPlugin extends Plugin {
       },
       buildRow: (menu) => {
         menu.addItem((i) => {
-          // "User Ordered", not "Restore saved ordering": here it is a MODE
+          // "User ordered", not "Restore saved ordering": here it is a MODE
           // sitting among Obsidian's six, and it is shown ticked when it is the
           // one in effect. The command and the switcher row keep the verb —
           // a command palette entry needs one, a mode label does not.
