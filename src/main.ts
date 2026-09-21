@@ -275,6 +275,14 @@ export default class SpacesPlugin extends Plugin {
   // a Component that will never unload again.
   private loaded = false;
   private unsubscribeDefs: (() => void) | null = null;
+
+  /**
+   * Held, rather than handed to `addSettingTab` and forgotten, because a
+   * declarative settings tab does not re-read its own definitions: Obsidian
+   * asks once at registration and renders that. The definition subscription
+   * below is what tells it the space list moved.
+   */
+  private settingTab: SpacesSettingTab | null = null;
   /**
    * The last probe result, kept so the fixture-vault verification and a
    * support question can both read it without reaching into the quarantine
@@ -409,8 +417,7 @@ export default class SpacesPlugin extends Plugin {
       this.runtime.reconcileLayouts(this.defs.get().spaces.map((s) => s.id));
     }
 
-    this.addSettingTab(
-      new SpacesSettingTab(
+    this.settingTab = new SpacesSettingTab(
         this.app,
         this,
         this.defs,
@@ -441,9 +448,9 @@ export default class SpacesPlugin extends Plugin {
         // "unknown" means the seam is gone, so the toggle says so
         // rather than silently doing nothing. Null means we have not probed
         // yet (no explorer bound), which is not a failure to report.
-        () => ({ available: this.sortProbe !== "unknown" }),
-      )
+      () => ({ available: this.sortProbe !== "unknown" })
     );
+    this.addSettingTab(this.settingTab);
 
     this.app.workspace.onLayoutReady(() => this.start());
   }
@@ -803,6 +810,17 @@ export default class SpacesPlugin extends Plugin {
       // A rename, icon or colour change repaints both chrome surfaces
       // together — two readers of one store.
       this.header?.render();
+      // And the settings tab, which is a third reader and the only one that
+      // cannot notice on its own: Obsidian asks a declarative tab for its
+      // definitions once, at registration, so a space created from the
+      // explorer never reached it. Guarded like the call above, because a
+      // throw here would take the repaints with it, and no-ops unless the
+      // space list actually moved.
+      try {
+        this.settingTab?.refreshIfSpacesChanged();
+      } catch (e) {
+        console.error("Spaces: defs-subscription settings refresh failed", e);
+      }
     });
 
     // Registered from ONE list, so the table, README and this file
@@ -2761,6 +2779,9 @@ export default class SpacesPlugin extends Plugin {
     this.unloadStep("unsubscribing from definitions", () => {
       this.unsubscribeDefs?.();
       this.unsubscribeDefs = null;
+      // Obsidian removes the tab itself on unload; dropping the reference
+      // keeps a disabled plugin from holding the instance alive through it.
+      this.settingTab = null;
     });
   }
 }

@@ -188,6 +188,50 @@ export class SpacesSettingTab extends PluginSettingTab {
     );
   }
 
+  /**
+   * What the Spaces page is built from, as a string.
+   *
+   * Ids and names in order, because those are the three things a change to
+   * the space list can do that the rendered page must follow: add, remove,
+   * rename, reorder. Settings live on the other page and are read through
+   * `getControlValue`, so a toggle changes no definition and must not cost a
+   * redraw.
+   */
+  private spaceSignature(): string {
+    return this.defs
+      .get()
+      .spaces.map((s) => `${s.id}\u0000${s.name}`)
+      .join("\u0001");
+  }
+
+  private lastSignature: string | null = null;
+
+  /**
+   * Re-reads the definitions when, and only when, the space list has changed.
+   *
+   * Obsidian builds a declarative tab from `getSettingDefinitions()` once,
+   * when the tab is registered, and then renders `settingItems`. It does NOT
+   * re-ask on open: `display()` is what used to be called every time, and a
+   * tab that returns definitions never gets `display()` at all. The typings
+   * say as much from the other side — `update()` is "called by dynamic tabs
+   * when their data changes", and this is a dynamic tab.
+   *
+   * Before this existed, a space created from the explorer's + button did not
+   * appear in settings until Obsidian restarted and the tab was registered
+   * again, because nothing here had any reason to look again.
+   *
+   * Gated on the signature rather than refreshed on every definition change:
+   * every toggle on the Preferences page writes to the same store, and
+   * redrawing the whole tab under the user's cursor each time they flip a
+   * switch is the cost `save()` has always deliberately avoided.
+   */
+  refreshIfSpacesChanged(): void {
+    const next = this.spaceSignature();
+    if (next === this.lastSignature) return;
+    this.lastSignature = next;
+    this.update();
+  }
+
   override hide(): void {
     this.edits.flush();
     this.edits.clear();
