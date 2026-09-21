@@ -129,7 +129,14 @@ function makeView(doc: Document = document): FakeView {
       [HARDWARE.path]: { file: { path: HARDWARE.path } },
       [OVERVIEW.path]: { file: { path: OVERVIEW.path } },
     },
-    getSortedFolderItems: () => [{ file: { path: "Papers" } }, { file: { path: "Projects" } }],
+    // Answers PER FOLDER, the way Obsidian's does. The hoist asks it for the
+    // space's root, so a fake that ignored its argument would hand the root
+    // the vault root's children and hide whether the hoist sorts at all.
+    getSortedFolderItems: (folder: unknown): FolderItemLike[] => {
+      const children = (folder as { children?: { path: string }[] } | null)?.children;
+      if (Array.isArray(children)) return children.map((c) => ({ file: { path: c.path } }));
+      return [{ file: { path: "Papers" } }, { file: { path: "Projects" } }];
+    },
     sort() {
       view.sorts++;
     },
@@ -199,6 +206,30 @@ function pathsOf(items: FolderItemLike[]): (string | undefined)[] {
 describe("folder-space hoisting through the real sort seam", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+  });
+
+  it("honours Obsidian's own sort for a folder space's hoisted children", async () => {
+    const view = makeView();
+    // Native sort answering PER FOLDER, Z-A for the space's root. Installed
+    // before `ensure`, because `patch()` captures the original at patch time.
+    view.getSortedFolderItems = (folder: unknown): FolderItemLike[] => {
+      const path = (folder as { path?: string } | null)?.path;
+      if (path === "Projects/Work") {
+        return [{ file: { path: OVERVIEW.path } }, { file: { path: HARDWARE.path } }];
+      }
+      return [{ file: { path: "Papers" } }, { file: { path: "Projects" } }];
+    };
+    const h = await makeHarness([{ view }]);
+    h.plugin["runtime"].setSelection({ kind: "space", id: "work" });
+    h.plugin["controller"].refresh();
+    ensure(h);
+
+    const out = view.getSortedFolderItems({ path: "/" });
+    // The hoisted root must render in whatever order Obsidian sorted the root
+    // folder into. `WORK_FOLDER.children` happens to be [Hardware, Overview],
+    // so a hoist built from that array rather than from the sort passes the
+    // A-Z case by luck and fails every other mode.
+    expect(pathsOf(out)).toEqual([OVERVIEW.path, HARDWARE.path]);
   });
 
   it("re-resolves permits after a space switch instead of keeping what patch time captured", async () => {
