@@ -57,6 +57,7 @@ import { detectNativeWorkspaces, effectiveRestoreLayouts } from "./layout/native
 import {
   displayedPaths,
   itemsForPaths,
+  nativeSortedItems,
   patch as patchExplorerSort,
   probe as probeExplorerSort,
   readSortOrder,
@@ -1811,7 +1812,22 @@ export default class SpacesPlugin extends Plugin {
   private hoistedRootItems(root: string, view: object | null): FolderItemLike[] | null {
     const folder = this.app.vault.getAbstractFileByPath(root);
     if (!(folder instanceof TFolder)) return null;
-    const items = itemsForPaths(view, folder.children.map((c) => c.path));
+    // Through the sort seam, NOT `folder.children`. That array is the vault's
+    // own, in no particular order, so hoisting from it rendered a folder space
+    // identically whatever sort mode was chosen -- and looked right only
+    // because the array is usually alphabetical, which made A-Z the one mode
+    // that appeared to work. Every other folder already arrives sorted,
+    // because Obsidian sorts it before our override ever sees it; the hoist is
+    // the one path that builds a folder's children itself and so has to ask.
+    //
+    // Falls back to `children` when the view is not patched or the call
+    // fails: an unsorted tree is the fail-open this transform uses
+    // everywhere, and beats rendering nothing.
+    const sorted = nativeSortedItems(view, folder);
+    const paths = sorted
+      ? sorted.flatMap((i) => (typeof i.file?.path === "string" ? [i.file.path] : []))
+      : folder.children.map((c) => c.path);
+    const items = itemsForPaths(view, paths);
     // A root that genuinely has no children
     // hoists to an empty list, which is correct. But a root WITH children
     // whose lookup came back empty means `itemsForPaths` could not read
@@ -2522,8 +2538,16 @@ export default class SpacesPlugin extends Plugin {
           defs.settings,
           defs.orders
         ).show;
+        // The middle sentence is not decoration. Declining a drag does NOT
+        // stop it: `DragOrdering` deliberately leaves `dragstart` without
+        // `preventDefault`, so Obsidian keeps the gesture and its own handler
+        // moves the file when the drop lands on a folder. Reported as a row
+        // vanishing from a folder space, which is what a move out of the
+        // hoisted root looks like. Saying only that reordering is paused
+        // reads as "nothing happened" while a file has quietly moved.
         const message =
           "Spaces: reordering is paused while the tree shows Obsidian's sort order. " +
+          "Dropping onto a folder still moves the file. " +
           (rowAvailable
             ? `Pick "${SORT_MENU_MODE}" in the sort menu to resume.`
             : 'Run "Restore saved ordering" to resume.');

@@ -63,6 +63,12 @@ interface Installed {
    * chain because another plugin wrapped it.
    */
   deactivate: () => void;
+  /**
+   * Obsidian's own sort for one folder, BELOW our override -- what the
+   * override itself starts from. Resolved the same way, so a plugin that
+   * wrapped the prototype after us is deferred to here too.
+   */
+  native: Original;
 }
 
 const installed = new WeakMap<object, Installed>();
@@ -164,21 +170,22 @@ export function patch(view: unknown, transform: TransformItems, permits?: Permit
   // spaces is disabled, and the tree must never show LESS than the space
   // should. `nativeSortMenu.ts` does the same thing for the same reason.
   let live = true;
-  const override = function (this: unknown, folder: unknown): FolderItemLike[] {
-    let source = original;
-    if (protoAtPatch) {
-      const now = (protoAtPatch as { getSortedFolderItems?: unknown })[SEAM];
-      if (typeof now === "function" && now !== original) {
-        source = now as Original;
-        if (!shadowWarned) {
-          shadowWarned = true;
-          console.warn(
-            "Spaces: another plugin patched the file explorer's sort after us. " +
-              "Deferring to it rather than shadowing it; spaces still filter."
-          );
-        }
-      }
+  const resolveSource = (): Original => {
+    if (!protoAtPatch) return original;
+    const now = (protoAtPatch as { getSortedFolderItems?: unknown })[SEAM];
+    if (typeof now !== "function" || now === original) return original;
+    if (!shadowWarned) {
+      shadowWarned = true;
+      console.warn(
+        "Spaces: another plugin patched the file explorer's sort after us. " +
+          "Deferring to it rather than shadowing it; spaces still filter."
+      );
     }
+    return now as Original;
+  };
+
+  const override = function (this: unknown, folder: unknown): FolderItemLike[] {
+    const source = resolveSource();
     const items = source.call(this, folder);
     if (!live) return items;
     try {
@@ -223,6 +230,7 @@ export function patch(view: unknown, transform: TransformItems, permits?: Permit
     deactivate: () => {
       live = false;
     },
+    native: (folder) => resolveSource().call(v, folder),
   });
   return true;
 }
@@ -301,6 +309,32 @@ export function unpatch(view: unknown): void {
   } catch {
     // Nothing useful to do: the override is already gone, so the next sort
     // Obsidian performs for any other reason will be native.
+  }
+}
+
+/**
+ * The folder's children as OBSIDIAN would sort them, under our override, or
+ * null when this view is not patched or the call fails.
+ *
+ * The counterpart to `displayedPaths`, which deliberately returns what is on
+ * screen: this returns what the sort mode alone says, with our filtering and
+ * ordering not yet applied.
+ *
+ * It exists for the folder-space hoist. That path answers the vault root with
+ * another folder's children, and building them from `TFolder.children` read
+ * the vault's own array instead of the sort -- so a folder space rendered in
+ * the same order whatever mode was picked, and looked correct only because
+ * that array is usually alphabetical.
+ */
+export function nativeSortedItems(view: unknown, folder: unknown): FolderItemLike[] | null {
+  try {
+    const v = asObject(view);
+    const entry = v ? installed.get(v) : undefined;
+    if (!entry) return null;
+    const items = entry.native(folder);
+    return Array.isArray(items) ? items : null;
+  } catch {
+    return null;
   }
 }
 

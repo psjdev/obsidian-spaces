@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1 — 2026-09-21
+
+Fixes sorting inside a space pinned to a folder. Obsidian's sort modes had no
+effect there: the pinned folder's contents are hoisted to the top of the
+explorer, and they were read straight from the vault's own list of children
+rather than from Obsidian's sorted one. Because that list is usually
+alphabetical, **File name (A to Z)** looked correct and every other mode
+appeared to do nothing. Sorting inside subfolders was never affected, and no
+saved order was ever at risk: nothing here writes one.
+
+The notice shown when a drag is declined now says that dropping onto a folder
+still moves the file. Declining a reorder does not cancel the drag, and
+Obsidian goes on to handle it, so a row could leave a folder space while the
+notice implied nothing had happened.
+
 ## 0.3.0 — 2026-09-21
 
 The space strip can now sit on any of the four sides of the file explorer, not just the bottom.
