@@ -34,6 +34,15 @@ export interface SpaceDefinition {
   members: MemberEntry[];
 }
 
+/**
+ * Where the space strip sits in the explorer pane.
+ *
+ * `"bottom"` is what the plugin has always done and stays the default: a
+ * placement that moves on upgrade would rearrange a pane the user never asked
+ * to have rearranged.
+ */
+export type StripPlacement = "bottom" | "top" | "left" | "right";
+
 interface SpacesSettings {
   globalIgnore: string[];
   /**
@@ -90,6 +99,8 @@ interface SpacesSettings {
    * governs which rows appear.
    */
   revealVisitors: boolean;
+  /** Where the strip sits. See `StripPlacement`. */
+  stripPlacement: StripPlacement;
 }
 
 /**
@@ -191,6 +202,7 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     // breaking rather than a default being applied.
     autoAssignColor: true,
     customColors: [],
+    stripPlacement: "bottom",
   },
   spaces: [],
 };

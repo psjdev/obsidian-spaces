@@ -16,6 +16,9 @@ import { ExplorerAdapter } from "./explorer/ExplorerAdapter";
 import { CLS_SWITCHING, SEL } from "./explorer/selectors";
 import { SwitcherView } from "./ui/SwitcherView";
 import { SpaceHeaderView } from "./ui/SpaceHeaderView";
+import { SpaceSuggestModal } from "./ui/SpaceSuggestModal";
+import { spaceEntries } from "./ui/spaceEntries";
+import { knownIconIds } from "./ui/knownIcons";
 import { CreateSpacePanel } from "./ui/CreateSpacePanel";
 import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
@@ -33,6 +36,7 @@ import {
   setSpaceRoot,
   startingSpaceColor,
 } from "./actions/spaceLifecycle";
+import { setStripPlacement } from "./actions/stripPlacement";
 import {
   newNoteInActiveSpace,
   newFolderInActiveSpace,
@@ -448,7 +452,11 @@ export default class SpacesPlugin extends Plugin {
         // "unknown" means the seam is gone, so the toggle says so
         // rather than silently doing nothing. Null means we have not probed
         // yet (no explorer bound), which is not a failure to report.
-      () => ({ available: this.sortProbe !== "unknown" })
+      () => ({ available: this.sortProbe !== "unknown" }),
+      // The switcher does not exist yet at this point in `onload()`; deferred
+      // the same way the two accessors above are, so it is read when a
+      // placement change actually happens rather than now.
+      () => this.switcher?.cancelDrag()
     );
     this.addSettingTab(this.settingTab);
 
@@ -806,6 +814,13 @@ export default class SpacesPlugin extends Plugin {
         );
       }
       this.controller.refresh();
+      // ORDER MATTERS: `applyPlacement` must run before `render()`, not
+      // after. `render()` is the only place that draws the grip's icon and
+      // measures the rail, and both derive from `this.axis`, which derives
+      // from `this.placement` -- so a `render()` that runs first draws for
+      // the placement this strip is LEAVING. Swapped, `render()` always
+      // finishes with the placement definitions already hold.
+      this.switcher?.applyPlacement(this.defs.get().settings.stripPlacement);
       this.switcher?.render();
       // A rename, icon or colour change repaints both chrome surfaces
       // together — two readers of one store.
@@ -854,6 +869,25 @@ export default class SpacesPlugin extends Plugin {
         id: "previous-space",
         name: "Previous space",
         callback: () => void this.cycle(-1),
+      },
+      {
+        id: "switch-to-space",
+        name: "Switch to space",
+        callback: () => {
+          new SpaceSuggestModal({
+            app: this.app,
+            // Built at open time, not at registration: the list has to
+            // reflect a space created, renamed or deleted since Obsidian
+            // started, and commands are registered exactly once.
+            entries: () =>
+              spaceEntries(
+                this.defs.get().spaces,
+                this.runtime.getSelection(),
+                knownIconIds()
+              ),
+            switchTo: (key) => this.controller.switchTo(key),
+          }).open();
+        },
       },
       {
         id: "create-space",
@@ -932,6 +966,42 @@ export default class SpacesPlugin extends Plugin {
           );
           if (ok && !checking) this.restoreSavedOrdering();
           return ok;
+        },
+      },
+      // Same setter the Settings dropdown and a completed drag use, so a
+      // hotkey can never disagree with either about where the strip is.
+      ...(["top", "bottom", "left", "right"] as const).map((where) => ({
+        id: `move-strip-${where}`,
+        name: `Move the space strip to the ${where}`,
+        callback: () => {
+          // Cancels a drag in flight before writing, so a move command run
+          // mid-gesture ends the gesture cleanly rather than racing it.
+          void setStripPlacement(this.defs, where, () => this.switcher?.cancelDrag());
+        },
+      })),
+      // A pair gated on `checkCallback`, not one command named "lock or
+      // unlock the strip": a command's name is fixed at registration, so a
+      // single toggle would either lie about which way it is about to go or
+      // sit unhelpfully vague. Offering exactly one at a time, worded as the
+      // action about to happen, is the point — unlike `pause-filtering`
+      // above, which genuinely has only one name because it has no visible
+      // "which way" to word.
+      {
+        id: "unlock-strip",
+        name: "Unlock the space strip",
+        checkCallback: (checking: boolean) => {
+          if (!this.switcher || this.switcher.isUnlocked()) return false;
+          if (!checking) this.switcher.setUnlocked(true);
+          return true;
+        },
+      },
+      {
+        id: "lock-strip",
+        name: "Lock the space strip",
+        checkCallback: (checking: boolean) => {
+          if (!this.switcher?.isUnlocked()) return false;
+          if (!checking) this.switcher.setUnlocked(false);
+          return true;
         },
       },
     ];
@@ -1376,6 +1446,7 @@ export default class SpacesPlugin extends Plugin {
           }
         );
         this.switcher.mount(leafRoot);
+        this.switcher.applyPlacement(this.defs.get().settings.stripPlacement);
       } catch (e) {
         console.error("Spaces: bindExplorer step 3 (switcher.mount) failed", e);
       }

@@ -115,6 +115,11 @@ describe("the registered command list", () => {
     expect(plugin["commandSpecs"]().map((c) => c.id).sort()).toEqual([
       "add-active-file-to-space",
       "create-space",
+      "lock-strip",
+      "move-strip-bottom",
+      "move-strip-left",
+      "move-strip-right",
+      "move-strip-top",
       "new-folder-in-active-space",
       "new-note-in-active-space",
       "next-space",
@@ -122,6 +127,8 @@ describe("the registered command list", () => {
       "previous-space",
       "restore-saved-ordering",
       "switch-to-all",
+      "switch-to-space",
+      "unlock-strip",
     ]);
   });
 

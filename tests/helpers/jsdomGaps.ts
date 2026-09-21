@@ -31,3 +31,21 @@ if (typeof globalThis.CSS === "undefined") {
 const css = globalThis.CSS as { escape?: (v: string) => string };
 css.escape ??= (value: string): string =>
   String(value).replace(UNSAFE, (ch) => BACKSLASH + ch);
+
+/**
+ * `ResizeObserver` is another Web Platform API jsdom does not implement. The
+ * strip watches its pane with one, to catch the zoom and theme changes that
+ * move the pane's rows without causing a render.
+ *
+ * A stub that never fires is the honest model, not a shortcut: jsdom performs
+ * no layout, so no element in a test can ever actually be resized. It exists
+ * so `mount()` can construct one -- guarding the real call site instead would
+ * put a branch in production code that Obsidian's Chromium can never take.
+ */
+class NoopResizeObserver implements ResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+globalThis.ResizeObserver ??= NoopResizeObserver;

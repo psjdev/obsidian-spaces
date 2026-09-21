@@ -138,7 +138,11 @@ async function makeHarness(
     apply: (snap) => plugin["adapter"].apply(snap),
     livePaths: () => new Set(live),
   });
-  plugin["switcher"] = { mount: () => undefined, render: () => undefined } as unknown as SwitcherView;
+  plugin["switcher"] = {
+    mount: () => undefined,
+    render: () => undefined,
+    applyPlacement: () => undefined,
+  } as unknown as SwitcherView;
   plugin["header"] = { mount: () => undefined, render: () => undefined } as unknown as SpaceHeaderView;
   return { plugin, leaves, live };
 }

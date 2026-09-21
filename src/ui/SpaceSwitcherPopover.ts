@@ -1,5 +1,5 @@
-import { setIcon } from "obsidian";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { appendSpaceIcon } from "./spaceRow";
 import type { SpaceEntry } from "./spaceEntries";
 import type { ActiveSelection } from "../types";
 
@@ -49,13 +49,7 @@ export function openSpaceSwitcher(deps: SpaceSwitcherDeps): AnchoredPopover {
           row.setAttribute("aria-current", "true");
         }
 
-        const icon = doc.win.createDiv();
-        icon.className = "spaces-spaces-row-icon";
-        setIcon(icon, entry.icon);
-        // The rule: the colour goes on the ICON, never the text. Measured
-        // — a `#123456` space is invisible as body text on a dark theme.
-        if (entry.color) icon.style.color = entry.color;
-        row.appendChild(icon);
+        appendSpaceIcon(row, entry);
 
         const name = doc.win.createDiv();
         name.className = "spaces-spaces-row-name";
