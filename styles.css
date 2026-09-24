@@ -367,7 +367,11 @@
   width: 28px; height: 28px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
-  color: var(--text-normal);
+  /* An icon, so it takes the colour Obsidian gives icons rather than the one
+     it gives body text. `.is-empty` below stays on `--text-muted`, because
+     that says no icon has been chosen yet, which is the plugin expressing a
+     state rather than an icon taking its natural colour. */
+  color: var(--icon-color);
 }
 .spaces-create-iconbtn svg { width: 20px; height: 20px; }
 .spaces-create-iconbtn:hover { background: var(--background-modifier-hover); }
@@ -490,7 +494,7 @@ body.spaces-switching
   aspect-ratio: 1;
   border-radius: var(--radius-s);
   cursor: pointer;
-  color: var(--text-normal);
+  color: var(--icon-color);
 }
 
 .spaces-icon-cell:hover,
