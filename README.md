@@ -172,7 +172,7 @@ All available from the command palette, and bindable to hotkeys.
 
 ## Settings
 
-Settings → Spaces has two pages. **Preferences** holds the toggles below; **Spaces** lists your spaces, where you can rename one, review its members, or delete it. Every setting here is findable from Obsidian's own settings search.
+Settings → Spaces has three pages. **Appearance** holds the settings that change how the explorer looks; **Preferences** holds the behavioural ones; **Spaces** lists your spaces, where you can rename one, review its members, or delete it. Every setting here is findable from Obsidian's own settings search.
 
 | Setting | Default | What it controls |
 |---|---|---|
@@ -180,6 +180,7 @@ Settings → Spaces has two pages. **Preferences** holds the toggles below; **Sp
 | Mark folder pinned spaces with a pin | Off | Adds a pin to that header for a folder pinned space; hover it for the folder |
 | All stays at the left of the space strip | Off | Keeps **All** in place while the other icons scroll |
 | Space strip position | Bottom | Where the strip of space icons sits in the file explorer. Left and right show it as a vertical ribbon |
+| Active space style | Box | How the strip marks the space you are in. Box draws a tinted square with a coloured outline; Bold draws the icon at a heavier weight and no box |
 | Assign a colour to new spaces | On | New spaces take the next palette colour. Off, they start neutral and you pick |
 | Show files you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
 | Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A file you added explicitly is still shown |

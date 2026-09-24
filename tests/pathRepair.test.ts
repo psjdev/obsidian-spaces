@@ -6,7 +6,7 @@ import { SCHEMA_VERSION, type SpacesDefinitions } from "../src/types";
 function defs(): SpacesDefinitions {
   return {
     schemaVersion: SCHEMA_VERSION,
-    settings: { globalIgnore: [], restoreLayouts: false, revealVisitors: true, allowReordering: true, allowReorderingAll: true, showSpaceHeader: true, pinAllSpace: false, autoAssignColor: true, showPinnedFolder: false, customColors: [], stripPlacement: "bottom" },
+    settings: { globalIgnore: [], restoreLayouts: false, revealVisitors: true, allowReordering: true, allowReorderingAll: true, showSpaceHeader: true, pinAllSpace: false, autoAssignColor: true, showPinnedFolder: false, customColors: [], stripPlacement: "bottom", activeSpaceStyle: "box" },
     spaces: [
       {
         id: "research",
