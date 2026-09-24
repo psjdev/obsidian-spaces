@@ -15,7 +15,19 @@ export type ValidationResult =
 
 const COLOR = /^#[0-9a-f]{6}$/i;
 const STRIP_PLACEMENTS = new Set(["bottom", "top", "left", "right"]);
-const ACTIVE_SPACE_STYLES = new Set(["box", "bold"]);
+/**
+ * Each stored value and the style it means. `box` and `bold` were the names
+ * up to 0.6.0: `box` drew the theme's shading and nothing else by then, which
+ * is what `shaded` draws, so both old names keep their look rather than being
+ * approximated. Dropping them would silently reset the setting on upgrade.
+ */
+const ACTIVE_SPACE_STYLES = new Map<string, ActiveSpaceStyle>([
+  ["shaded", "shaded"],
+  ["boxed", "boxed"],
+  ["bolded", "bolded"],
+  ["box", "shaded"],
+  ["bold", "bolded"],
+]);
 /** The same cap the picker enforces, applied to hand-edited documents. */
 const MAX_CUSTOM_COLORS = 12;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -145,13 +157,13 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
   // Folder spaces. This function's job is to load a document safely, not to
   // correct it, and the one thing it must never do is cost the user a space
   // — so `root` is validated for SHAPE only, and a value this loader cannot use is dropped as a single field,
-  // never as a reason to discard the id/name/icon/colour/members around it.
+  // never as a reason to discard the id/name/icon/color/members around it.
   //
   // A non-string `root` (a hand-edited `null`, a number, an object, ...) or
   // one that is an unsafe vault path in the ordinary sense (`../`, a drive
   // letter, a backslash, traversal) is exactly that: unusable, not
   // incoherent. Dropping the whole space over it would turn a single bad
-  // string into the loss of the space's name, icon, colour and members on
+  // string into the loss of the space's name, icon, color and members on
   // the very next write — and a rejected document is sticky, refusing every
   // write for the rest of the session.
   //
@@ -261,10 +273,9 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // look every existing vault already has: a document written before
         // this setting existed carries no key at all.
         activeSpaceStyle:
-          typeof st.activeSpaceStyle === "string" &&
-          ACTIVE_SPACE_STYLES.has(st.activeSpaceStyle)
-            ? (st.activeSpaceStyle as ActiveSpaceStyle)
-            : "box",
+          (typeof st.activeSpaceStyle === "string"
+            ? ACTIVE_SPACE_STYLES.get(st.activeSpaceStyle)
+            : undefined) ?? "shaded",
         // Defaults to FALSE, so absent and non-boolean collapse to the
         // same answer and no `undefined` branch is needed. Strict for the same
         // reason as the keys above — `pinAllSpace: 1` must not read as true.
@@ -273,10 +284,14 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // non-boolean collapse to the same answer. Strict for the same reason:
         // `showPinnedFolder: 1` must not read as true.
         showPinnedFolder: st.showPinnedFolder === true,
+        // Defaults to FALSE for the same reason as the two above, and because
+        // it changes how every existing install looks. Nothing here touches a
+        // space's stored color: this key governs drawing alone.
+        useThemeIconColor: st.useThemeIconColor === true,
         // Defaults to true, strict like `showSpaceHeader` above —
         // `autoAssignColor: 0` must not read as true the way a `!== false`
         // check would make it. An explicit false is kept: someone who turned
-        // colour off wants it off, and re-enabling it on the next load would
+        // color off wants it off, and re-enabling it on the next load would
         // undo a choice they made on purpose.
         autoAssignColor:
           st.autoAssignColor === undefined ? true : st.autoAssignColor === true,

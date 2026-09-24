@@ -26,7 +26,7 @@ function store(): DefinitionStore {
 }
 
 describe("PALETTE", () => {
-  it("is exported, because the create panel's colour row needs it", () => {
+  it("is exported, because the create panel's color row needs it", () => {
     // Tasks 4 and 5 read it directly. Duplicating the values in a second file
     // would drift the moment either changed.
     expect(PALETTE.length).toBeGreaterThan(0);
@@ -36,10 +36,10 @@ describe("PALETTE", () => {
 
 describe("nextPaletteColor", () => {
   // PALETTE[0] is the neutral swatch — Obsidian's own icon grey, offered so a
-  // user can opt OUT of a colour. Auto-assignment must never hand it out: the
+  // user can opt OUT of a color. Auto-assignment must never hand it out: the
   // rotation exists so consecutive spaces are told apart at a glance, and one
   // turn in six silently arriving grey defeats that. It rotates the vivid
-  // colours only, keeping their order and starting point — though not a fixed
+  // colors only, keeping their order and starting point — though not a fixed
   // sequence across palette edits, since the palette's length is what the
   // rotation is taken modulo.
   it("never assigns the neutral swatch", () => {
@@ -48,23 +48,23 @@ describe("nextPaletteColor", () => {
     }
   });
 
-  it("starts at the first vivid colour", () => {
+  it("starts at the first vivid color", () => {
     expect(nextPaletteColor(0)).toBe(PALETTE[1]);
   });
 
-  it("cycles every vivid colour before repeating", () => {
+  it("cycles every vivid color before repeating", () => {
     const vivid = PALETTE.slice(1);
     const seen = vivid.map((_, i) => nextPaletteColor(i));
     expect(seen).toEqual(vivid);
   });
 
-  it("wraps after the last vivid colour", () => {
+  it("wraps after the last vivid color", () => {
     const vivid = PALETTE.slice(1);
     expect(nextPaletteColor(vivid.length)).toBe(vivid[0]);
     expect(nextPaletteColor(vivid.length + 1)).toBe(vivid[1]);
   });
 
-  it("matches createSpace's default colour rotation across sequential creates", async () => {
+  it("matches createSpace's default color rotation across sequential creates", async () => {
     const s = store();
     await s.load();
 
@@ -99,7 +99,7 @@ describe("createSpace", () => {
     expect(sp.color).toMatch(/^#[0-9a-f]{6}$/i);
   });
 
-  it("takes an icon and a colour", async () => {
+  it("takes an icon and a color", async () => {
     const s = store();
     await s.load();
     const id = await createSpace(s, "Research", { icon: "microscope", color: "#4ecdc4" });
@@ -492,7 +492,7 @@ describe("startingSpaceColor", () => {
     }
   });
 
-  it("never returns a rotation colour when off", () => {
+  it("never returns a rotation color when off", () => {
     // The two modes must not overlap: "off" means the popover opens on the
     // first swatch, which only holds if nothing else can be handed out.
     const vivid = PALETTE.slice(1);

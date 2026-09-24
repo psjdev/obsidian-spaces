@@ -16,6 +16,7 @@ import type { DefinitionStore } from "../src/definitions/DefinitionStore";
 interface Item {
   type?: string;
   name?: string;
+  desc?: string;
   heading?: string;
   items?: Item[];
   control?: { type?: string; key?: string; options?: Record<string, string> };
@@ -63,15 +64,48 @@ describe("the settings pages", () => {
   });
 });
 
+describe("the theme icon color control", () => {
+  it("is a toggle on the Appearance page", () => {
+    const control = flatten(page("Appearance").items).find(
+      (i) => i.control?.key === "useThemeIconColor"
+    )?.control;
+    expect(control?.type).toBe("toggle");
+  });
+
+  it("sits with the other color settings", () => {
+    // Next to the setting that decides what color a new space is GIVEN,
+    // since this one decides whether any of them are drawn.
+    const keys = flatten(page("Appearance").items)
+      .map((i) => i.control?.key)
+      .filter(Boolean);
+    expect(keys).toContain("useThemeIconColor");
+    expect(keys.indexOf("useThemeIconColor")).toBe(keys.indexOf("autoAssignColor") + 1);
+  });
+
+  it("says the colors are kept", () => {
+    // The question anyone reading this setting will have. A toggle that
+    // sounds like it discards your colors does not get turned on.
+    const item = flatten(page("Appearance").items).find(
+      (i) => i.control?.key === "useThemeIconColor"
+    );
+    expect(item?.desc).toMatch(/kept/i);
+  });
+});
+
 describe("the active space style control", () => {
-  it("is a dropdown on the Appearance page offering both looks", () => {
+  it("is a dropdown on the Appearance page offering all three looks", () => {
     const control = flatten(page("Appearance").items).find(
       (i) => i.control?.key === "activeSpaceStyle"
     )?.control;
     expect(control?.type).toBe("dropdown");
-    // Both one short word: a native select sizes to its selected option, so
-    // an uneven pair makes the settings row jump on every change.
-    expect(control?.options).toEqual({ box: "Box", bold: "Bold" });
+    // One short word each, and close to the same length: a native select
+    // sizes to its selected option, so uneven labels make the settings row
+    // jump on every change.
+    expect(control?.options).toEqual({
+      shaded: "Shaded",
+      boxed: "Boxed",
+      bolded: "Bolded",
+    });
   });
 
   it("is not on any other page", () => {

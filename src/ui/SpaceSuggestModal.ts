@@ -27,6 +27,11 @@ interface SpaceSuggestDeps {
   app: App;
   /** Read at open time, so the list reflects a space created since the last one. */
   entries: () => readonly SpaceEntry[];
+  /**
+   * The Appearance toggle. A function like `entries` above, for the same
+   * reason: the modal is registered once and read at open time.
+   */
+  useThemeIconColor: () => boolean;
   /** Rejects if the switch fails; the modal is already closed by then. */
   switchTo(key: ActiveSelection): Promise<void>;
 }
@@ -49,7 +54,7 @@ export class SpaceSuggestModal extends SuggestModal<SpaceSuggestion<SearchResult
     if (entry.active) el.classList.add("is-active");
     el.setAttribute("aria-current", String(entry.active));
 
-    appendSpaceIcon(el, entry);
+    appendSpaceIcon(el, entry, this.deps.useThemeIconColor());
 
     const name = el.ownerDocument.win.createDiv();
     name.className = "spaces-spaces-row-name";

@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.6.0 — 2026-09-24
+
+Spaces now takes its colors from your theme instead of setting its own.
+
+If you turned off **Assign a color to new spaces**, your spaces were being
+drawn in a fixed grey rather than in whatever grey your theme uses for icons.
+That neutral swatch now means what it says in the color popover, which is
+that no color was chosen, so those icons take the theme's icon color like
+every other icon in Obsidian. That holds everywhere a space icon is drawn:
+the strip, the space header, the switcher popover, the quick switcher and the
+create form's preview. A space you gave a color keeps it exactly as before.
+
+The strip's buttons are now Obsidian icon buttons rather than controls that
+only looked like them, so a theme restyles them along with everything else it
+restyles. The box marking the active space uses whatever your theme draws a
+selected row with, in place of the colored outline it drew before.
+
+The three active space styles are now **Shaded**, **Boxed** and **Bolded**,
+renamed from Box and Bold. Shaded is the default and shades the active icon
+the way your theme shades a selected row. Boxed puts an outline back over that
+shading, in the space's own color, or your theme's icon color for a space
+with no color. Bolded drops the shading and draws the icon one step heavier
+than your theme draws icons, rather than at a fixed weight.
+
+Your setting carries over: a vault on Box gets Shaded, a vault on Bold gets
+Bolded. If you want the outline the earlier releases drew, pick Boxed.
+
+There is also a new **Use theme colors for space icons** toggle under
+Settings → Appearance, off by default. Turn it on and every space icon is
+drawn in your theme's icon color, whatever color you gave the space. The
+colors themselves are kept, so turning it back off brings all of them back.
+It covers the strip, the space header, both space lists and the create form's
+preview.
+
+Reported by @reareaty on the forum, and tracked as #10.
+
 ## 0.5.1 — 2026-09-24
 
 Tidies up the menu you get when you right-click empty space in the file
@@ -32,7 +68,7 @@ entry stays out of it.
 ## 0.4.0 — 2026-09-24
 
 The space you are in can be marked two ways now. **Box**, the default and what
-every vault has today, draws a tinted square with a coloured outline around its
+every vault has today, draws a tinted square with a colored outline around its
 icon. **Bold** drops the box and draws the icon at a heavier weight
 instead. Either way the active icon stays at full strength while the others
 remain muted, so neither look leans on a single cue. Set it under Settings →
@@ -41,7 +77,7 @@ Appearance → **Active space style**.
 Settings now has three pages rather than two. **Appearance** is its own page
 beside **Preferences** and **Spaces**, holding the settings that change how the
 explorer looks: the space header, the pin marker, where the strip sits, how the
-active space is marked, and whether new spaces take a colour. Preferences keeps
+active space is marked, and whether new spaces take a color. Preferences keeps
 the behavioural groups. Nothing was removed and every setting is still findable
 from Obsidian's own settings search.
 
@@ -194,7 +230,7 @@ of `npm run build`, which the release workflow runs.
   spaces" replace two settings whose names read as Title Case to Obsidian's
   sentence-case lint. Mid-sentence, "All" is indistinguishable from the
   quantifier: "Pin all …" would mean pinning every icon.
-- The colour field's placeholder reads "Hex value" rather than a "#5b5bff"
+- The color field's placeholder reads "Hex value" rather than a "#5b5bff"
   sample, for the same lint. The label is unchanged.
 - The "Switching spaces" settings heading is now "Switching". A heading that
   repeats the plugin name inside the plugin's own tab says nothing.
@@ -222,7 +258,7 @@ No change to what the plugin does, or to any saved data.
 Brings the plugin in line with Obsidian's developer policies and UI style guide.
 
 - Menu and button labels are sentence case, matching the rest of Obsidian:
-  "Rename space…", "Change space icon…", "Change space colour…", and the
+  "Rename space…", "Change space icon…", "Change space color…", and the
   "Folder pinned" mode in the create panel.
 - The settings tab no longer carries a support link. Funding is reachable the
   way Obsidian intends, from the plugin's entry in the community list, and
@@ -273,7 +309,7 @@ pick a space and the tree shows only the notes and folders that belong to it.
   you later add to it appears without you doing anything. Which kind a space is, is fixed
   when you create it.
 - **Creating one.** Click **+** on the switcher strip or run **Create space**. Name it, give
-  it an icon and a colour, then pick **Curated** or **Folder Pinned** and choose from a
+  it an icon and a color, then pick **Curated** or **Folder Pinned** and choose from a
   searchable tree of the vault. Both are optional: a name alone is a valid empty space.
   Right-click any folder and choose **Create folder pinned space** to make one in a click.
 - **Adding and removing later.** Right-click any row for **Add to space**, or, inside a

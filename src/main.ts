@@ -843,7 +843,7 @@ export default class SpacesPlugin extends Plugin {
       // finishes with the placement definitions already hold.
       this.switcher?.applyPlacement(this.defs.get().settings.stripPlacement);
       this.switcher?.render();
-      // A rename, icon or colour change repaints both chrome surfaces
+      // A rename, icon or color change repaints both chrome surfaces
       // together — two readers of one store.
       this.header?.render();
       // And the settings tab, which is a third reader and the only one that
@@ -906,6 +906,7 @@ export default class SpacesPlugin extends Plugin {
                 this.runtime.getSelection(),
                 knownIconIds()
               ),
+            useThemeIconColor: () => this.defs.get().settings.useThemeIconColor,
             switchTo: (key) => this.controller.switchTo(key),
           }).open();
         },
@@ -1544,7 +1545,7 @@ export default class SpacesPlugin extends Plugin {
    *
    * Deliberately NOT cached across opens: `defaultColor` is a plain string
    * captured once at construction, so a reused instance would keep offering
-   * whichever rotation colour was true the first time this ran. Reading `defs`
+   * whichever rotation color was true the first time this ran. Reading `defs`
    * here, before any push, is what makes a create right after open get the
    * swatch the panel actually offered. `this.createPanel` exists only for the
    * open-check below and for `layout-change`/`onunload` teardown to reach the
@@ -1573,6 +1574,7 @@ export default class SpacesPlugin extends Plugin {
       // Read at construction, like `defaultColor`: the panel is built fresh
       // per open, so this is the list as of the moment it opened.
       customColors: this.defs.get().settings.customColors,
+      useThemeIconColor: () => this.defs.get().settings.useThemeIconColor,
       saveCustomColors: (customs) =>
         this.defs.mutate((d) => {
           d.settings.customColors = customs;

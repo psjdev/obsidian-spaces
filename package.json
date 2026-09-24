@@ -1,6 +1,6 @@
 {
   "name": "obsidian-spaces",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Switch between curated views of your vault's folders and notes.",
   "private": true,
   "license": "MIT",

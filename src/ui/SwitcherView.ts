@@ -16,7 +16,7 @@ import {
 } from "./spaceReorder";
 import { axisFor, pointerAlong, spanOf, type Axis, type Span } from "./stripAxis";
 import { applyDock, applyUnlockState, clearDock } from "./stripDock";
-import { ACTIVE_STYLE_CLASS, activeStyleClass } from "./activeStyle";
+import { BOLDED_CLASS, BOXED_CLASS, activeStyleClass } from "./activeStyle";
 import {
   DESIGN_PAD_TOP,
   DESIGN_RAIL_GAP,
@@ -27,6 +27,7 @@ import { nearestPlacement, passedThreshold, type PaneRect, type Point } from "./
 import { CLS_SPACE_DRAGGING, CLS_SPACE_DROP_LINE, SEL } from "../explorer/selectors";
 import { renameSpace, setSpaceIcon, setSpaceColor } from "../actions/spaceLifecycle";
 import { setStripPlacement } from "../actions/stripPlacement";
+import { iconColorFor } from "./spaceIconColor";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { SpaceController } from "../controller/SpaceController";
@@ -478,8 +479,8 @@ export class SwitcherView {
     el.replaceChildren();
     // That line just destroyed every icon a picker could be anchored to, and
     // destroying a node fires nothing. This is the moment to notice: deleting
-    // a custom colour chip re-renders the strip from the definitions
-    // subscription, which would otherwise leave the colour picker floating
+    // a custom color chip re-renders the strip from the definitions
+    // subscription, which would otherwise leave the color picker floating
     // over an anchor that is no longer in the document.
     this.popover?.closeIfAnchorDetached();
 
@@ -528,7 +529,7 @@ export class SwitcherView {
     this.wireWheel(rail);
 
     const add = el.ownerDocument.win.createDiv();
-    add.className = "spaces-switcher-add";
+    add.className = "clickable-icon spaces-switcher-add";
     add.setAttribute("role", "button");
     add.setAttribute("tabindex", "0");
     add.setAttribute("aria-label", "Create a space");
@@ -557,12 +558,12 @@ export class SwitcherView {
     }
 
     this.revealActive(rail);
-    // Toggled rather than added: the element survives a render, so a switch
-    // back to the boxed look has to take the class off again.
-    el.classList.toggle(
-      ACTIVE_STYLE_CLASS,
-      activeStyleClass(this.defs.get().settings.activeSpaceStyle) !== null
-    );
+    // Both classes are set every render, not just the chosen one: the element
+    // survives a render, so a switch from Boxed to Bolded that only added
+    // would leave the strip wearing both and drawing both looks at once.
+    const styleClass = activeStyleClass(this.defs.get().settings.activeSpaceStyle);
+    el.classList.toggle(BOXED_CLASS, styleClass === BOXED_CLASS);
+    el.classList.toggle(BOLDED_CLASS, styleClass === BOLDED_CLASS);
     // Last: every box it measures was created above.
     this.alignToPane();
   }
@@ -808,16 +809,27 @@ export class SwitcherView {
   private buildItem(entry: SpaceEntry): HTMLElement {
     const el = this.el as HTMLElement;
     const item = el.ownerDocument.win.createDiv();
-    item.className = "spaces-switcher-item";
+    // `clickable-icon` is Obsidian's own. It carries the color, radius and
+    // hover a theme restyles, so without it a theme has no selector that
+    // reaches this control. Ours carries size, position and state.
+    item.className = "clickable-icon spaces-switcher-item";
     item.setAttribute("role", "button");
     item.setAttribute("tabindex", "0");
-    // Name in the label, never colour alone (spec section 9.6).
+    // Name in the label, never color alone (spec section 9.6).
     // `aria-label` and NOTHING ELSE. Obsidian renders its own tooltip
     // from this attribute — its nav buttons and ribbon actions carry an
     // aria-label and no `title` at all — so adding `title` too produced a
     // second, OS-drawn tooltip stacked on the first.
     item.setAttribute("aria-label", entry.label);
-    if (entry.color) item.style.color = entry.color;
+    // `iconColorFor` answers this for every surface that draws a space icon.
+    // A real color is the user's data and goes inline, where it wins over a
+    // theme's rule. The neutral swatch means no color was chosen, so nothing
+    // is written and `--icon-color` applies.
+    const painted = iconColorFor(
+      entry.color,
+      this.defs.get().settings.useThemeIconColor
+    );
+    if (painted) item.style.color = painted;
 
     if (entry.active) {
       item.classList.add("is-active");
@@ -931,7 +943,7 @@ export class SwitcherView {
         menu.addItem((mi) =>
           mi
             .setIcon("palette")
-            .setTitle("Change space colour…")
+            .setTitle("Change space color…")
             .onClick(() => {
               this.show(
                 openColorPicker({

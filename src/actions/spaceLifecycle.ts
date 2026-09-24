@@ -42,7 +42,7 @@ function normalizeMemberPath(path: string): string {
 }
 
 /**
- * The colour swatch is pre-selected to the next in rotation so it
+ * The color swatch is pre-selected to the next in rotation so it
  * matches today's auto-assignment. This is the one formula for that rotation,
  * so no renderer need reimplement it.
  */
@@ -53,25 +53,25 @@ export function nextPaletteColor(spaceCount: number): string {
   // the picker, never an assignment.
   //
   // Rotating `PALETTE.slice(1)` keeps the order and starting point of the
-  // vivid colours. The SEQUENCE is not frozen, and is not meant to be:
+  // vivid colors. The SEQUENCE is not frozen, and is not meant to be:
   // dropping green from the palette shortened it, so a given count now lands
-  // on a different colour than it once did. That moves nothing already
+  // on a different color than it once did. That moves nothing already
   // stored — a space keeps the hex it was created with, and an unlisted
-  // colour still renders — it only changes what the next new space is
+  // color still renders — it only changes what the next new space is
   // offered.
   const vivid = PALETTE.slice(1);
   return vivid[spaceCount % vivid.length];
 }
 
 /**
- * The colour a newly created space starts on — the whole of the
+ * The color a newly created space starts on — the whole of the
  * `autoAssignColor` preference, in one place.
  *
  * ON hands back exactly what `nextPaletteColor` would have on its own, so the
  * setting is "the behaviour as it was" rather than a second sequence that
  * merely resembles it. OFF hands back the neutral swatch, which is
- * `PALETTE[0]` and therefore the FIRST one in the colour popover's grid — so
- * the popover opens with its selection already on the colour the space has,
+ * `PALETTE[0]` and therefore the FIRST one in the color popover's grid — so
+ * the popover opens with its selection already on the color the space has,
  * instead of highlighting one swatch while the space wears another.
  *
  * Pure, and separate from the toggle that feeds it, because
@@ -200,9 +200,9 @@ export async function setSpaceIcon(
 }
 
 /**
- * `validateSpace` rejects a bad colour outright, so
+ * `validateSpace` rejects a bad color outright, so
  * without this a mistyped value would fail the whole write rather than this one
- * field, and the space would silently keep its old colour with no explanation.
+ * field, and the space would silently keep its old color with no explanation.
  */
 export async function setSpaceColor(
   defs: DefinitionStore,
@@ -210,7 +210,7 @@ export async function setSpaceColor(
   color: string
 ): Promise<void> {
   const hex = normalizeHex(color);
-  if (!hex) throw new Error(`Spaces: ${color} is not a colour`);
+  if (!hex) throw new Error(`Spaces: ${color} is not a color`);
   await defs.mutate((d) => {
     const s = d.spaces.find((x) => x.id === id);
     if (s) s.color = hex;

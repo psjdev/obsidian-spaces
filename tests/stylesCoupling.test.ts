@@ -10,7 +10,7 @@
  *    rebuilds the explorer. Unscoped, it hides EVERY container with that
  *    class in the window, not only the file explorer's — a class other
  *    views and plugins use to look native.
- *  - **The custom-colour delete badge** appears on `:hover` /
+ *  - **The custom-color delete badge** appears on `:hover` /
  *    `:focus-visible` only, so on a touch device there is no way to reach it
  *    at all.
  *  - **The folder-space elsewhere group's boundary**: `CLS_ELSEWHERE` must
@@ -129,11 +129,11 @@ describe("styles.css — the switch mask is the FILE explorer's", () => {
   });
 });
 
-describe("styles.css — custom-colour removal is reachable without hover", () => {
+describe("styles.css — custom-color removal is reachable without hover", () => {
   it("reveals the delete badge on a pointer that cannot hover", () => {
     // The badge is `display: none` until `:hover`/`:focus-visible`. A touch
     // device produces neither on the way to a tap, so the badge was
-    // unreachable and a custom colour could never be deleted there.
+    // unreachable and a custom color could never be deleted there.
     const reveal = selectorsFor("spaces-color-remove").filter((r) =>
       /hover:\s*none/.test(r.media)
     );

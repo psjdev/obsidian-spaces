@@ -1,5 +1,5 @@
 /**
- * The colour conversions and pointer mapping, pure.
+ * The color conversions and pointer mapping, pure.
  *
  * Exists because the picker is EMBEDDED: `<input type="color">` was the first
  * implementation and it hands off to the operating system's own dialog, which

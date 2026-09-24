@@ -581,7 +581,7 @@ describe("folder spaces — hoisting", () => {
  * a message naming the missing folder — and must never be auto-repaired to
  * the vault root: honouring `""` or `"/"` as a live root would show the
  * entire vault with nothing hidden, which is *All* wearing a different name
- * and colour. Given a missing root, this transform must produce the empty
+ * and color. Given a missing root, this transform must produce the empty
  * state, never the whole vault, so these tests assert the EMPTY result.
  */
 describe("SpacesPlugin.filterAndOrderFolder — the missing-root state empties the tree", () => {

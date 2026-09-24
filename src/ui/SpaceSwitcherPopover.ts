@@ -20,6 +20,11 @@ import type { ActiveSelection } from "../types";
 interface SpaceSwitcherDeps {
   anchor: HTMLElement;
   entries: readonly SpaceEntry[];
+  /**
+   * The Appearance toggle. A snapshot like `entries` beside it, since the
+   * popover is built fresh on every click and cannot outlive a change.
+   */
+  useThemeIconColor: boolean;
   /** Rejects if the switch fails; the popover is already closed by then. */
   switchTo(key: ActiveSelection): Promise<void>;
 }
@@ -49,7 +54,7 @@ export function openSpaceSwitcher(deps: SpaceSwitcherDeps): AnchoredPopover {
           row.setAttribute("aria-current", "true");
         }
 
-        appendSpaceIcon(row, entry);
+        appendSpaceIcon(row, entry, deps.useThemeIconColor);
 
         const name = doc.win.createDiv();
         name.className = "spaces-spaces-row-name";

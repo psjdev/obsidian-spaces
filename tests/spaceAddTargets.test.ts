@@ -54,7 +54,7 @@ describe("spaceAddTargets", () => {
     expect(out[0]).toMatchObject({ addablePaths: ["Loose.md", "Other.md"], label: "Work (2)" });
   });
 
-  it("carries icon and colour so the submenu can look like the switcher", () => {
+  it("carries icon and color so the submenu can look like the switcher", () => {
     const out = spaceAddTargets([WORK], ["Loose.md"]);
     expect(out[0]).toMatchObject({ icon: "box", color: "#5b5bff" });
   });

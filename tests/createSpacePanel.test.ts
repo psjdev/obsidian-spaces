@@ -50,6 +50,7 @@ function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
       kindOf: (path) => VAULT[path] ?? null,
     },
     customColors: [],
+    useThemeIconColor: () => false,
     saveCustomColors: async (customs) => {
       saved.push([...customs]);
     },
@@ -386,7 +387,7 @@ describe("the tree's ARIA", () => {
   });
 });
 
-describe("where the chosen colour shows", () => {
+describe("where the chosen color shows", () => {
   const iconBtn = (): HTMLElement => {
     const el = panelEl().querySelector<HTMLElement>(".spaces-create-iconbtn");
     if (!el) throw new Error("no icon button");
@@ -399,18 +400,18 @@ describe("where the chosen colour shows", () => {
   };
 
   /**
-   * The brush labels the action; it is not the thing being coloured. An
+   * The brush labels the action; it is not the thing being colored. An
    * earlier build tinted it, which made the button read as a second swatch
-   * and put the colour in the one place it describes nothing.
+   * and put the color in the one place it describes nothing.
    */
-  it("never tints the colour button's brush", () => {
+  it("never tints the color button's brush", () => {
     makeHarness({ defaultColor: "#ff6b6b" });
     expect(brush().style.color).toBe("");
   });
 
   it("leaves the placeholder untinted, so the stylesheet's grey wins", () => {
-    // The dashed plus is a prompt, not a preview: colouring it would claim a
-    // choice nobody has made. An inline colour here would also out-specify
+    // The dashed plus is a prompt, not a preview: coloring it would claim a
+    // choice nobody has made. An inline color here would also out-specify
     // `.is-empty`.
     makeHarness({ defaultColor: "#ff6b6b" });
     expect(iconBtn().classList.contains("is-empty")).toBe(true);
