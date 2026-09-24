@@ -2,9 +2,9 @@
  * Putting a row of ours inside a menu Obsidian builds itself.
  * Pure — no DOM, no `"obsidian"` import; the prototype arrives injected.
  *
- * Two menus use this. The sort-order menu takes spaces's own ordering as a
- * seventh mode, and the explorer's empty-space context menu takes a
- * `New space` row beside `New note` and `New folder`.
+ * One caller today: the sort-order menu, which takes spaces's own ordering as
+ * a seventh mode. The mechanism is not specific to it, which is why this file
+ * is not named for it.
  *
  * The public menu events (`file-menu`, `files-menu`, `editor-menu`,
  * `url-menu`) cover neither, but `Menu.prototype.addItem` and
@@ -16,9 +16,8 @@
  *
  * `addItem` is patched only when a caller wants the HOST's items touched:
  * the sort menu unticks Obsidian's six modes, and must see items the host
- * adds before it calls show. A caller that only appends its own row — the
- * `New space` one — omits `decorateHostItem` and `onHostItemClick`, and
- * `addItem` is left alone entirely. The wrapper never re-invokes the
+ * adds before it calls show. Omit `decorateHostItem` and `onHostItemClick`
+ * and `addItem` is left alone entirely. The wrapper never re-invokes the
  * caller's callback, since a second call would run side effects twice.
  *
  * The arm is scoped to a MENU, not a gesture: until `isIntendedMenu` answers
@@ -35,12 +34,6 @@ export interface MenuItemLike {
 
 export interface MenuLike {
   addItem(cb: (item: MenuItemLike) => void): unknown;
-  /**
-   * `Menu.addSeparator` (obsidian.d.ts:4275). Structural, like `addItem`
-   * above: this file never imports `"obsidian"`, so the shapes it needs are
-   * declared rather than borrowed.
-   */
-  addSeparator(): unknown;
 }
 
 type ShowMethod = (this: MenuLike, ...args: unknown[]) => unknown;

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.1 — 2026-09-24
+
+Tidies up the menu you get when you right-click empty space in the file
+explorer. **New space** now sits above **Add to space** instead of below it,
+and there is a single divider between Obsidian's own entries and the two
+space ones.
+
+```
+New note
+New folder
+New canvas
+New base
+--------------
+New space
+Add to space
+```
+
+Right-clicking a file or a folder is unchanged.
+
 ## 0.5.0 — 2026-09-24
 
 Right-click empty space in the file explorer and the menu now offers **New
