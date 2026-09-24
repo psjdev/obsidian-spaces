@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 — 2026-09-24
+
+Spaces now takes its colours from your theme instead of setting its own.
+
+If you turned off **Assign a colour to new spaces**, your spaces were being
+drawn in a fixed grey rather than in whatever grey your theme uses for icons.
+That neutral swatch now means what it says in the colour popover, which is
+that no colour was chosen, so those icons take the theme's icon colour like
+every other icon in Obsidian. A space you gave a colour keeps it exactly as
+before.
+
+The strip's buttons are now Obsidian icon buttons rather than controls that
+only looked like them, so a theme restyles them along with everything else it
+restyles. The box marking the active space uses whatever your theme draws a
+selected row with, in place of the coloured outline it drew before.
+
+**Bold** now means one step heavier than your theme draws icons, rather than a
+fixed weight. On the default theme it looks the same as it did.
+
+Reported by @reareaty on the forum, and tracked as #10.
+
 ## 0.5.1 — 2026-09-24
 
 Tidies up the menu you get when you right-click empty space in the file

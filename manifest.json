@@ -1,7 +1,7 @@
 {
   "id": "spaces",
   "name": "Spaces",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "minAppVersion": "1.13.0",
   "description": "Switch between curated views of your vault's folders and notes.",
   "author": "Peter Jamrozinski",
