@@ -27,6 +27,7 @@ import { nearestPlacement, passedThreshold, type PaneRect, type Point } from "./
 import { CLS_SPACE_DRAGGING, CLS_SPACE_DROP_LINE, SEL } from "../explorer/selectors";
 import { renameSpace, setSpaceIcon, setSpaceColor } from "../actions/spaceLifecycle";
 import { setStripPlacement } from "../actions/stripPlacement";
+import { DEFAULT_SPACE_COLOR } from "../definitions/appearance";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { SpaceController } from "../controller/SpaceController";
@@ -528,7 +529,7 @@ export class SwitcherView {
     this.wireWheel(rail);
 
     const add = el.ownerDocument.win.createDiv();
-    add.className = "spaces-switcher-add";
+    add.className = "clickable-icon spaces-switcher-add";
     add.setAttribute("role", "button");
     add.setAttribute("tabindex", "0");
     add.setAttribute("aria-label", "Create a space");
@@ -808,7 +809,10 @@ export class SwitcherView {
   private buildItem(entry: SpaceEntry): HTMLElement {
     const el = this.el as HTMLElement;
     const item = el.ownerDocument.win.createDiv();
-    item.className = "spaces-switcher-item";
+    // `clickable-icon` is Obsidian's own. It carries the colour, radius and
+    // hover a theme restyles, so without it a theme has no selector that
+    // reaches this control. Ours carries size, position and state.
+    item.className = "clickable-icon spaces-switcher-item";
     item.setAttribute("role", "button");
     item.setAttribute("tabindex", "0");
     // Name in the label, never colour alone (spec section 9.6).
@@ -817,7 +821,14 @@ export class SwitcherView {
     // aria-label and no `title` at all — so adding `title` too produced a
     // second, OS-drawn tooltip stacked on the first.
     item.setAttribute("aria-label", entry.label);
-    if (entry.color) item.style.color = entry.color;
+    // The neutral swatch is not a colour the user picked for its own sake, it
+    // is the colour popover's way of saying they picked none. Writing it would
+    // pin the icon to #808080 and shut the theme out, which is what was
+    // reported as the icons being grey. Every other colour IS their data and is
+    // written inline, where it wins over the theme's rule.
+    if (entry.color && entry.color !== DEFAULT_SPACE_COLOR) {
+      item.style.color = entry.color;
+    }
 
     if (entry.active) {
       item.classList.add("is-active");

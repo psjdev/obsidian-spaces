@@ -102,13 +102,15 @@
      side, but the same weight is wanted in every orientation. */
   background: var(--background-modifier-border-focus);
 }
+/* `clickable-icon` supplies display, centring, colour, radius and hover. What
+   stays here is what a theme must not decide: the box's size, its place in the
+   rail, and the opacity ladder that says which space you are in. `padding: 0`
+   because the component class brings `4px 6px`, and on a 28px box with
+   `border-box` that leaves 16px of content for an 18px icon. */
 .spaces-switcher-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  padding: 0;
   cursor: pointer;
   flex: 0 0 auto;
   opacity: 0.55;
@@ -126,6 +128,15 @@
   opacity: 1;
   background: var(--background-modifier-hover);
   box-shadow: inset 0 0 0 2px currentColor;
+  /* Obsidian styles `.clickable-icon.is-active` as a toggle that is switched
+     on, and colours it `--text-accent`. Our `is-active` means something else:
+     this is the space you are in. Colour here is identity, either the space's
+     own or the theme's icon colour when it has none, and state is carried by
+     the box or by Bold. Without this line an uncoloured active space turns
+     accent-purple and reads as though it had been given a colour. A space
+     that HAS a colour is unaffected either way, because that colour is an
+     inline style and wins over both rules. */
+  color: var(--icon-color);
 }
 /* The other way to mark the active space: no box, a heavier glyph instead.
    `--icon-stroke` is Obsidian's own token rather than a `stroke-width` of our
@@ -140,12 +151,9 @@
 .spaces-switcher-item.is-pending { opacity: 1; animation: spaces-pulse 0.6s ease-in-out infinite; }
 @keyframes spaces-pulse { 50% { opacity: 0.4; } }
 .spaces-switcher-add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  padding: 0;
   cursor: pointer;
   flex: 0 0 auto;
   opacity: 0.55;
