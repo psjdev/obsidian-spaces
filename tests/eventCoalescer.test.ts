@@ -8,7 +8,7 @@ import {
 
 /**
  * Injected clock (no `setTimeout`, no sleeping).
- * Same shape as `nativeSortMenu.ts`'s injected `defer`, extended with `now`
+ * Same shape as `nativeMenuInjection.ts`'s injected `defer`, extended with `now`
  * and cancellation because a debounce needs both.
  */
 function fakeTimer(): CoalescerTimer & {

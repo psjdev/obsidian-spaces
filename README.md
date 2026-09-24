@@ -71,7 +71,7 @@ If your vault uses a custom config folder, substitute it for `.obsidian`.
 ## Quick start
 
 1. Enable the plugin. The **space strip** appears along the bottom of the file explorer, with **All** at the left.
-2. Click **`+`** at the right of the strip, or run the **Create space** command. The explorer pane turns into a creation form.
+2. Click **`+`** at the right of the strip, run the **Create space** command, or right-click empty space in the file explorer and choose **New space**. The explorer pane turns into a creation form.
 3. Type a name. Optionally click the dashed square to the left of the name to choose an icon, and **Choose icon colour** to set its colour.
 4. Choose what goes in it:
    - **Curated** opens a searchable tree of your vault. Click any notes and folders to include them.

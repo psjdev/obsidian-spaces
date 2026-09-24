@@ -420,8 +420,8 @@ export const Platform = {
 /**
  * `Menu.prototype` must exist as an object with `addItem` and
  * `showAtMouseEvent` on it, because `main.ts:1291` hands the prototype to
- * `armSortMenuInjection` — that much is `obsidian.d.ts`. The
- * behaviour of a real menu is not modelled: `tests/nativeSortMenu.test.ts`
+ * `armMenuInjection` — that much is `obsidian.d.ts`. The
+ * behaviour of a real menu is not modelled: `tests/nativeMenuInjection.test.ts`
  * already exercises the patch against a purpose-built `MenuPrototype` fake,
  * which is the honest way to test that seam.
  */

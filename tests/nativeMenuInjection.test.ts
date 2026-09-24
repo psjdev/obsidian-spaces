@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  armSortMenuInjection,
-  cancelSortMenuInjection,
+  armMenuInjection,
+  cancelMenuInjection,
   type MenuLike,
   type MenuPrototype,
-} from "../src/ui/nativeSortMenu";
+} from "../src/ui/nativeMenuInjection";
 
 interface Rec {
   title?: string;
@@ -26,6 +26,13 @@ class FakeMenu {
   /** The REAL item objects, so a test can ask whether the host got one. */
   realItems: unknown[] = [];
   showArgs: unknown[] = [];
+  /** Item count when each separator was added, so ordering can be asserted. */
+  separatorsAfter: number[] = [];
+
+  addSeparator(): this {
+    this.separatorsAfter.push(this.items.length);
+    return this;
+  }
 
   addItem(cb: (item: unknown) => void): this {
     const rec: Rec = {};
@@ -130,11 +137,102 @@ const collector = (): {
  */
 const anyMenu = (): boolean => true;
 
-describe("armSortMenuInjection", () => {
+/**
+ * The `New space` row, the second caller of this module. It differs from the
+ * sort menu in two ways worth pinning: it precedes its item with a separator,
+ * and it supplies NEITHER `decorateHostItem` nor `onHostItemClick`, so the
+ * host's own entries must be left entirely alone.
+ */
+describe("the New space row", () => {
+  const newSpaceRow =
+    (onClick: () => void = () => {}) =>
+    (menu: MenuLike): void => {
+      menu.addSeparator();
+      menu.addItem((i) => i.setTitle("New space").setIcon("layers").onClick(onClick));
+    };
+
+  it("adds a separator and then the row", () => {
+    const { proto, menu: newMenu } = fresh();
+    const { defer } = collector();
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: newSpaceRow(), defer });
+
+    const menu = newMenu();
+    menu.showAtMouseEvent({});
+
+    expect(menu.items).toHaveLength(1);
+    expect(menu.items[0]).toMatchObject({ title: "New space", icon: "layers" });
+    // Recorded at zero items, i.e. before the row: a separator added after it
+    // would draw a line under the menu rather than above our entry.
+    expect(menu.separatorsAfter).toEqual([0]);
+  });
+
+  it("leaves the host's own entries untouched", () => {
+    // Obsidian's New note / New folder / New canvas / New base. With no
+    // `decorateHostItem` and no `onHostItemClick`, `addItem` is never patched,
+    // so the host keeps the very objects it created.
+    const { proto, menu: newMenu } = fresh();
+    const { defer } = collector();
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: newSpaceRow(), defer });
+
+    const menu = newMenu();
+    const seen: unknown[] = [];
+    menu.addItem((i) => {
+      seen.push(i);
+      (i as { setTitle(t: string): unknown }).setTitle("New note");
+    });
+    menu.showAtMouseEvent({});
+
+    expect(menu.realItems[0]).toBe(seen[0]);
+    expect(menu.items.map((r) => r.title)).toEqual(["New note", "New space"]);
+  });
+
+  it("opens the create panel once when the row is chosen", () => {
+    let opened = 0;
+    const { proto, menu: newMenu } = fresh();
+    const { defer } = collector();
+    armMenuInjection({
+      proto,
+      isIntendedMenu: anyMenu,
+      buildRow: newSpaceRow(() => void opened++),
+      defer,
+    });
+
+    const menu = newMenu();
+    menu.showAtMouseEvent({});
+    menu.items[0]?.click?.();
+
+    expect(opened).toBe(1);
+  });
+
+  it("ignores a menu opened by a different gesture", () => {
+    // Identity, not menu contents: the four entries Obsidian puts in this menu
+    // are translated, so matching their text would break outside English.
+    const gesture = {};
+    const { proto, menu: newMenu } = fresh();
+    const { defer } = collector();
+    armMenuInjection({
+      proto,
+      isIntendedMenu: (showArgs) => showArgs[0] === gesture,
+      buildRow: newSpaceRow(),
+      defer,
+    });
+
+    const other = newMenu();
+    other.showAtMouseEvent({});
+    expect(other.items).toHaveLength(0);
+    expect(other.separatorsAfter).toEqual([]);
+
+    const ours = newMenu();
+    ours.showAtMouseEvent(gesture);
+    expect(ours.items.map((r) => r.title)).toEqual(["New space"]);
+  });
+});
+
+describe("armMenuInjection", () => {
   it("adds the row to a menu shown after arming", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
 
     const menu = newMenu();
     menu.showAtMouseEvent({});
@@ -148,7 +246,7 @@ describe("armSortMenuInjection", () => {
     // so insertion order is the only thing deciding position.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
 
     const menu = newMenu();
     menu.addItem((i) => (i as { setTitle(t: string): unknown }).setTitle("File name (A to Z)"));
@@ -166,7 +264,7 @@ describe("armSortMenuInjection", () => {
     // list and be invisible on screen.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
 
     const menu = newMenu();
     menu.showAtMouseEvent({});
@@ -178,7 +276,7 @@ describe("armSortMenuInjection", () => {
     const { proto, menu: newMenu } = fresh();
     const before = { m: proto.showAtMouseEvent, p: proto.showAtPosition };
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
 
     newMenu().showAtMouseEvent({});
 
@@ -192,7 +290,7 @@ describe("armSortMenuInjection", () => {
     const { proto } = fresh();
     const before = proto.showAtMouseEvent;
     const c = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer: c.defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer: c.defer });
 
     expect(proto.showAtMouseEvent).not.toBe(before);
     c.run();
@@ -205,7 +303,7 @@ describe("armSortMenuInjection", () => {
     // after the sort menu must be untouched.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
 
     newMenu().showAtMouseEvent({});
     const second = newMenu();
@@ -219,7 +317,7 @@ describe("armSortMenuInjection", () => {
     // stays in the chain, doing nothing.
     const { proto, menu: newMenu } = fresh();
     const c = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer: c.defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer: c.defer });
     const ourWrapper = proto.showAtMouseEvent;
 
     // Another plugin wraps what it finds — which is us — and calls through.
@@ -248,7 +346,7 @@ describe("armSortMenuInjection", () => {
   it("injects on the showAtPosition path too", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
 
     const menu = newMenu();
     menu.showAtPosition({ x: 1, y: 2 });
@@ -259,7 +357,7 @@ describe("armSortMenuInjection", () => {
   it("passes the arguments, receiver and return value straight through", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(), defer });
 
     const menu = newMenu();
     const evt = { clientX: 7 };
@@ -281,7 +379,7 @@ describe("armSortMenuInjection", () => {
     });
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: boom, defer });
+      armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: boom, defer });
 
       const menu = newMenu();
       expect(() => menu.showAtMouseEvent({})).not.toThrow();
@@ -297,7 +395,7 @@ describe("armSortMenuInjection", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
     const onClick = vi.fn();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(onClick), defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: restoreRow(onClick), defer });
 
     const menu = newMenu();
     menu.showAtMouseEvent({});
@@ -307,7 +405,7 @@ describe("armSortMenuInjection", () => {
   });
 });
 
-describe("armSortMenuInjection host-item decoration", () => {
+describe("armMenuInjection host-item decoration", () => {
   /** What the sort menu's own six items look like being added. */
   const hostItem = (title: string, checked: boolean) => (i: unknown): void => {
     const it = i as { setTitle(t: string): unknown; setChecked(c: boolean): unknown };
@@ -324,7 +422,7 @@ describe("armSortMenuInjection host-item decoration", () => {
     // is what renders. Exactly one item may end up ticked.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: (m) => m.addItem((i) => i.setTitle("Custom ordering").setChecked(true)),
@@ -350,7 +448,7 @@ describe("armSortMenuInjection host-item decoration", () => {
     // decorating means wrapping the callback, not re-running it.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer });
 
     const calls = vi.fn(hostItem("File name (A to Z)", true));
     const menu = newMenu();
@@ -365,7 +463,7 @@ describe("armSortMenuInjection host-item decoration", () => {
     // the tick we just set on it.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: (m) => m.addItem((i) => i.setTitle("Custom ordering").setChecked(true)),
@@ -383,7 +481,7 @@ describe("armSortMenuInjection host-item decoration", () => {
     const { proto, menu: newMenu } = fresh();
     const before = proto.addItem;
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer });
     expect(proto.addItem).not.toBe(before);
 
     newMenu().showAtMouseEvent({});
@@ -395,7 +493,7 @@ describe("armSortMenuInjection host-item decoration", () => {
     // A file context menu opened straight after must keep its own checkmarks.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer });
     newMenu().showAtMouseEvent({});
 
     const second = newMenu();
@@ -408,7 +506,7 @@ describe("armSortMenuInjection host-item decoration", () => {
   it("still adds the item when the decorator throws", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: () => {},
@@ -441,7 +539,7 @@ describe("armSortMenuInjection host-item decoration", () => {
     // unticking items in every later menu, not just the sort menu.
     const { proto, menu: newMenu } = fresh();
     const c = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer: c.defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, decorateHostItem: untick, defer: c.defer });
     const ourAdd = proto.addItem;
 
     const foreign = function (this: unknown, ...a: unknown[]): unknown {
@@ -461,13 +559,13 @@ describe("armSortMenuInjection host-item decoration", () => {
     const { proto } = fresh();
     const before = proto.addItem;
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, defer });
 
     expect(proto.addItem).toBe(before);
   });
 });
 
-describe("armSortMenuInjection host-item clicks", () => {
+describe("armMenuInjection host-item clicks", () => {
   interface HostItem {
     setTitle(t: string): HostItem;
     setChecked(c: boolean): HostItem;
@@ -482,7 +580,7 @@ describe("armSortMenuInjection host-item clicks", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
     const order: string[] = [];
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: () => {},
@@ -502,7 +600,7 @@ describe("armSortMenuInjection host-item clicks", () => {
   it("keeps chaining working through the proxy", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: () => {}, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: () => {}, defer });
 
     const menu = newMenu();
     menu.addItem((i) => (i as HostItem).setTitle("File name (A to Z)").setChecked(true));
@@ -516,7 +614,7 @@ describe("armSortMenuInjection host-item clicks", () => {
     // cost the user the whole menu.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: () => {}, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: () => {}, defer });
 
     const menu = newMenu();
     expect(() => menu.addItem((i) => (i as HostItem).setSection("order"))).not.toThrow();
@@ -530,7 +628,7 @@ describe("armSortMenuInjection host-item clicks", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
     const reported = vi.fn();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: (m) => m.addItem((i) => i.setTitle("Custom ordering").onClick(() => {})),
@@ -549,7 +647,7 @@ describe("armSortMenuInjection host-item clicks", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
     const reported = vi.fn();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: reported, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: reported, defer });
     newMenu().showAtMouseEvent({});
 
     const second = newMenu();
@@ -564,7 +662,7 @@ describe("armSortMenuInjection host-item clicks", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
     const reported = vi.fn();
-    armSortMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: reported, defer });
+    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: () => {}, onHostItemClick: reported, defer });
 
     const menu = newMenu();
     menu.addItem((i) =>
@@ -586,7 +684,7 @@ describe("armSortMenuInjection host-item clicks", () => {
  * inside that macrotask. These tests are about the entry check that scopes it
  * to a MENU instead.
  */
-describe("armSortMenuInjection menu identity", () => {
+describe("armMenuInjection menu identity", () => {
   /** Stands in for the click event Obsidian hands to `showAtMouseEvent`. */
   const gesture = { sortButtonClick: true };
   const isTheSortMenu = (showArgs: unknown[]): boolean => showArgs[0] === gesture;
@@ -611,7 +709,7 @@ describe("armSortMenuInjection menu identity", () => {
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
     const reported = vi.fn();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: isTheSortMenu,
       buildRow: restoreRow(),
@@ -636,7 +734,7 @@ describe("armSortMenuInjection menu identity", () => {
     // and it may not be the first menu to open in the window.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: isTheSortMenu,
       buildRow: restoreRow(),
@@ -661,7 +759,7 @@ describe("armSortMenuInjection menu identity", () => {
     // needed. `decorateHostItem` alone must not summon one.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: isTheSortMenu,
       buildRow: restoreRow(),
@@ -691,7 +789,7 @@ describe("armSortMenuInjection menu identity", () => {
     // which menu this is. It now waits for the identity check.
     const { proto, menu: newMenu } = fresh();
     const { defer } = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: isTheSortMenu,
       buildRow: restoreRow(),
@@ -713,7 +811,7 @@ describe("armSortMenuInjection menu identity", () => {
     const { defer } = collector();
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      armSortMenuInjection({
+      armMenuInjection({
         proto,
         isIntendedMenu: () => {
           throw new Error("nope");
@@ -743,13 +841,13 @@ describe("armSortMenuInjection menu identity", () => {
     const before = proto.showAtMouseEvent;
     const first = collector();
     const second = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: isTheSortMenu,
       buildRow: restoreRow(),
       defer: first.defer,
     });
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: isTheSortMenu,
       buildRow: restoreRow(),
@@ -770,12 +868,12 @@ describe("armSortMenuInjection menu identity", () => {
  * in this plugin that no `Component` owns — and it is what puts a shared
  * prototype back. `onunload` has to be able to reach it.
  */
-describe("cancelSortMenuInjection", () => {
+describe("cancelMenuInjection", () => {
   it("restores the prototype and cancels the pending restore", () => {
     const { proto, menu: newMenu } = fresh();
     const before = { m: proto.showAtMouseEvent, a: proto.addItem };
     const c = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: restoreRow(),
@@ -783,7 +881,7 @@ describe("cancelSortMenuInjection", () => {
       defer: c.defer,
     });
 
-    cancelSortMenuInjection();
+    cancelMenuInjection();
 
     expect(proto.showAtMouseEvent).toBe(before.m);
     expect(proto.addItem).toBe(before.a);
@@ -800,16 +898,16 @@ describe("cancelSortMenuInjection", () => {
     const { proto } = fresh();
     const before = proto.showAtMouseEvent;
     const c = collector();
-    expect(() => cancelSortMenuInjection()).not.toThrow();
+    expect(() => cancelMenuInjection()).not.toThrow();
 
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: restoreRow(),
       defer: c.defer,
     });
-    cancelSortMenuInjection();
-    expect(() => cancelSortMenuInjection()).not.toThrow();
+    cancelMenuInjection();
+    expect(() => cancelMenuInjection()).not.toThrow();
 
     expect(proto.showAtMouseEvent).toBe(before);
     expect(c.cancelled()).toBe(1);
@@ -819,7 +917,7 @@ describe("cancelSortMenuInjection", () => {
     // Unload must not delete another plugin's feature either. Ours goes inert.
     const { proto, menu: newMenu } = fresh();
     const c = collector();
-    armSortMenuInjection({
+    armMenuInjection({
       proto,
       isIntendedMenu: anyMenu,
       buildRow: restoreRow(),
@@ -831,7 +929,7 @@ describe("cancelSortMenuInjection", () => {
     };
     proto.showAtMouseEvent = foreign as MenuPrototype["showAtMouseEvent"];
 
-    cancelSortMenuInjection();
+    cancelMenuInjection();
 
     expect(proto.showAtMouseEvent).toBe(foreign);
     const menu = newMenu();
