@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 — 2026-09-24
+
+Right-click empty space in the file explorer and the menu now offers **New
+space** below Obsidian's own **New note**, **New folder**, **New canvas** and
+**New base**. It opens the same creation form the **`+`** on the space strip
+does, so there is one more way in and nothing new to learn.
+
+Right-clicking a file or folder is unchanged. That menu is Obsidian's and the
+entry stays out of it.
+
 ## 0.4.0 — 2026-09-24
 
 The space you are in can be marked two ways now. **Box**, the default and what
