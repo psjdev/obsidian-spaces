@@ -31,7 +31,7 @@
  * The scheduling shape is `ExplorerAdapter.schedule()`'s: one in-flight handle,
  * guarded, cleared inside the callback, cancellable at teardown. The timer is
  * injected rather than closed over `setTimeout` so tests can drive it without
- * sleeping, the same way `nativeSortMenu.ts` injects
+ * sleeping, the same way `nativeMenuInjection.ts` injects
  * `defer`. Two deliberate differences from the rAF version: the window
  * restarts on each event (a rAF tick is far too short to span an event burst),
  * and a max-wait caps the restarts.

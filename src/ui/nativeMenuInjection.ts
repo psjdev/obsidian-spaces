@@ -1,18 +1,25 @@
 /**
- * The third restore surface: a row inside Obsidian's OWN sort-order menu.
+ * Putting a row of ours inside a menu Obsidian builds itself.
  * Pure — no DOM, no `"obsidian"` import; the prototype arrives injected.
  *
+ * Two menus use this. The sort-order menu takes spaces's own ordering as a
+ * seventh mode, and the explorer's empty-space context menu takes a
+ * `New space` row beside `New note` and `New folder`.
+ *
  * The public menu events (`file-menu`, `files-menu`, `editor-menu`,
- * `url-menu`) don't cover this menu, but `Menu.prototype.addItem` and
+ * `url-menu`) cover neither, but `Menu.prototype.addItem` and
  * `showAtMouseEvent` are PUBLIC API, so this file does not join the
- * private-API quarantine. The sort menu builds synchronously inside the
- * button's click handler, so a patch armed by that click covers exactly one
- * gesture — and since adding an item to an already-shown menu doesn't
+ * private-API quarantine. Both menus build synchronously inside the handler
+ * for the gesture that opens them, so a patch armed by that gesture covers
+ * exactly one — and since adding an item to an already-shown menu doesn't
  * render it, injection must happen BEFORE the original show method runs.
  *
- * `addItem` is patched too: the host adds its six mode items BEFORE calling
- * show, so a later patch would miss them, and the wrapper never re-invokes
- * the caller's callback, since a second call would run side effects twice.
+ * `addItem` is patched only when a caller wants the HOST's items touched:
+ * the sort menu unticks Obsidian's six modes, and must see items the host
+ * adds before it calls show. A caller that only appends its own row — the
+ * `New space` one — omits `decorateHostItem` and `onHostItemClick`, and
+ * `addItem` is left alone entirely. The wrapper never re-invokes the
+ * caller's callback, since a second call would run side effects twice.
  *
  * The arm is scoped to a MENU, not a gesture: until `isIntendedMenu` answers
  * yes, `addItem` only COLLECTS items, so a menu another plugin opens inside
@@ -28,6 +35,12 @@ export interface MenuItemLike {
 
 export interface MenuLike {
   addItem(cb: (item: MenuItemLike) => void): unknown;
+  /**
+   * `Menu.addSeparator` (obsidian.d.ts:4275). Structural, like `addItem`
+   * above: this file never imports `"obsidian"`, so the shapes it needs are
+   * declared rather than borrowed.
+   */
+  addSeparator(): unknown;
 }
 
 type ShowMethod = (this: MenuLike, ...args: unknown[]) => unknown;
@@ -83,7 +96,7 @@ let activeArming: Arming | null = null;
  * prototype after the plugin is gone is exactly the interoperability cost this
  * seam is meant to keep to one gesture.
  */
-export function cancelSortMenuInjection(): void {
+export function cancelMenuInjection(): void {
   const arming = activeArming;
   activeArming = null;
   if (!arming) return;
@@ -113,7 +126,7 @@ interface MenuRecord {
  * the restore without a timer. Production passes a `window.setTimeout` and
  * returns the `clearTimeout` for it.
  */
-export function armSortMenuInjection(args: {
+export function armMenuInjection(args: {
   proto: MenuPrototype;
   /**
    * Asked, on ENTRY to the show wrapper, whether the menu now showing is the
@@ -150,12 +163,12 @@ export function armSortMenuInjection(args: {
   onHostItemClick?: () => void;
   /**
    * Runs the restore at the end of the macrotask. Return a canceller and
-   * `cancelSortMenuInjection` can stop it; return nothing and it cannot.
+   * `cancelMenuInjection` can stop it; return nothing and it cannot.
    */
   defer: (fn: () => void) => (() => void) | void;
 }): void {
   // Whatever is still armed comes down first. See `activeArming`.
-  cancelSortMenuInjection();
+  cancelMenuInjection();
 
   const { proto, isIntendedMenu, buildRow, decorateHostItem, onHostItemClick, defer } = args;
 

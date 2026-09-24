@@ -168,7 +168,7 @@ export function patch(view: unknown, transform: TransformItems, permits?: Permit
   // so it goes inert instead. This seam carries FILTERING as well as ordering,
   // so a buried wrapper would otherwise leave the tree still filtered after
   // spaces is disabled, and the tree must never show LESS than the space
-  // should. `nativeSortMenu.ts` does the same thing for the same reason.
+  // should. `nativeMenuInjection.ts` does the same thing for the same reason.
   let live = true;
   const resolveSource = (): Original => {
     if (!protoAtPatch) return original;
