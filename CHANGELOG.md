@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — 2026-09-24
+
+The space you are in can be marked two ways now. **Box**, the default and what
+every vault has today, draws a tinted square with a coloured outline around its
+icon. **Bold** drops the box and draws the icon at a heavier weight
+instead. Either way the active icon stays at full strength while the others
+remain muted, so neither look leans on a single cue. Set it under Settings →
+Appearance → **Active space style**.
+
+Settings now has three pages rather than two. **Appearance** is its own page
+beside **Preferences** and **Spaces**, holding the settings that change how the
+explorer looks: the space header, the pin marker, where the strip sits, how the
+active space is marked, and whether new spaces take a colour. Preferences keeps
+the behavioural groups. Nothing was removed and every setting is still findable
+from Obsidian's own settings search.
+
 ## 0.3.2 — 2026-09-21
 
 Fixes a state you could get stuck in. Choosing one of Obsidian's sort modes
