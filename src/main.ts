@@ -600,6 +600,26 @@ export default class SpacesPlugin extends Plugin {
     this.bindExplorer();
     this.controller.refresh();
 
+    // `New space` in the menu the explorer opens on a right-click below the
+    // tree. `file-menu` is public and, as the handler further down notes,
+    // fires for the empty explorer body with the vault root as the file,
+    // which is exactly the case this wants and no other.
+    //
+    // Registered BEFORE `registerMembershipMenus` on purpose. Obsidian adds
+    // its own four creation entries first, then runs listeners in
+    // registration order, so this is what puts `New space` above
+    // `Add to space` rather than below it. A listener of our own, rather
+    // than moving the membership one, keeps that reordering out of the file
+    // and folder menus, which are not part of this.
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!isVaultRoot(file.path)) return;
+        menu.addItem((i) =>
+          i.setTitle("New space").setIcon("layers").onClick(() => this.openCreatePanel())
+        );
+      })
+    );
+
     registerMembershipMenus(this, { defs: this.defs, controller: this.controller });
 
     // Routed through the controller, not a plain refresh(),
@@ -787,33 +807,6 @@ export default class SpacesPlugin extends Plugin {
           now: Date.now(),
         });
         if (btn.querySelector(SEL.sortButtonIcon)) this.armSortMenuRow(btn, e);
-      },
-      true
-    );
-
-    // `New space`, beside Obsidian's own `New note` and `New folder`, in the
-    // menu the explorer opens on a right-click below the tree.
-    //
-    // Capture phase for the same reason the click above is: the explorer
-    // shows that menu inside its OWN handler for this event, and a row added
-    // to an already-shown menu does not render. Arming has to happen first.
-    this.registerDomEvent(
-      document,
-      "contextmenu",
-      (e) => {
-        const target = e.target;
-        // `instanceOf`, not `instanceof`: a popout window is its own realm,
-        // where the bare operator answers false for a perfectly good element.
-        if (!(target instanceof Node) || !target.instanceOf(Node)) return;
-        const el = target.instanceOf(Element) ? target : target.parentElement;
-        if (!el) return;
-        // Inside the file explorer's tree container, but NOT on a row. A
-        // right-click on a file or folder opens a different menu, which is
-        // Obsidian's to own.
-        if (!el.closest(SEL.fileExplorerPane)) return;
-        if (!el.closest(SEL.container)) return;
-        if (el.closest(SEL.rowWrapper)) return;
-        this.armNewSpaceRow(e);
       },
       true
     );
@@ -2388,41 +2381,6 @@ export default class SpacesPlugin extends Plugin {
       // restore that outlives an unload puts the prototype BACK, which is the
       // safe direction — but the wrapper sitting on `Menu.prototype` until it
       // fires is not, so unload takes it down now instead.
-      defer: (fn) => {
-        const id = window.setTimeout(fn, 0);
-        return () => window.clearTimeout(id);
-      },
-    });
-  }
-
-  /**
-   * Adds `New space` to the explorer's empty-space context menu, doing what
-   * the strip's `+` does.
-   *
-   * Recognised by EVENT IDENTITY, not by reading the menu's items: the four
-   * entries Obsidian puts there are translated, and this codebase already
-   * refuses to match its UI copy for that reason (see `SEL.sortButtonIcon`).
-   * The explorer shows this menu with `showAtMouseEvent(evt)` for the very
-   * event being handled here, so the same object arriving at the show wrapper
-   * is proof; a menu opened from anywhere else inside the armed macrotask is
-   * not, and passes through untouched.
-   *
-   * No `decorateHostItem` and no `onHostItemClick`: this only appends, so
-   * `addItem` is never patched and Obsidian's own entries are not wrapped.
-   */
-  private armNewSpaceRow(gesture: MouseEvent): void {
-    armMenuInjection({
-      proto: Menu.prototype as unknown as MenuPrototype,
-      isIntendedMenu: (showArgs) => showArgs[0] === (gesture as unknown),
-      buildRow: (menu) => {
-        // Separated, because everything above it creates a FILE and this does
-        // not: a space is a view onto files that already exist.
-        menu.addSeparator();
-        menu.addItem((i) => {
-          i.setTitle("New space").setIcon("layers");
-          i.onClick(() => this.openCreatePanel());
-        });
-      },
       defer: (fn) => {
         const id = window.setTimeout(fn, 0);
         return () => window.clearTimeout(id);

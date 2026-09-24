@@ -26,13 +26,6 @@ class FakeMenu {
   /** The REAL item objects, so a test can ask whether the host got one. */
   realItems: unknown[] = [];
   showArgs: unknown[] = [];
-  /** Item count when each separator was added, so ordering can be asserted. */
-  separatorsAfter: number[] = [];
-
-  addSeparator(): this {
-    this.separatorsAfter.push(this.items.length);
-    return this;
-  }
 
   addItem(cb: (item: unknown) => void): this {
     const rec: Rec = {};
@@ -136,97 +129,6 @@ const collector = (): {
  * the "menu identity" block below supplies a real check.
  */
 const anyMenu = (): boolean => true;
-
-/**
- * The `New space` row, the second caller of this module. It differs from the
- * sort menu in two ways worth pinning: it precedes its item with a separator,
- * and it supplies NEITHER `decorateHostItem` nor `onHostItemClick`, so the
- * host's own entries must be left entirely alone.
- */
-describe("the New space row", () => {
-  const newSpaceRow =
-    (onClick: () => void = () => {}) =>
-    (menu: MenuLike): void => {
-      menu.addSeparator();
-      menu.addItem((i) => i.setTitle("New space").setIcon("layers").onClick(onClick));
-    };
-
-  it("adds a separator and then the row", () => {
-    const { proto, menu: newMenu } = fresh();
-    const { defer } = collector();
-    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: newSpaceRow(), defer });
-
-    const menu = newMenu();
-    menu.showAtMouseEvent({});
-
-    expect(menu.items).toHaveLength(1);
-    expect(menu.items[0]).toMatchObject({ title: "New space", icon: "layers" });
-    // Recorded at zero items, i.e. before the row: a separator added after it
-    // would draw a line under the menu rather than above our entry.
-    expect(menu.separatorsAfter).toEqual([0]);
-  });
-
-  it("leaves the host's own entries untouched", () => {
-    // Obsidian's New note / New folder / New canvas / New base. With no
-    // `decorateHostItem` and no `onHostItemClick`, `addItem` is never patched,
-    // so the host keeps the very objects it created.
-    const { proto, menu: newMenu } = fresh();
-    const { defer } = collector();
-    armMenuInjection({ proto, isIntendedMenu: anyMenu, buildRow: newSpaceRow(), defer });
-
-    const menu = newMenu();
-    const seen: unknown[] = [];
-    menu.addItem((i) => {
-      seen.push(i);
-      (i as { setTitle(t: string): unknown }).setTitle("New note");
-    });
-    menu.showAtMouseEvent({});
-
-    expect(menu.realItems[0]).toBe(seen[0]);
-    expect(menu.items.map((r) => r.title)).toEqual(["New note", "New space"]);
-  });
-
-  it("opens the create panel once when the row is chosen", () => {
-    let opened = 0;
-    const { proto, menu: newMenu } = fresh();
-    const { defer } = collector();
-    armMenuInjection({
-      proto,
-      isIntendedMenu: anyMenu,
-      buildRow: newSpaceRow(() => void opened++),
-      defer,
-    });
-
-    const menu = newMenu();
-    menu.showAtMouseEvent({});
-    menu.items[0]?.click?.();
-
-    expect(opened).toBe(1);
-  });
-
-  it("ignores a menu opened by a different gesture", () => {
-    // Identity, not menu contents: the four entries Obsidian puts in this menu
-    // are translated, so matching their text would break outside English.
-    const gesture = {};
-    const { proto, menu: newMenu } = fresh();
-    const { defer } = collector();
-    armMenuInjection({
-      proto,
-      isIntendedMenu: (showArgs) => showArgs[0] === gesture,
-      buildRow: newSpaceRow(),
-      defer,
-    });
-
-    const other = newMenu();
-    other.showAtMouseEvent({});
-    expect(other.items).toHaveLength(0);
-    expect(other.separatorsAfter).toEqual([]);
-
-    const ours = newMenu();
-    ours.showAtMouseEvent(gesture);
-    expect(ours.items.map((r) => r.title)).toEqual(["New space"]);
-  });
-});
 
 describe("armMenuInjection", () => {
   it("adds the row to a menu shown after arming", () => {
