@@ -23,7 +23,7 @@ describe("normalizeHex", () => {
     expect(normalizeHex("  #5b5bff  ")).toBe("#5b5bff");
   });
 
-  it("rejects anything that is not a colour", () => {
+  it("rejects anything that is not a color", () => {
     for (const bad of ["", "#", "#12", "#12345", "#1234567", "rebeccapurple", "#zzzzzz"]) {
       expect(normalizeHex(bad)).toBeNull();
     }
@@ -54,17 +54,17 @@ describe("addCustomColor", () => {
     ]);
   });
 
-  it("refuses a colour the built-in palette already has", () => {
+  it("refuses a color the built-in palette already has", () => {
     // A chip duplicating a palette swatch is a second button doing the same
-    // thing, and it would push a genuinely custom colour out of the cap.
+    // thing, and it would push a genuinely custom color out of the cap.
     expect(addCustomColor([], PALETTE, PALETTE[0])).toEqual([]);
   });
 
-  it("refuses a palette colour regardless of case", () => {
+  it("refuses a palette color regardless of case", () => {
     expect(addCustomColor([], PALETTE, PALETTE[0].toUpperCase())).toEqual([]);
   });
 
-  it("ignores a value that is not a colour", () => {
+  it("ignores a value that is not a color", () => {
     expect(addCustomColor(["#111111"], PALETTE, "banana")).toEqual(["#111111"]);
   });
 
@@ -120,7 +120,7 @@ describe("colorSwatches", () => {
     expect(out[out.length - 1].label).toBe("#123456");
   });
 
-  it("does not repeat a custom that duplicates a palette colour", () => {
+  it("does not repeat a custom that duplicates a palette color", () => {
     const out = colorSwatches({ ...base, customs: [PALETTE[1]], current: PALETTE[0] });
     expect(out.filter((s) => s.color.toLowerCase() === PALETTE[1].toLowerCase())).toHaveLength(1);
   });
@@ -135,7 +135,7 @@ describe("colorSwatches", () => {
     expect(out[out.length - 1]).toMatchObject({ color: "#123456", removable: true });
   });
 
-  it("does NOT mark the synthesised current colour removable", () => {
+  it("does NOT mark the synthesised current color removable", () => {
     // It is shown for reference and is not in `customs`, so a delete button on
     // it would be a control that does nothing.
     const out = colorSwatches({ ...base, current: "#abcdef" });
@@ -143,16 +143,16 @@ describe("colorSwatches", () => {
     expect(sel[0]).toMatchObject({ color: "#abcdef", custom: true, removable: false });
   });
 
-  it("shows the current colour even when nothing else lists it", () => {
+  it("shows the current color even when nothing else lists it", () => {
     // A space from before a palette change, or a hand-edited data.json.
-    // Showing nothing selected would suggest the space has no colour at all.
+    // Showing nothing selected would suggest the space has no color at all.
     const out = colorSwatches({ ...base, current: "#abcdef" });
     const sel = out.filter((s) => s.selected);
     expect(sel).toHaveLength(1);
     expect(sel[0].color).toBe("#abcdef");
   });
 
-  it("matches the current colour case-insensitively", () => {
+  it("matches the current color case-insensitively", () => {
     const out = colorSwatches({ ...base, current: PALETTE[0].toUpperCase() });
     expect(out.filter((s) => s.selected)).toHaveLength(1);
     expect(out).toHaveLength(PALETTE.length);
@@ -161,7 +161,7 @@ describe("colorSwatches", () => {
 
 describe("DEFAULT_SPACE_COLOR", () => {
   /**
-   * The pairing the create panel depends on: the colour a new space starts
+   * The pairing the create panel depends on: the color a new space starts
    * with must be the swatch the popover shows selected when it opens.
    *
    * Two constants, one rule — so this is pinned rather than left to the two
@@ -185,7 +185,7 @@ describe("DEFAULT_SPACE_COLOR", () => {
     expect(out.filter((s) => s.selected)).toHaveLength(1);
   });
 
-  it("is the neutral swatch, not one of the rotation's colours", () => {
+  it("is the neutral swatch, not one of the rotation's colors", () => {
     // `nextPaletteColor` rotates `PALETTE.slice(1)` and must never hand out
     // the neutral one — so the opt-in default and the auto-assignment can
     // never collide.

@@ -11,11 +11,11 @@ import { iconColorFor } from "./spaceIconColor";
  */
 
 /**
- * Appends the entry's icon, in the entry's colour.
+ * Appends the entry's icon, in the entry's color.
  *
- * **The colour goes on the ICON, never the text.** Measured: a `#123456`
+ * **The color goes on the ICON, never the text.** Measured: a `#123456`
  * space is invisible as body text on a dark theme. A name stays in the
- * theme's own foreground colour so it is always readable, and the colour
+ * theme's own foreground color so it is always readable, and the color
  * does its identifying work on the glyph beside it.
  *
  * `useThemeColor` is the Appearance toggle, passed in rather than read here:

@@ -23,7 +23,7 @@ const spaces: HeaderSpace[] = [
 const EXISTS = (path: string): boolean => path === "Projects/Console 2030/Hardware";
 
 describe("headerModel", () => {
-  it("shows the space's own icon, name and colour", () => {
+  it("shows the space's own icon, name and color", () => {
     expect(headerModel({ kind: "space", id: "s1" }, spaces, KNOWN, EXISTS)).toEqual({
       icon: "anchor",
       label: "Work",
@@ -33,9 +33,9 @@ describe("headerModel", () => {
     });
   });
 
-  it("leaves colour undefined for a space that has none", () => {
-    // Rather than inventing one: an uncoloured space should inherit the pane's
-    // text colour, not a colour spaces picked on its behalf.
+  it("leaves color undefined for a space that has none", () => {
+    // Rather than inventing one: an uncolored space should inherit the pane's
+    // text color, not a color spaces picked on its behalf.
     expect(headerModel({ kind: "space", id: "s2" }, spaces, KNOWN, EXISTS).color).toBeUndefined();
   });
 

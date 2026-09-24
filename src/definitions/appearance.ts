@@ -1,6 +1,6 @@
 /**
  * A space's stored appearance: the palette it is assigned from, and the two
- * validators that decide whether an icon id or a colour may reach `data.json`.
+ * validators that decide whether an icon id or a color may reach `data.json`.
  *
  * `normalizeHex` lived in `ui/colorPicker.ts` and `isIconIdShape` in
  * `ui/iconPicker.ts`, so `actions/spaceLifecycle.ts` — the write path for both
@@ -20,10 +20,10 @@
  *
  * `#808080` is Obsidian's own icon grey, near enough: measured against 1.13.7,
  * `--icon-color` is `#b3b3b3` in the default dark theme and `#5c5c5c` in the
- * default light one. A stored colour is a fixed hex (`schema.ts`'s COLOR
+ * default light one. A stored color is a fixed hex (`schema.ts`'s COLOR
  * regex), so it cannot track a theme switch the way a CSS variable would —
  * the midpoint is legible on either ground instead of correct on one and
- * washed out on the other. Offering it lets a user opt OUT of colour-coding a
+ * washed out on the other. Offering it lets a user opt OUT of color-coding a
  * space rather than being assigned a tint they did not choose.
  *
  * It is deliberately NOT in the auto-assignment rotation — see
@@ -39,10 +39,10 @@ export const PALETTE = [
 ];
 
 /**
- * What a space is coloured before anyone chooses — the neutral swatch, and
- * therefore the one the colour popover opens with already selected.
+ * What a space is colored before anyone chooses — the neutral swatch, and
+ * therefore the one the color popover opens with already selected.
  *
- * Colour is opt-IN. A new space looks like the rest of Obsidian's chrome
+ * Color is opt-IN. A new space looks like the rest of Obsidian's chrome
  * until the user decides otherwise, rather than arriving wearing a tint they
  * did not pick and may not want. That is the same argument the neutral swatch
  * was added for, applied to the default rather than only to the choice.
@@ -53,11 +53,11 @@ export const PALETTE = [
 export const DEFAULT_SPACE_COLOR = PALETTE[0];
 
 /**
- * Colour alone must never be the
+ * Color alone must never be the
  * only label a control carries. Parallel to PALETTE by index and length —
  * one source of truth for the human-readable name of each swatch, so
  * nothing downstream (the create panel's aria-label today, anything else
- * later) has to invent its own name for a colour it was only handed as a
+ * later) has to invent its own name for a color it was only handed as a
  * hex string. Moved together with `PALETTE`: the two are indexed
  * against each other, so separating them would create the drift the comment
  * above exists to prevent.
@@ -71,7 +71,7 @@ export const PALETTE_NAMES: readonly string[] = [
   "Violet",
 ];
 
-/** `#ABC` → `#aabbcc`, `abcdef` → `#abcdef`. Null if it is not a colour. */
+/** `#ABC` → `#aabbcc`, `abcdef` → `#abcdef`. Null if it is not a color. */
 export function normalizeHex(input: string): string | null {
   const raw = input.trim().toLowerCase();
   const body = raw.startsWith("#") ? raw.slice(1) : raw;

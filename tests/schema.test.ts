@@ -47,7 +47,7 @@ describe("validateDefinitions", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("rejects a malformed colour", () => {
+  it("rejects a malformed color", () => {
     const r = validateDefinitions({
       ...valid,
       spaces: [{ ...valid.spaces[0], color: "red; background: url(x)" }],
@@ -383,7 +383,7 @@ describe("folder spaces — the root field", () => {
     // Validation never deletes a user's space. A folder space
     // with populated `members` is incoherent, but which field the RUNTIME
     // prefers is `rootOf()`'s call in a later task, not this loader's — and
-    // dropping the space over it would erase the name, icon, colour and
+    // dropping the space over it would erase the name, icon, color and
     // members from data.json on the very next write. Store both; nothing is
     // lost, and clearing `root` later brings the members straight back.
     const d = validateDefinitions({
@@ -466,13 +466,13 @@ describe("autoAssignColor", () => {
   it("defaults to TRUE for a document written before it existed", () => {
     // On by default, like its Appearance neighbours: the rotation is what the
     // palette is for — consecutive spaces told apart at a glance — and an
-    // install that quietly stopped colouring new spaces would read as the
+    // install that quietly stopped coloring new spaces would read as the
     // feature breaking rather than as a default being applied.
     expect(settingsOf({}).autoAssignColor).toBe(true);
   });
 
   it("keeps an explicit false", () => {
-    // Someone who turned colour off wants it off. Silently re-enabling it on
+    // Someone who turned color off wants it off. Silently re-enabling it on
     // the next load would undo a choice they made on purpose.
     expect(settingsOf({ autoAssignColor: false }).autoAssignColor).toBe(false);
   });
@@ -495,7 +495,7 @@ describe("useThemeIconColor", () => {
   it("defaults to FALSE for a document written before it existed", () => {
     // Off, like every other setting that changes what an existing install
     // already looks like. Turning up after an update with every space icon
-    // the same colour reads as the colours having been lost.
+    // the same color reads as the colors having been lost.
     expect(settingsOf({}).useThemeIconColor).toBe(false);
   });
 
@@ -510,9 +510,9 @@ describe("useThemeIconColor", () => {
     expect(settingsOf({ useThemeIconColor: "yes" }).useThemeIconColor).toBe(false);
   });
 
-  it("leaves every stored space colour untouched", () => {
+  it("leaves every stored space color untouched", () => {
     // The promise the setting makes. It governs drawing only, so a document
-    // loaded with the toggle on must still carry the colours out the other
+    // loaded with the toggle on must still carry the colors out the other
     // side, ready for the day it goes off again.
     const r = validateDefinitions({ ...valid, settings: { ...valid.settings, useThemeIconColor: true } });
     if (!r.ok) throw new Error(r.error);

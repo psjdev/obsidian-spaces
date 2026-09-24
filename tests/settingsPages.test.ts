@@ -64,7 +64,7 @@ describe("the settings pages", () => {
   });
 });
 
-describe("the theme icon colour control", () => {
+describe("the theme icon color control", () => {
   it("is a toggle on the Appearance page", () => {
     const control = flatten(page("Appearance").items).find(
       (i) => i.control?.key === "useThemeIconColor"
@@ -72,8 +72,8 @@ describe("the theme icon colour control", () => {
     expect(control?.type).toBe("toggle");
   });
 
-  it("sits with the other colour settings", () => {
-    // Next to the setting that decides what colour a new space is GIVEN,
+  it("sits with the other color settings", () => {
+    // Next to the setting that decides what color a new space is GIVEN,
     // since this one decides whether any of them are drawn.
     const keys = flatten(page("Appearance").items)
       .map((i) => i.control?.key)
@@ -82,9 +82,9 @@ describe("the theme icon colour control", () => {
     expect(keys.indexOf("useThemeIconColor")).toBe(keys.indexOf("autoAssignColor") + 1);
   });
 
-  it("says the colours are kept", () => {
+  it("says the colors are kept", () => {
     // The question anyone reading this setting will have. A toggle that
-    // sounds like it discards your colours does not get turned on.
+    // sounds like it discards your colors does not get turned on.
     const item = flatten(page("Appearance").items).find(
       (i) => i.control?.key === "useThemeIconColor"
     );

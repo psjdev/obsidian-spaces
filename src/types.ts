@@ -45,7 +45,7 @@ export type StripPlacement = "bottom" | "top" | "left" | "right";
 
 /**
  * How the strip marks the active space. Shaded is the theme's own selected
- * background and nothing else. Boxed adds a ring in the icon's colour over
+ * background and nothing else. Boxed adds a ring in the icon's color over
  * that background. Bolded drops the background and draws the icon at a heavier
  * stroke. All three leave the active icon at full opacity while the rest stay
  * muted, so no look depends on a single cue.
@@ -90,33 +90,33 @@ interface SpacesSettings {
    */
   pinAllSpace: boolean;
   /**
-   * Whether a new space is given the next colour in the palette, or
-   * starts neutral for the user to colour themselves.
+   * Whether a new space is given the next color in the palette, or
+   * starts neutral for the user to color themselves.
    *
    * On, consecutive spaces are told apart at a glance without anyone
    * deciding anything. Off, a new space looks like the rest of Obsidian's
-   * chrome until its owner colours it — the popover then opens on the
-   * first swatch, since that is the colour the space actually has.
+   * chrome until its owner colors it — the popover then opens on the
+   * first swatch, since that is the color the space actually has.
    */
   autoAssignColor: boolean;
   /**
-   * Whether every space icon is drawn in the theme's icon colour, ignoring
-   * the colour the space stores.
+   * Whether every space icon is drawn in the theme's icon color, ignoring
+   * the color the space stores.
    *
-   * Drawing only. The stored colours are untouched, so turning this off
+   * Drawing only. The stored colors are untouched, so turning this off
    * brings them all back exactly as they were. It is the blanket form of
    * what the neutral swatch does for a single space, for someone who wants
-   * their theme to decide while keeping the colours they have set.
+   * their theme to decide while keeping the colors they have set.
    *
    * Independent of `autoAssignColor`, which governs what a new space SAVES.
-   * Both on means new spaces keep taking palette colours that nothing draws
+   * Both on means new spaces keep taking palette colors that nothing draws
    * until this goes off.
    */
   useThemeIconColor: boolean;
   /**
-   * Custom colour chips, newest first, shared across spaces — a chip you
+   * Custom color chips, newest first, shared across spaces — a chip you
    * mix once is worth reusing on the next space, and keeping them per-space
-   * would mean re-mixing the same colour to match two spaces.
+   * would mean re-mixing the same color to match two spaces.
    */
   customColors: string[];
   restoreLayouts: boolean;
@@ -225,12 +225,12 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     // OFF by default: this rearranges a strip every existing install already
     // reads fluently, and doing that unasked on an update reads as a bug.
     pinAllSpace: false,
-    // ON, like its Appearance neighbours: colouring new spaces is what the
+    // ON, like its Appearance neighbours: coloring new spaces is what the
     // palette is for, and quietly stopping would read as the feature
     // breaking rather than a default being applied.
     autoAssignColor: true,
     // OFF: it changes how every existing install looks. Turning up after an
-    // update with every icon the same colour reads as the colours having
+    // update with every icon the same color reads as the colors having
     // been lost rather than as a default being applied.
     useThemeIconColor: false,
     customColors: [],

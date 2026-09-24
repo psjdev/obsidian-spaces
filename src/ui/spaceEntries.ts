@@ -25,7 +25,7 @@ export interface SpaceEntry {
   /** Already through the fallback, so a caller can `setIcon` it directly. */
   icon: string;
   label: string;
-  /** Undefined for *All*, and for a space with no colour of its own. */
+  /** Undefined for *All*, and for a space with no color of its own. */
   color: string | undefined;
   active: boolean;
 }

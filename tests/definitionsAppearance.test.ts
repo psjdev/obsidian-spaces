@@ -44,8 +44,8 @@ describe("definitions/appearance", () => {
     expect(PALETTE_NAMES).toHaveLength(PALETTE.length);
   });
 
-  it("only accepts colours schema.ts's COLOR regex would also accept", () => {
-    // `normalizeHex` is the write-path gate for a space colour; a value it
+  it("only accepts colors schema.ts's COLOR regex would also accept", () => {
+    // `normalizeHex` is the write-path gate for a space color; a value it
     // passes and `validateDefinitions` then rejects would fail the whole
     // document rather than the one field.
     for (const input of ["#5B5BFF", "5b5bff", "#f0a", "  #5b5bff  "]) {
@@ -62,7 +62,7 @@ describe("definitions/appearance", () => {
 
 describe("the neutral swatch", () => {
   // Measured against Obsidian 1.13.7: `--icon-color` is #b3b3b3 in the default
-  // dark theme and #5c5c5c in the default light one. A stored colour is a
+  // dark theme and #5c5c5c in the default light one. A stored color is a
   // fixed hex (schema.ts's COLOR regex), so it cannot follow a theme switch —
   // #808080 is the midpoint, legible on either ground rather than correct on
   // one and washed out on the other.
@@ -71,7 +71,7 @@ describe("the neutral swatch", () => {
   });
 
   it("is named, like every other swatch", () => {
-    // Colour must never be the only label a control carries.
+    // Color must never be the only label a control carries.
     expect(PALETTE_NAMES[0]).toBe("Neutral");
   });
 });

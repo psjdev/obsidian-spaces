@@ -67,7 +67,7 @@ describe("`home` is not part of the persisted schema", () => {
     // space is still a refusal, so this test cannot pass by the validator
     // having stopped validating.
     const doc = docWith("Papers") as { spaces: { color: string }[] };
-    doc.spaces[0].color = "not-a-colour";
+    doc.spaces[0].color = "not-a-color";
     expect(validateDefinitions(doc).ok).toBe(false);
   });
 });

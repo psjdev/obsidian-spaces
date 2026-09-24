@@ -72,7 +72,7 @@ If your vault uses a custom config folder, substitute it for `.obsidian`.
 
 1. Enable the plugin. The **space strip** appears along the bottom of the file explorer, with **All** at the left.
 2. Click **`+`** at the right of the strip, run the **Create space** command, or right-click empty space in the file explorer and choose **New space**. The explorer pane turns into a creation form.
-3. Type a name. Optionally click the dashed square to the left of the name to choose an icon, and **Choose icon colour** to set its colour.
+3. Type a name. Optionally click the dashed square to the left of the name to choose an icon, and **Choose icon color** to set its color.
 4. Choose what goes in it:
    - **Curated** opens a searchable tree of your vault. Click any notes and folders to include them.
    - **Folder pinned** shows folders only; pick exactly one to pin the space to.
@@ -93,11 +93,11 @@ Right-click a row in the file tree:
 - Inside a space, **Remove from *space*** removes a member. A row that is in the space because you added its parent folder shows a disabled entry naming the folder it came from. Remove the folder, or use **Stop showing here** to dismiss a visitor.
 - On a folder in **All**, **Create folder pinned space** builds a space pinned to it in one step.
 
-Right-click a space's icon in the space strip for **Rename space…**, **Change space icon…**, **Change space colour…**, and **Restore saved ordering**.
+Right-click a space's icon in the space strip for **Rename space…**, **Change space icon…**, **Change space color…**, and **Restore saved ordering**.
 
 | A row in the file tree | A space's icon in the strip |
 |---|---|
-| <img src="docs/media/menu-add-to-space.png" width="360" alt="Obsidian's own folder menu with two added entries: Add to space, opened to show the spaces that can take this folder, and Create folder pinned space."> | <img src="docs/media/menu-space-icon.png" width="360" alt="The menu on a space icon: Rename space, Change space icon and Change space colour."> |
+| <img src="docs/media/menu-add-to-space.png" width="360" alt="Obsidian's own folder menu with two added entries: Add to space, opened to show the spaces that can take this folder, and Create folder pinned space."> | <img src="docs/media/menu-space-icon.png" width="360" alt="The menu on a space icon: Rename space, Change space icon and Change space color."> |
 
 Only spaces that can take the row are offered: a folder pinned space is a window onto its own folder, so it never appears in **Add to space**.
 
@@ -180,9 +180,9 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Mark folder pinned spaces with a pin | Off | Adds a pin to that header for a folder pinned space; hover it for the folder |
 | All stays at the left of the space strip | Off | Keeps **All** in place while the other icons scroll |
 | Space strip position | Bottom | Where the strip of space icons sits in the file explorer. Left and right show it as a vertical ribbon |
-| Active space style | Shaded | How the strip marks the space you are in. Shaded shades it the way your theme shades a selected row, Boxed adds an outline in the space's colour, Bolded draws the icon at a heavier weight and no shading |
-| Assign a colour to new spaces | On | New spaces take the next palette colour. Off, they start neutral and you pick |
-| Use theme colours for space icons | Off | Draws every space icon in your theme's icon colour. Your saved colours are kept and come back when you turn it off |
+| Active space style | Shaded | How the strip marks the space you are in. Shaded shades it the way your theme shades a selected row, Boxed adds an outline in the space's color, Bolded draws the icon at a heavier weight and no shading |
+| Assign a color to new spaces | On | New spaces take the next palette color. Off, they start neutral and you pick |
+| Use theme colors for space icons | Off | Draws every space icon in your theme's icon color. Your saved colors are kept and come back when you turn it off |
 | Show files you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
 | Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A file you added explicitly is still shown |
 | Allow reordering of space items | On | Whether dragging rows rearranges them inside a space |

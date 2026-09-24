@@ -80,18 +80,18 @@ export interface CreateSpacePanelDeps {
    */
   folders: VaultSource;
   /**
-   * The user's saved custom colours, and the way to persist a new one — the
-   * theme button opens the same colour popover the space strip uses, and that
+   * The user's saved custom colors, and the way to persist a new one — the
+   * theme button opens the same color popover the space strip uses, and that
    * popover can mint one. Threaded as deps so the panel stays ignorant of
    * `DefinitionStore`.
    */
   customColors: readonly string[];
   saveCustomColors(customs: string[]): Promise<void>;
   /**
-   * The colour the form starts on, and therefore the swatch the popover shows
+   * The color the form starts on, and therefore the swatch the popover shows
    * selected when it opens. `main.ts` passes `DEFAULT_SPACE_COLOR`, which is
    * `PALETTE[0]` and so the FIRST swatch in the popover's grid: the popover
-   * opens with its selection on the colour the space actually has. Colour is
+   * opens with its selection on the color the space actually has. Color is
    * opt-in, and the palette rotation remains `createSpace`'s fallback for a
    * caller that supplies none at all.
    *
@@ -243,7 +243,7 @@ export class CreateSpacePanel {
   private pickerPopover: AnchoredPopover | null = null;
 
   /**
-   * The custom colours as they stand now — seeded from `deps` and updated
+   * The custom colors as they stand now — seeded from `deps` and updated
    * whenever this panel mints one, because `deps.customColors` is a snapshot
    * taken at construction and never written back to.
    */
@@ -437,7 +437,7 @@ export class CreateSpacePanel {
 
   /**
    * Idempotent: `renderInner()` and `destroy()` both call it unconditionally.
-   * ONE field serves both pickers, so chaining icon into colour cannot leave
+   * ONE field serves both pickers, so chaining icon into color cannot leave
    * two popovers open or drop the handle to the first.
    */
   private closePicker(): void {
@@ -448,7 +448,7 @@ export class CreateSpacePanel {
   /**
    * The icon picker, opened from the button beside the name.
    *
-   * Deliberately NOT chained into the colour picker: auto-opening a second
+   * Deliberately NOT chained into the color picker: auto-opening a second
    * popover the moment the first closed reads as jarring — the content
    * changing under the cursor is itself the jolt, however the box behaves.
    */
@@ -471,9 +471,9 @@ export class CreateSpacePanel {
   }
 
   /**
-   * The theme picker — the same colour popover the space strip uses.
+   * The theme picker — the same color popover the space strip uses.
    *
-   * Offered, never required: `validateForm` ignores colour exactly as it
+   * Offered, never required: `validateForm` ignores color exactly as it
    * ignores the icon, so dismissing this keeps the rotating default.
    */
   private openThemePicker(anchor: HTMLElement): void {
@@ -491,19 +491,19 @@ export class CreateSpacePanel {
       placement: "below",
       current: this.state.color,
       customs: this.customColors,
-      // Form state, like the icon: no space exists yet to write a colour to.
+      // Form state, like the icon: no space exists yet to write a color to.
       apply: async (color) => {
         this.state = { ...this.state, color };
         this.closePicker();
         this.renderInner();
       },
-      // A custom colour IS persisted: it belongs to the user's settings, not
+      // A custom color IS persisted: it belongs to the user's settings, not
       // to the space being created, so minting one and losing it when this
       // panel closes would be the surprising behaviour.
       saveCustoms: (customs) => {
         // Keep our own copy in step with what we just persisted: `deps` holds
         // the snapshot taken when the panel was constructed, so without this a
-        // colour minted here vanished from the grid the moment the picker was
+        // color minted here vanished from the grid the moment the picker was
         // reopened.
         this.customColors = [...customs];
         return this.deps.saveCustomColors(customs);
@@ -517,7 +517,7 @@ export class CreateSpacePanel {
    *
    * The placeholder is our own SVG rather than a Lucide id: every real icon
    * reads as a choice already made. Drawn in `currentColor` so the stylesheet
-   * owns the colour (no hardcoded values — see `styles.css`).
+   * owns the color (no hardcoded values — see `styles.css`).
    */
   private paintIconButton(btn: HTMLElement): void {
     const chosen = this.state.icon !== "";
@@ -529,16 +529,16 @@ export class CreateSpacePanel {
     if (chosen) {
       setIcon(btn, this.state.icon);
       // Only once an icon is chosen: the dashed placeholder is a prompt rather
-      // than a preview, and colouring it would claim a choice not yet made.
+      // than a preview, and coloring it would claim a choice not yet made.
       // Through `iconColorFor`, so the preview predicts the result. Painting
       // the neutral swatch here would show grey for a space that will render
-      // in the theme's icon colour everywhere else.
+      // in the theme's icon color everywhere else.
       const painted = iconColorFor(this.state.color, this.deps.useThemeIconColor());
       if (painted) btn.style.color = painted;
       else btn.style.removeProperty("color");
       return;
     }
-    // Back to the stylesheet's muted grey. An inline colour left over from a
+    // Back to the stylesheet's muted grey. An inline color left over from a
     // previously chosen icon would out-specify `.is-empty` and leave the
     // placeholder wearing it.
     btn.style.removeProperty("color");
@@ -717,7 +717,7 @@ export class CreateSpacePanel {
     // --- Theme ---
     //
     // A button, not a swatch row: it names the one thing it changes — the
-    // colour the space's icon is drawn in — and defers the choosing to the
+    // color the space's icon is drawn in — and defers the choosing to the
     // same popover the space strip uses. A real `<button>`, unclassed like
     // Cancel, so it inherits Obsidian's own chrome and Enter/Space activate it
     // natively rather than through a hand-rolled keydown handler.
@@ -727,20 +727,20 @@ export class CreateSpacePanel {
     themeBtn.dataset.focusKey = "theme";
     const themeIcon = doc.win.createSpan();
     themeIcon.className = "spaces-create-theme-icon";
-    // Deliberately NOT tinted with the chosen colour: the brush labels the
-    // action, and the thing it colours is the space's own icon up in the name
+    // Deliberately NOT tinted with the chosen color: the brush labels the
+    // action, and the thing it colors is the space's own icon up in the name
     // row, which is where the choice shows (`paintIconButton`).
     setIcon(themeIcon, "brush");
     const themeLabel = doc.win.createSpan();
-    themeLabel.textContent = "Choose icon colour";
+    themeLabel.textContent = "Choose icon color";
     themeBtn.appendChild(themeIcon);
     themeBtn.appendChild(themeLabel);
-    // The colour is named, not left as a swatch a screen reader cannot
+    // The color is named, not left as a swatch a screen reader cannot
     // describe; `paletteNameOf` already falls back to the value itself for a
-    // custom colour with no name.
+    // custom color with no name.
     themeBtn.setAttribute(
       "aria-label",
-      `Choose icon colour. Currently ${paletteNameOf(this.state.color)}`
+      `Choose icon color. Currently ${paletteNameOf(this.state.color)}`
     );
     themeBtn.addEventListener("click", () => this.openThemePicker(themeBtn));
     el.appendChild(themeBtn);
@@ -1115,14 +1115,14 @@ export class CreateSpacePanel {
    * Points at whatever stopped a Create, instead of a button that will not
    * click.
    *
-   * Two halves, because a colour alone is not a reason: the control is marked
+   * Two halves, because a color alone is not a reason: the control is marked
    * so the eye lands on it, and the reason goes to a `Notice`. The panel keeps
    * no message row of its own — it had to be cleared by hand, which is how a
    * stale "choose a folder" once sat there after its mode was switched off.
    *
    * A fault on the root OPENS the picker first: a red border on a box that is
    * not on screen tells the user nothing. Focus follows the mark, so keyboard
-   * users are taken where the colour points sighted ones.
+   * users are taken where the color points sighted ones.
    */
   private showFault(fault: FormFault): void {
     if (fault.field === "root" && !this.itemsOpen) {
@@ -1222,7 +1222,7 @@ export class CreateSpacePanel {
 /**
  * Resolves a swatch value back to its human name via PALETTE_NAMES
  * (spaceLifecycle.ts), by index against PALETTE — the one source of truth for
- * both. Falls back to the raw value for a colour outside `PALETTE` (a custom
+ * both. Falls back to the raw value for a color outside `PALETTE` (a custom
  * one the user minted).
  */
 function paletteNameOf(color: string): string {

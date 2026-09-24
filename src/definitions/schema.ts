@@ -157,13 +157,13 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
   // Folder spaces. This function's job is to load a document safely, not to
   // correct it, and the one thing it must never do is cost the user a space
   // — so `root` is validated for SHAPE only, and a value this loader cannot use is dropped as a single field,
-  // never as a reason to discard the id/name/icon/colour/members around it.
+  // never as a reason to discard the id/name/icon/color/members around it.
   //
   // A non-string `root` (a hand-edited `null`, a number, an object, ...) or
   // one that is an unsafe vault path in the ordinary sense (`../`, a drive
   // letter, a backslash, traversal) is exactly that: unusable, not
   // incoherent. Dropping the whole space over it would turn a single bad
-  // string into the loss of the space's name, icon, colour and members on
+  // string into the loss of the space's name, icon, color and members on
   // the very next write — and a rejected document is sticky, refusing every
   // write for the rest of the session.
   //
@@ -286,12 +286,12 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         showPinnedFolder: st.showPinnedFolder === true,
         // Defaults to FALSE for the same reason as the two above, and because
         // it changes how every existing install looks. Nothing here touches a
-        // space's stored colour: this key governs drawing alone.
+        // space's stored color: this key governs drawing alone.
         useThemeIconColor: st.useThemeIconColor === true,
         // Defaults to true, strict like `showSpaceHeader` above —
         // `autoAssignColor: 0` must not read as true the way a `!== false`
         // check would make it. An explicit false is kept: someone who turned
-        // colour off wants it off, and re-enabling it on the next load would
+        // color off wants it off, and re-enabling it on the next load would
         // undo a choice they made on purpose.
         autoAssignColor:
           st.autoAssignColor === undefined ? true : st.autoAssignColor === true,

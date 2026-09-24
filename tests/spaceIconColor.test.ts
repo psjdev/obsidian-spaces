@@ -1,7 +1,7 @@
 /**
- * Which colour a space's icon is painted, across every surface that draws one.
+ * Which color a space's icon is painted, across every surface that draws one.
  *
- * The neutral swatch is the colour popover's way of saying no colour was
+ * The neutral swatch is the color popover's way of saying no color was
  * chosen, so an icon wearing it takes the theme's `--icon-color` instead of a
  * fixed grey. That decision was first made in the strip alone, which left the
  * same space grey in the header, the switcher popover, the quick switcher and
@@ -12,8 +12,8 @@ import { describe, expect, it } from "vitest";
 import { iconColorFor, swatchPaint } from "../src/ui/spaceIconColor";
 import { DEFAULT_SPACE_COLOR, PALETTE } from "../src/definitions/appearance";
 
-describe("the colour a space's icon is painted", () => {
-  it("paints a colour the user chose", () => {
+describe("the color a space's icon is painted", () => {
+  it("paints a color the user chose", () => {
     expect(iconColorFor("#4ecdc4", false)).toBe("#4ecdc4");
   });
 
@@ -21,8 +21,8 @@ describe("the colour a space's icon is painted", () => {
     expect(iconColorFor(DEFAULT_SPACE_COLOR, false)).toBeUndefined();
   });
 
-  it("paints nothing when there is no colour at all", () => {
-    // *All* carries no colour: `spaceEntries` gives it `undefined`.
+  it("paints nothing when there is no color at all", () => {
+    // *All* carries no color: `spaceEntries` gives it `undefined`.
     expect(iconColorFor(undefined, false)).toBeUndefined();
     expect(iconColorFor("", false)).toBeUndefined();
   });
@@ -34,42 +34,42 @@ describe("the colour a space's icon is painted", () => {
     expect(iconColorFor("#808080".toUpperCase(), false)).toBeUndefined();
   });
 
-  it("paints every other palette colour", () => {
+  it("paints every other palette color", () => {
     // Guards against the sentinel widening to swallow a real choice. Only
     // `PALETTE[0]` is neutral; `nextPaletteColor` hands out the rest.
-    for (const colour of PALETTE.slice(1)) {
-      expect(iconColorFor(colour, false)).toBe(colour);
+    for (const color of PALETTE.slice(1)) {
+      expect(iconColorFor(color, false)).toBe(color);
     }
   });
 });
 
-describe("when theme colours are forced on", () => {
-  it("paints nothing, whatever colour the space has", () => {
-    // The whole point of the toggle. No inline colour is what lets
+describe("when theme colors are forced on", () => {
+  it("paints nothing, whatever color the space has", () => {
+    // The whole point of the toggle. No inline color is what lets
     // `--icon-color` apply, the same mechanism the neutral swatch uses.
-    for (const colour of PALETTE) {
-      expect(iconColorFor(colour, true)).toBeUndefined();
+    for (const color of PALETTE) {
+      expect(iconColorFor(color, true)).toBeUndefined();
     }
     expect(iconColorFor("#123456", true)).toBeUndefined();
   });
 
-  it("leaves the stored colour alone", () => {
+  it("leaves the stored color alone", () => {
     // Non-destructive is the requirement. The function is pure and returns a
     // new value, so this is really a guard against someone later making it
     // "helpful" by normalising or clearing what it was handed.
-    const colour = "#4ecdc4";
-    iconColorFor(colour, true);
-    expect(colour).toBe("#4ecdc4");
-    expect(iconColorFor(colour, false)).toBe("#4ecdc4");
+    const color = "#4ecdc4";
+    iconColorFor(color, true);
+    expect(color).toBe("#4ecdc4");
+    expect(iconColorFor(color, false)).toBe("#4ecdc4");
   });
 });
 
 describe("what a swatch chip is painted with", () => {
-  it("paints a chosen colour as itself", () => {
+  it("paints a chosen color as itself", () => {
     expect(swatchPaint("#4ecdc4")).toBe("#4ecdc4");
   });
 
-  it("paints the neutral chip with the theme's icon colour", () => {
+  it("paints the neutral chip with the theme's icon color", () => {
     // The chip is a preview of the result. A space on the neutral swatch
     // renders in `--icon-color`, so a chip showing a fixed grey would promise
     // something the strip does not deliver. A variable rather than a resolved

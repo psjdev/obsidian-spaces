@@ -54,9 +54,9 @@ describe("hexToHsv", () => {
     expect(hexToHsv("FF0000")).toMatchObject({ h: 0, s: 1, v: 1 });
   });
 
-  it("returns null rather than a silent black for a non-colour", () => {
+  it("returns null rather than a silent black for a non-color", () => {
     // The caller decides what to do with an unparseable field; handing back
-    // black would quietly change the user's colour to something they never
+    // black would quietly change the user's color to something they never
     // picked.
     for (const bad of ["", "#12345", "nope", "#zzzzzz", "#f0a"]) {
       expect(hexToHsv(bad)).toBeNull();
@@ -65,7 +65,7 @@ describe("hexToHsv", () => {
 });
 
 describe("hex ↔ hsv round trip", () => {
-  it("survives a round trip for every palette colour", () => {
+  it("survives a round trip for every palette color", () => {
     for (const color of PALETTE) {
       const hsv = hexToHsv(color) as Hsv;
       expect(hsvToHex(hsv)).toBe(color.toLowerCase());

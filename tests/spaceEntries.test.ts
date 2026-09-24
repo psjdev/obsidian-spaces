@@ -22,7 +22,7 @@ describe("spaceEntries", () => {
     expect(out.map((e) => e.label)).toEqual([ALL_LABEL, "Work", "Lab"]);
   });
 
-  it("gives All its own icon and no colour", () => {
+  it("gives All its own icon and no color", () => {
     const all = spaceEntries(spaces, { kind: "all" }, KNOWN)[0];
     expect(all).toMatchObject({ icon: ALL_ICON, label: ALL_LABEL, color: undefined });
     expect(all.key).toEqual({ kind: "all" });
@@ -45,7 +45,7 @@ describe("spaceEntries", () => {
     expect(out.some((e) => e.active)).toBe(false);
   });
 
-  it("carries each space's own colour through", () => {
+  it("carries each space's own color through", () => {
     const out = spaceEntries(spaces, { kind: "all" }, KNOWN);
     expect(out[1].color).toBe("#5b5bff");
     expect(out[2].color).toBeUndefined();

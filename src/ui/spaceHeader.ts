@@ -31,7 +31,7 @@ export interface HeaderSpace {
 interface HeaderModel {
   icon: string;
   label: string;
-  /** Undefined for All, and for a space that has no colour of its own. */
+  /** Undefined for All, and for a space that has no color of its own. */
   color: string | undefined;
   /**
    * The space this header can rename, or null when there is nothing to rename

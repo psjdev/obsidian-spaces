@@ -115,7 +115,7 @@
      side, but the same weight is wanted in every orientation. */
   background: var(--background-modifier-border-focus);
 }
-/* `clickable-icon` supplies display, centring, colour, radius and hover. What
+/* `clickable-icon` supplies display, centring, color, radius and hover. What
    stays here is what a theme must not decide: the box's size, its place in the
    rail, and the opacity ladder that says which space you are in. `padding: 0`
    because the component class brings `4px 6px`, and on a 28px box with
@@ -156,20 +156,20 @@
   opacity: 1;
   background-color: var(--background-modifier-active-hover);
   /* Obsidian styles `.clickable-icon.is-active` as a toggle that is switched
-     on, and colours it `--text-accent`. Our `is-active` means something else:
-     this is the space you are in. Colour here is identity, either the space's
-     own or the theme's icon colour when it has none, and state is carried by
-     the shading, the ring or the heavier glyph. Without this line an uncoloured active space turns
-     accent-purple and reads as though it had been given a colour. A space
-     that HAS a colour is unaffected either way, because that colour is an
+     on, and colors it `--text-accent`. Our `is-active` means something else:
+     this is the space you are in. Color here is identity, either the space's
+     own or the theme's icon color when it has none, and state is carried by
+     the shading, the ring or the heavier glyph. Without this line an uncolored active space turns
+     accent-purple and reads as though it had been given a color. A space
+     that HAS a color is unaffected either way, because that color is an
      inline style and wins over both rules. */
   color: var(--icon-color);
 }
 /* Boxed: the shading above plus a ring, for anyone who wants the active space
    to read from further away than a background tint does. `currentColor` rather
-   than a fixed value, so the ring is the space's own colour when it has one
-   and the theme's icon colour when it does not. The rule above sets that
-   colour, so the ring follows a theme without a second variable to keep in
+   than a fixed value, so the ring is the space's own color when it has one
+   and the theme's icon color when it does not. The rule above sets that
+   color, so the ring follows a theme without a second variable to keep in
    step. Inset, so the ring costs no layout and cannot shift the alignment the
    strip works to hold with the pane beside it. */
 .spaces-switcher.spaces-active-boxed .spaces-switcher-item.is-active,
@@ -373,7 +373,7 @@
 }
 /* The theme button replaces the old swatch row: full width under the name,
    so it reads as an action rather than seven unexplained circles. The brush
-   carries the current colour (set inline from state), so the button shows the
+   carries the current color (set inline from state), so the button shows the
    choice as well as offering to change it. */
 /* Layout only. Everything else -- background, border, radius, hover, active,
    focus ring -- is Obsidian's default button chrome, inherited by NOT being
@@ -389,8 +389,8 @@
 /* The muted default, shared with the mode buttons' icons and matching the
    icon placeholder's dashed box (`.spaces-create-iconbtn.is-empty`, below).
    Nothing overrides it: the brush labels the action and is not a swatch. The
-   chosen colour shows on the space's own icon instead, which is the thing
-   being coloured. */
+   chosen color shows on the space's own icon instead, which is the thing
+   being colored. */
 .spaces-create-theme-icon {
   display: flex;
   align-items: center;
@@ -399,17 +399,17 @@
 .spaces-create-theme-icon svg { width: 16px; height: 16px; }
 /* The icon button sits inside the name row, left of the input, so the two
    read as one field. `.is-empty` is the pre-choice state: the dashed plus is
-   drawn by CreateSpacePanel as inline SVG in `currentColor`, so the colour
+   drawn by CreateSpacePanel as inline SVG in `currentColor`, so the color
    decision lives here rather than in the markup. */
 .spaces-create-iconbtn {
   flex: 0 0 auto;
   width: 28px; height: 28px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
-  /* An icon, so it takes the colour Obsidian gives icons rather than the one
+  /* An icon, so it takes the color Obsidian gives icons rather than the one
      it gives body text. `.is-empty` below stays on `--text-muted`, because
      that says no icon has been chosen yet, which is the plugin expressing a
-     state rather than an icon taking its natural colour. */
+     state rather than an icon taking its natural color. */
   color: var(--icon-color);
 }
 .spaces-create-iconbtn svg { width: 20px; height: 20px; }
@@ -554,7 +554,7 @@ body.spaces-switching
   font-size: var(--font-ui-smaller);
 }
 
-/* §9.8: the colour picker. Same shell as the icon picker (AnchoredPopover). */
+/* §9.8: the color picker. Same shell as the icon picker (AnchoredPopover). */
 .spaces-color-popover {
   position: fixed;
   z-index: var(--layer-menu);
@@ -599,7 +599,7 @@ body.spaces-switching
   line-height: 1;
 }
 
-/* §9.8: deleting a custom chip. Palette colours never get one — they are
+/* §9.8: deleting a custom chip. Palette colors never get one — they are
    immutable, and the picker's floor. */
 .spaces-color-cell {
   position: relative;
@@ -718,7 +718,7 @@ body.spaces-switching
 
 /* §21: the space header, directly above the file tree and below Obsidian's
    own .nav-header. `flex: 0 0 auto` like the switcher strip, so the tree below
-   simply gets shorter rather than overflowing. The space's colour is set
+   simply gets shorter rather than overflowing. The space's color is set
    inline on the ICON only -- see SpaceHeaderView for why the name must stay
    themed. The padding is asymmetric on purpose: it sits tight to the rows it
    labels and keeps its distance from the buttons above. */
@@ -733,8 +733,8 @@ body.spaces-switching
   font-weight: var(--font-semibold);
 }
 
-/* An icon, so with no colour of its own it takes the one the theme gives
-   icons rather than the one it gives body text. A space that HAS a colour
+/* An icon, so with no color of its own it takes the one the theme gives
+   icons rather than the one it gives body text. A space that HAS a color
    gets it inline from `iconColorFor`, which wins over this. */.spaces-space-header-icon {
   display: flex;
   align-items: center;
@@ -785,7 +785,7 @@ body.spaces-switching
   background-color: var(--background-modifier-hover);
 }
 
-/* Inherits font and colour so swapping the label for the input does not make
+/* Inherits font and color so swapping the label for the input does not make
    the row jump. */
 .spaces-space-header-input {
   flex: 1 1 auto;
@@ -882,7 +882,7 @@ body.spaces-switching
   background-color: var(--background-modifier-hover);
 }
 
-/* Distinct from hover, and not colour alone (§9.6): the active row keeps a
+/* Distinct from hover, and not color alone (§9.6): the active row keeps a
    background AND carries aria-current. */
 .spaces-spaces-row.is-active {
   background-color: var(--background-modifier-active-hover);
@@ -894,8 +894,8 @@ body.spaces-switching
   outline-offset: -1px;
 }
 
-/* An icon, so with no colour of its own it takes the one the theme gives
-   icons rather than the one it gives body text. A space that HAS a colour
+/* An icon, so with no color of its own it takes the one the theme gives
+   icons rather than the one it gives body text. A space that HAS a color
    gets it inline from `iconColorFor`, which wins over this. */.spaces-spaces-row-icon {
   display: flex;
   align-items: center;
@@ -940,8 +940,8 @@ body.spaces-switching
   font-family: var(--font-monospace);
 }
 
-/* A missing entry is dimmed rather than coloured: it is not an error, just an
-   entry whose file has gone (§7.1). Colour is never the only signal (§9.6) —
+/* A missing entry is dimmed rather than colored: it is not an error, just an
+   entry whose file has gone (§7.1). Color is never the only signal (§9.6) —
    the description says "Missing" in words. */
 .spaces-member-row.is-missing .setting-item-name {
   opacity: 0.6;
@@ -964,7 +964,7 @@ body.spaces-switching
    --------------------------------------------------------------------------- */
 
 /* §9.8's delete badge waits for `:hover`/`:focus-visible`, and a pointer that
-   cannot hover produces neither on the way to a tap — so a custom colour could
+   cannot hover produces neither on the way to a tap — so a custom color could
    not be deleted on touch at all. Shown permanently instead: there is no hover
    state here for it to be the reward of. Enlarged in the same breath — 14px is
    under a third of the ~44px guideline, and it sits at the chip's corner where
@@ -1159,7 +1159,7 @@ body.spaces-switching
      leaves it only 2.5px of clearance either side -- the 6px gap is what
      puts the first icon on the header row, so the clearance cannot grow --
      and a 17px hairline in that little space stopped reading as a rule at
-     all. Colour is shared with the base rule; length is this rule's half. */
+     all. Color is shared with the base rule; length is this rule's half. */
   align-self: stretch;
   width: auto;
   height: 1px;

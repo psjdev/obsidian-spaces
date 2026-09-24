@@ -9,7 +9,7 @@ import type { VaultSource } from "./createSpaceForm";
  * caller). No settings-row equivalent exists; Settings shows the row's
  * summary only (`spaceRowSummary`) and is not drivable under Vitest to add
  * one. A separate, tiny widget rather than reopening `CreateSpacePanel` —
- * that panel builds a whole new space (name, icon, colour, starting
+ * that panel builds a whole new space (name, icon, color, starting
  * members); this only ever changes one existing space's `root`, which is
  * `setSpaceRoot`'s job (`spaceLifecycle.ts`), not `createSpace`'s.
  *

@@ -11,15 +11,15 @@ import {
 import { hexToHsv, hsvToHex, hueFromPoint, svFromPoint, type Hsv } from "./colorMath";
 
 /**
- * The "Change Space Colour…" picker.
+ * The "Change Space Color…" picker.
  *
  * Two views in one popover, in the manner of the icon picker: the
- * palette plus any custom chips, and — behind a `+` — a colour picker for
+ * palette plus any custom chips, and — behind a `+` — a color picker for
  * making a new chip. Positioning and dismissal come from `AnchoredPopover`, so
  * both pickers behave identically and cannot drift apart.
  *
  * It decides nothing: which chips exist, how a custom one is added and
- * de-duplicated, and what counts as a colour are all in `colorPicker.ts`,
+ * de-duplicated, and what counts as a color are all in `colorPicker.ts`,
  * tested in plain node.
  */
 interface ColorPickerDeps {
@@ -28,7 +28,7 @@ interface ColorPickerDeps {
   placement?: "above" | "below";
   current: string;
   customs: readonly string[];
-  /** Apply a colour to the space. Rejects on a failed write. */
+  /** Apply a color to the space. Rejects on a failed write. */
   apply(color: string): Promise<void>;
   /** Persist the custom chip list. Rejects on a failed write. */
   saveCustoms(customs: string[]): Promise<void>;
@@ -43,12 +43,12 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
     anchor: deps.anchor,
     placement: deps.placement,
     className: "spaces-color-popover",
-    ariaLabel: "Choose a colour",
+    ariaLabel: "Choose a color",
     build: (root, pop) => render(root, pop),
   });
 
   function fail(err: unknown): void {
-    new Notice(`Spaces: could not change the colour (${String(err)})`);
+    new Notice(`Spaces: could not change the color (${String(err)})`);
   }
 
   function render(root: HTMLElement, pop: AnchoredPopover): void {
@@ -79,11 +79,11 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
       cell.className = "spaces-color-cell";
       cell.setAttribute("role", "button");
       cell.setAttribute("tabindex", "0");
-      // A name, never the colour alone — a swatch announces nothing.
+      // A name, never the color alone — a swatch announces nothing.
       cell.setAttribute("aria-label", sw.label);
       cell.setAttribute("aria-pressed", String(sw.selected));
       // `swatchPaint`, not `sw.color`: the neutral chip previews the theme's
-      // icon colour, which is what a space on it renders in. `sw.color` is
+      // icon color, which is what a space on it renders in. `sw.color` is
       // still what gets applied on click, because that is what is stored.
       cell.style.backgroundColor = swatchPaint(sw.color);
       if (sw.selected) cell.classList.add("is-selected");
@@ -97,8 +97,8 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
         const remove = (): void => {
           customs = removeCustomColor(customs, sw.color);
           void deps.saveCustoms(customs).catch(fail);
-          // Only the chip goes. A space wearing this colour KEEPS it: the
-          // colour is stored on the space, not a reference to the chip, and
+          // Only the chip goes. A space wearing this color KEEPS it: the
+          // color is stored on the space, not a reference to the chip, and
           // `colorSwatches` still shows it as the current selection. Changing
           // a space's appearance as a side effect of tidying a palette would
           // be a surprise.
@@ -109,7 +109,7 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
         del.className = "spaces-color-remove";
         del.setAttribute("role", "button");
         del.setAttribute("tabindex", "0");
-        del.setAttribute("aria-label", `Delete colour ${sw.label}`);
+        del.setAttribute("aria-label", `Delete color ${sw.label}`);
         // An SVG, not a text "×". The character's ink box is not vertically
         // centred in its em box — measured at 0.7px high in a 14px badge,
         // because flex centres the LINE box and the glyph sits above it. A
@@ -117,7 +117,7 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
         setIcon(del, "x");
         del.addEventListener("click", (e) => {
           // Without this the click also reaches the chip and applies the very
-          // colour being deleted.
+          // color being deleted.
           e.stopPropagation();
           remove();
         });
@@ -148,13 +148,13 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
       grid.appendChild(cell);
     }
 
-    // The + that opens the colour picker, styled as a chip so it reads as one
+    // The + that opens the color picker, styled as a chip so it reads as one
     // more slot in the palette rather than a control bolted beside it.
     const add = doc.win.createDiv();
     add.className = "spaces-color-cell spaces-color-add";
     add.setAttribute("role", "button");
     add.setAttribute("tabindex", "0");
-    add.setAttribute("aria-label", "Add a custom colour");
+    add.setAttribute("aria-label", "Add a custom color");
     add.textContent = "+";
     const openCustom = (): void => {
       mode = "custom";
@@ -208,7 +208,7 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
     const hex = doc.win.createEl("input");
     hex.type = "text";
     hex.className = "spaces-color-hex";
-    hex.setAttribute("aria-label", "Colour hex value");
+    hex.setAttribute("aria-label", "Color hex value");
     // "Hex value" rather than a "#5b5bff" sample: Obsidian lints UI text for
     // sentence case, and the only spelling of a hex sample that rule accepts
     // is "#5B5bff", which reads as a typo. The aria-label carries the rest.
@@ -278,10 +278,10 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
 
     const addBtn = doc.win.createEl("button");
     addBtn.className = "mod-cta";
-    addBtn.textContent = "Add colour";
+    addBtn.textContent = "Add color";
     addBtn.addEventListener("click", () => {
       const parsed = normalizeHex(hex.value) ?? hsvToHex(hsv);
-      // Persist the chip AND apply it: adding a colour you then have to click
+      // Persist the chip AND apply it: adding a color you then have to click
       // again would be a pointless second step.
       customs = addCustomColor(customs, PALETTE, parsed);
       void deps.saveCustoms(customs).catch(fail);

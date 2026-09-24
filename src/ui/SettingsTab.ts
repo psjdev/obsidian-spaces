@@ -319,18 +319,18 @@ export class SpacesSettingTab extends PluginSettingTab {
         },
       },
       {
-        name: "Assign a colour to new spaces",
+        name: "Assign a color to new spaces",
         desc:
-          "New spaces take the next colour in the palette, so consecutive " +
+          "New spaces take the next color in the palette, so consecutive " +
           "spaces are easy to tell apart. Turn this off to start every new " +
-          "space neutral and pick its colour yourself.",
+          "space neutral and pick its color yourself.",
         control: { type: "toggle", key: "autoAssignColor" },
       },
       {
-        name: "Use theme colours for space icons",
+        name: "Use theme colors for space icons",
         desc:
-          "Draws every space icon in your theme's icon colour instead of the " +
-          "colour you gave it. Your colours are kept and come back when you " +
+          "Draws every space icon in your theme's icon color instead of the " +
+          "color you gave it. Your colors are kept and come back when you " +
           "turn this off.",
         control: { type: "toggle", key: "useThemeIconColor" },
       },
@@ -339,7 +339,7 @@ export class SpacesSettingTab extends PluginSettingTab {
         desc:
           "How the strip marks the space you are in. Shaded shades it the way " +
           "your theme shades a selected row. Boxed adds an outline in the " +
-          "space's colour. Bolded draws the icon at a heavier weight and no " +
+          "space's color. Bolded draws the icon at a heavier weight and no " +
           "shading.",
         control: {
           type: "dropdown",
@@ -509,7 +509,7 @@ export class SpacesSettingTab extends PluginSettingTab {
   /**
    * The notice for patterns past the cap, and for an invalid pattern that is
    * reported and skipped. Same visual treatment as the ordering warning rather
-   * than a third style, and no colours of its own — `.spaces-setting-warning`
+   * than a third style, and no colors of its own — `.spaces-setting-warning`
    * is built from `--text-error` and `--background-modifier-error`.
    */
   private renderIgnoreWarning(host: HTMLElement): void {

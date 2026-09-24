@@ -17,7 +17,7 @@ import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
  *
  * The counterpart to the switcher strip at the bottom — the strip is where
  * you go somewhere, this is where you are. It decides nothing: `spaceHeader.ts`
- * resolves a selection to an icon, a label, a colour and a renameable id, and
+ * resolves a selection to an icon, a label, a color and a renameable id, and
  * this renders what it returns.
  */
 export class SpaceHeaderView {
@@ -138,14 +138,14 @@ export class SpaceHeaderView {
     const icon = doc.win.createDiv();
     icon.className = "spaces-space-header-icon";
     setIcon(icon, model.icon);
-    // The colour goes on the ICON ALONE, never the row. Tinting the row was
+    // The color goes on the ICON ALONE, never the row. Tinting the row was
     // the first implementation and it rendered a `#123456` space's header
-    // invisible on a dark theme — a space colour is chosen to read as a 16px
+    // invisible on a dark theme — a space color is chosen to read as a 16px
     // glyph, not as body text, and half the palette fails contrast as text on
-    // one theme or the other. The name stays a themed colour, which is also
+    // one theme or the other. The name stays a themed color, which is also
     // what Arc does: the icon carries identity, the name stays legible.
     // Removed rather than left stale, since `render()` reuses nothing but the
-    // row and an unset property would inherit the previous space's colour.
+    // row and an unset property would inherit the previous space's color.
     const painted = iconColorFor(model.color, this.defs.get().settings.useThemeIconColor);
     if (painted) icon.style.color = painted;
     else icon.style.removeProperty("color");

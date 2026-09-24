@@ -479,8 +479,8 @@ export class SwitcherView {
     el.replaceChildren();
     // That line just destroyed every icon a picker could be anchored to, and
     // destroying a node fires nothing. This is the moment to notice: deleting
-    // a custom colour chip re-renders the strip from the definitions
-    // subscription, which would otherwise leave the colour picker floating
+    // a custom color chip re-renders the strip from the definitions
+    // subscription, which would otherwise leave the color picker floating
     // over an anchor that is no longer in the document.
     this.popover?.closeIfAnchorDetached();
 
@@ -809,21 +809,21 @@ export class SwitcherView {
   private buildItem(entry: SpaceEntry): HTMLElement {
     const el = this.el as HTMLElement;
     const item = el.ownerDocument.win.createDiv();
-    // `clickable-icon` is Obsidian's own. It carries the colour, radius and
+    // `clickable-icon` is Obsidian's own. It carries the color, radius and
     // hover a theme restyles, so without it a theme has no selector that
     // reaches this control. Ours carries size, position and state.
     item.className = "clickable-icon spaces-switcher-item";
     item.setAttribute("role", "button");
     item.setAttribute("tabindex", "0");
-    // Name in the label, never colour alone (spec section 9.6).
+    // Name in the label, never color alone (spec section 9.6).
     // `aria-label` and NOTHING ELSE. Obsidian renders its own tooltip
     // from this attribute — its nav buttons and ribbon actions carry an
     // aria-label and no `title` at all — so adding `title` too produced a
     // second, OS-drawn tooltip stacked on the first.
     item.setAttribute("aria-label", entry.label);
     // `iconColorFor` answers this for every surface that draws a space icon.
-    // A real colour is the user's data and goes inline, where it wins over a
-    // theme's rule. The neutral swatch means no colour was chosen, so nothing
+    // A real color is the user's data and goes inline, where it wins over a
+    // theme's rule. The neutral swatch means no color was chosen, so nothing
     // is written and `--icon-color` applies.
     const painted = iconColorFor(
       entry.color,
@@ -943,7 +943,7 @@ export class SwitcherView {
         menu.addItem((mi) =>
           mi
             .setIcon("palette")
-            .setTitle("Change space colour…")
+            .setTitle("Change space color…")
             .onClick(() => {
               this.show(
                 openColorPicker({

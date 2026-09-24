@@ -1,16 +1,16 @@
 /**
- * The colour to paint a space's icon with, for every surface that draws one.
+ * The color to paint a space's icon with, for every surface that draws one.
  *
  * A space always stores a real hex: `validateSpace` requires one and drops a
- * space without it. So "this space has no colour" is expressed by storing the
- * neutral swatch, which is `PALETTE[0]`. The colour popover presents it as
+ * space without it. So "this space has no color" is expressed by storing the
+ * neutral swatch, which is `PALETTE[0]`. The color popover presents it as
  * Neutral and `nextPaletteColor` never hands it out, so it is a sentinel
  * rather than a choice.
  *
  * Painting it would pin the icon to a fixed grey and shut the theme out, which
- * is what was reported: with colour assignment turned off, every space wore
+ * is what was reported: with color assignment turned off, every space wore
  * `#808080` whatever the theme drew its icons in. Returning undefined leaves
- * the element with no inline colour, so `--icon-color` applies.
+ * the element with no inline color, so `--icon-color` applies.
  *
  * One function rather than the same condition in five places. It was first
  * written inline in the strip alone, which left the same space grey in the
@@ -20,11 +20,11 @@
 import { DEFAULT_SPACE_COLOR } from "../definitions/appearance";
 
 /**
- * The colour to set inline, or undefined to leave it to the theme.
+ * The color to set inline, or undefined to leave it to the theme.
  *
  * `useThemeColor` is the Appearance toggle, and it is required rather than
  * defaulted: an optional argument would let a surface forget to pass it and
- * keep painting stored colours while the rest of the app obeyed the setting.
+ * keep painting stored colors while the rest of the app obeyed the setting.
  * That is exactly how the neutral swatch first reached one surface out of
  * five. Required means the compiler names every caller.
  */
@@ -32,7 +32,7 @@ export function iconColorFor(
   color: string | undefined,
   useThemeColor: boolean
 ): string | undefined {
-  // First, and without looking at the colour: the toggle is a blanket. The
+  // First, and without looking at the color: the toggle is a blanket. The
   // stored value is left alone, so it comes back the moment this goes off.
   if (useThemeColor) return undefined;
   if (!color) return undefined;
@@ -42,9 +42,9 @@ export function iconColorFor(
 }
 
 /**
- * What to paint a swatch chip in the colour popover with.
+ * What to paint a swatch chip in the color popover with.
  *
- * The chip is a preview of the result, so the neutral one shows the colour a
+ * The chip is a preview of the result, so the neutral one shows the color a
  * space on it will actually be, which is the theme's. Painting the stored
  * `#808080` would promise a grey the strip does not deliver.
  *
@@ -52,8 +52,8 @@ export function iconColorFor(
  * screen follows a theme switch without the popover being rebuilt.
  */
 export function swatchPaint(color: string): string {
-  // `false`, deliberately, and not the Appearance toggle: with theme colours
-  // forced on, every chip would go the same colour and the palette would stop
+  // `false`, deliberately, and not the Appearance toggle: with theme colors
+  // forced on, every chip would go the same color and the palette would stop
   // being a palette. The chips show what a space STORES, which is what you
   // are choosing between, and the toggle governs what gets drawn from it.
   return iconColorFor(color, false) ?? "var(--icon-color)";

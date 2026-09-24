@@ -15,7 +15,7 @@
  */
 import type { ActiveSpaceStyle } from "../types";
 
-/** Shading plus a ring in the icon's own colour. */
+/** Shading plus a ring in the icon's own color. */
 export const BOXED_CLASS = "spaces-active-boxed";
 
 /** A heavier glyph and no shading. */
