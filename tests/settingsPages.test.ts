@@ -16,6 +16,7 @@ import type { DefinitionStore } from "../src/definitions/DefinitionStore";
 interface Item {
   type?: string;
   name?: string;
+  desc?: string;
   heading?: string;
   items?: Item[];
   control?: { type?: string; key?: string; options?: Record<string, string> };
@@ -60,6 +61,34 @@ describe("the settings pages", () => {
       .map((i) => i.heading)
       .filter(Boolean);
     expect(headings).toEqual(["File tree", "Reordering", "Switching"]);
+  });
+});
+
+describe("the theme icon colour control", () => {
+  it("is a toggle on the Appearance page", () => {
+    const control = flatten(page("Appearance").items).find(
+      (i) => i.control?.key === "useThemeIconColor"
+    )?.control;
+    expect(control?.type).toBe("toggle");
+  });
+
+  it("sits with the other colour settings", () => {
+    // Next to the setting that decides what colour a new space is GIVEN,
+    // since this one decides whether any of them are drawn.
+    const keys = flatten(page("Appearance").items)
+      .map((i) => i.control?.key)
+      .filter(Boolean);
+    expect(keys).toContain("useThemeIconColor");
+    expect(keys.indexOf("useThemeIconColor")).toBe(keys.indexOf("autoAssignColor") + 1);
+  });
+
+  it("says the colours are kept", () => {
+    // The question anyone reading this setting will have. A toggle that
+    // sounds like it discards your colours does not get turned on.
+    const item = flatten(page("Appearance").items).find(
+      (i) => i.control?.key === "useThemeIconColor"
+    );
+    expect(item?.desc).toMatch(/kept/i);
   });
 });
 

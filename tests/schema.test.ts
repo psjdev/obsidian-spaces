@@ -485,6 +485,41 @@ describe("autoAssignColor", () => {
   });
 });
 
+describe("useThemeIconColor", () => {
+  function settingsOf(raw: Record<string, unknown>) {
+    const r = validateDefinitions({ ...valid, settings: { ...valid.settings, ...raw } });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.settings;
+  }
+
+  it("defaults to FALSE for a document written before it existed", () => {
+    // Off, like every other setting that changes what an existing install
+    // already looks like. Turning up after an update with every space icon
+    // the same colour reads as the colours having been lost.
+    expect(settingsOf({}).useThemeIconColor).toBe(false);
+  });
+
+  it("keeps an explicit true", () => {
+    expect(settingsOf({ useThemeIconColor: true }).useThemeIconColor).toBe(true);
+  });
+
+  it("does not trust a present non-boolean", () => {
+    // Strict like `pinAllSpace` and `showPinnedFolder`: `1` must not read as
+    // true.
+    expect(settingsOf({ useThemeIconColor: 1 }).useThemeIconColor).toBe(false);
+    expect(settingsOf({ useThemeIconColor: "yes" }).useThemeIconColor).toBe(false);
+  });
+
+  it("leaves every stored space colour untouched", () => {
+    // The promise the setting makes. It governs drawing only, so a document
+    // loaded with the toggle on must still carry the colours out the other
+    // side, ready for the day it goes off again.
+    const r = validateDefinitions({ ...valid, settings: { ...valid.settings, useThemeIconColor: true } });
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.spaces.map((s) => s.color)).toEqual(valid.spaces.map((s: { color: string }) => s.color));
+  });
+});
+
 describe("showPinnedFolder", () => {
   function settingsOf(raw: Record<string, unknown>) {
     const r = validateDefinitions({ ...valid, settings: { ...valid.settings, ...raw } });

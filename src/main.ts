@@ -906,6 +906,7 @@ export default class SpacesPlugin extends Plugin {
                 this.runtime.getSelection(),
                 knownIconIds()
               ),
+            useThemeIconColor: () => this.defs.get().settings.useThemeIconColor,
             switchTo: (key) => this.controller.switchTo(key),
           }).open();
         },
@@ -1573,6 +1574,7 @@ export default class SpacesPlugin extends Plugin {
       // Read at construction, like `defaultColor`: the panel is built fresh
       // per open, so this is the list as of the moment it opened.
       customColors: this.defs.get().settings.customColors,
+      useThemeIconColor: () => this.defs.get().settings.useThemeIconColor,
       saveCustomColors: (customs) =>
         this.defs.mutate((d) => {
           d.settings.customColors = customs;

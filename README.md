@@ -182,6 +182,7 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Space strip position | Bottom | Where the strip of space icons sits in the file explorer. Left and right show it as a vertical ribbon |
 | Active space style | Shaded | How the strip marks the space you are in. Shaded shades it the way your theme shades a selected row, Boxed adds an outline in the space's colour, Bolded draws the icon at a heavier weight and no shading |
 | Assign a colour to new spaces | On | New spaces take the next palette colour. Off, they start neutral and you pick |
+| Use theme colours for space icons | Off | Draws every space icon in your theme's icon colour. Your saved colours are kept and come back when you turn it off |
 | Show files you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
 | Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A file you added explicitly is still shown |
 | Allow reordering of space items | On | Whether dragging rows rearranges them inside a space |

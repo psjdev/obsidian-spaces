@@ -50,6 +50,7 @@ function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
       kindOf: (path) => VAULT[path] ?? null,
     },
     customColors: [],
+    useThemeIconColor: () => false,
     saveCustomColors: async (customs) => {
       saved.push([...customs]);
     },

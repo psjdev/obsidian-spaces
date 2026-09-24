@@ -27,6 +27,13 @@ than your theme draws icons, rather than at a fixed weight.
 Your setting carries over: a vault on Box gets Shaded, a vault on Bold gets
 Bolded. If you want the outline the earlier releases drew, pick Boxed.
 
+There is also a new **Use theme colours for space icons** toggle under
+Settings → Appearance, off by default. Turn it on and every space icon is
+drawn in your theme's icon colour, whatever colour you gave the space. The
+colours themselves are kept, so turning it back off brings all of them back.
+It covers the strip, the space header, both space lists and the create form's
+preview.
+
 Reported by @reareaty on the forum, and tracked as #10.
 
 ## 0.5.1 — 2026-09-24

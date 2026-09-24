@@ -327,6 +327,14 @@ export class SpacesSettingTab extends PluginSettingTab {
         control: { type: "toggle", key: "autoAssignColor" },
       },
       {
+        name: "Use theme colours for space icons",
+        desc:
+          "Draws every space icon in your theme's icon colour instead of the " +
+          "colour you gave it. Your colours are kept and come back when you " +
+          "turn this off.",
+        control: { type: "toggle", key: "useThemeIconColor" },
+      },
+      {
         name: "Active space style",
         desc:
           "How the strip marks the space you are in. Shaded shades it the way " +

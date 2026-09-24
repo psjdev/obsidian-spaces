@@ -100,6 +100,20 @@ interface SpacesSettings {
    */
   autoAssignColor: boolean;
   /**
+   * Whether every space icon is drawn in the theme's icon colour, ignoring
+   * the colour the space stores.
+   *
+   * Drawing only. The stored colours are untouched, so turning this off
+   * brings them all back exactly as they were. It is the blanket form of
+   * what the neutral swatch does for a single space, for someone who wants
+   * their theme to decide while keeping the colours they have set.
+   *
+   * Independent of `autoAssignColor`, which governs what a new space SAVES.
+   * Both on means new spaces keep taking palette colours that nothing draws
+   * until this goes off.
+   */
+  useThemeIconColor: boolean;
+  /**
    * Custom colour chips, newest first, shared across spaces — a chip you
    * mix once is worth reusing on the next space, and keeping them per-space
    * would mean re-mixing the same colour to match two spaces.
@@ -215,6 +229,10 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     // palette is for, and quietly stopping would read as the feature
     // breaking rather than a default being applied.
     autoAssignColor: true,
+    // OFF: it changes how every existing install looks. Turning up after an
+    // update with every icon the same colour reads as the colours having
+    // been lost rather than as a default being applied.
+    useThemeIconColor: false,
     customColors: [],
     stripPlacement: "bottom",
     activeSpaceStyle: "shaded",

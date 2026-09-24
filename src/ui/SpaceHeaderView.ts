@@ -146,7 +146,7 @@ export class SpaceHeaderView {
     // what Arc does: the icon carries identity, the name stays legible.
     // Removed rather than left stale, since `render()` reuses nothing but the
     // row and an unset property would inherit the previous space's colour.
-    const painted = iconColorFor(model.color);
+    const painted = iconColorFor(model.color, this.defs.get().settings.useThemeIconColor);
     if (painted) icon.style.color = painted;
     else icon.style.removeProperty("color");
     el.appendChild(icon);
@@ -173,6 +173,7 @@ export class SpaceHeaderView {
           this.runtime.getSelection(),
           knownIconIds()
         ),
+        useThemeIconColor: this.defs.get().settings.useThemeIconColor,
         switchTo: (key) => this.switchTo(key),
       });
     };

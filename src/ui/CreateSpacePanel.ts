@@ -100,6 +100,13 @@ export interface CreateSpacePanelDeps {
    */
   defaultColor: string;
   /**
+   * The Appearance toggle, so the icon preview predicts what the strip will
+   * draw. A function rather than a value, because this panel is the one that
+   * documents the reuse hazard above: a captured boolean would go stale on a
+   * second open of the same instance.
+   */
+  useThemeIconColor: () => boolean;
+  /**
    * Pre-fills the form as a folder space rooted here; `undefined` opens the
    * ordinary curated form. Read once per `mount()` alongside `defaultColor`,
    * so a reused instance does not seed a later, unrelated open with the first
@@ -526,7 +533,7 @@ export class CreateSpacePanel {
       // Through `iconColorFor`, so the preview predicts the result. Painting
       // the neutral swatch here would show grey for a space that will render
       // in the theme's icon colour everywhere else.
-      const painted = iconColorFor(this.state.color);
+      const painted = iconColorFor(this.state.color, this.deps.useThemeIconColor());
       if (painted) btn.style.color = painted;
       else btn.style.removeProperty("color");
       return;

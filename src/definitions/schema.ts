@@ -284,6 +284,10 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // non-boolean collapse to the same answer. Strict for the same reason:
         // `showPinnedFolder: 1` must not read as true.
         showPinnedFolder: st.showPinnedFolder === true,
+        // Defaults to FALSE for the same reason as the two above, and because
+        // it changes how every existing install looks. Nothing here touches a
+        // space's stored colour: this key governs drawing alone.
+        useThemeIconColor: st.useThemeIconColor === true,
         // Defaults to true, strict like `showSpaceHeader` above —
         // `autoAssignColor: 0` must not read as true the way a `!== false`
         // check would make it. An explicit false is kept: someone who turned

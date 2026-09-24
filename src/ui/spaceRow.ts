@@ -18,13 +18,21 @@ import { iconColorFor } from "./spaceIconColor";
  * theme's own foreground colour so it is always readable, and the colour
  * does its identifying work on the glyph beside it.
  *
+ * `useThemeColor` is the Appearance toggle, passed in rather than read here:
+ * this module knows nothing about `DefinitionStore`, and both callers build
+ * their list at open time and can read it then.
+ *
  * Returns the icon element so a caller can class or measure it.
  */
-export function appendSpaceIcon(row: HTMLElement, entry: SpaceEntry): HTMLElement {
+export function appendSpaceIcon(
+  row: HTMLElement,
+  entry: SpaceEntry,
+  useThemeColor: boolean
+): HTMLElement {
   const icon = row.ownerDocument.win.createDiv();
   icon.className = "spaces-spaces-row-icon";
   setIcon(icon, entry.icon);
-  const painted = iconColorFor(entry.color);
+  const painted = iconColorFor(entry.color, useThemeColor);
   if (painted) icon.style.color = painted;
   row.appendChild(icon);
   return icon;

@@ -19,8 +19,22 @@
  */
 import { DEFAULT_SPACE_COLOR } from "../definitions/appearance";
 
-/** The colour to set inline, or undefined to leave it to the theme. */
-export function iconColorFor(color: string | undefined): string | undefined {
+/**
+ * The colour to set inline, or undefined to leave it to the theme.
+ *
+ * `useThemeColor` is the Appearance toggle, and it is required rather than
+ * defaulted: an optional argument would let a surface forget to pass it and
+ * keep painting stored colours while the rest of the app obeyed the setting.
+ * That is exactly how the neutral swatch first reached one surface out of
+ * five. Required means the compiler names every caller.
+ */
+export function iconColorFor(
+  color: string | undefined,
+  useThemeColor: boolean
+): string | undefined {
+  // First, and without looking at the colour: the toggle is a blanket. The
+  // stored value is left alone, so it comes back the moment this goes off.
+  if (useThemeColor) return undefined;
   if (!color) return undefined;
   // Case-insensitive: `validateSpace` accepts `#808080` in either case and
   // stores it as given, so a lowercase-only comparison would paint the grey.
@@ -38,5 +52,9 @@ export function iconColorFor(color: string | undefined): string | undefined {
  * screen follows a theme switch without the popover being rebuilt.
  */
 export function swatchPaint(color: string): string {
-  return iconColorFor(color) ?? "var(--icon-color)";
+  // `false`, deliberately, and not the Appearance toggle: with theme colours
+  // forced on, every chip would go the same colour and the palette would stop
+  // being a palette. The chips show what a space STORES, which is what you
+  // are choosing between, and the toggle governs what gets drawn from it.
+  return iconColorFor(color, false) ?? "var(--icon-color)";
 }

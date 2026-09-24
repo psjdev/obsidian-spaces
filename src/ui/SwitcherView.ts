@@ -825,7 +825,10 @@ export class SwitcherView {
     // A real colour is the user's data and goes inline, where it wins over a
     // theme's rule. The neutral swatch means no colour was chosen, so nothing
     // is written and `--icon-color` applies.
-    const painted = iconColorFor(entry.color);
+    const painted = iconColorFor(
+      entry.color,
+      this.defs.get().settings.useThemeIconColor
+    );
     if (painted) item.style.color = painted;
 
     if (entry.active) {
