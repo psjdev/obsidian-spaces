@@ -3,6 +3,7 @@ import { headerModel } from "./spaceHeader";
 import { SEL } from "../explorer/selectors";
 import { headerAnchor } from "./headerPlacement";
 import { knownIconIds } from "./knownIcons";
+import { iconColorFor } from "./spaceIconColor";
 import { MAX_SPACE_NAME_LENGTH, normalizeSpaceName } from "./renameSpaceForm";
 import { openSpaceSwitcher } from "./SpaceSwitcherPopover";
 import type { AnchoredPopover } from "./AnchoredPopover";
@@ -145,7 +146,8 @@ export class SpaceHeaderView {
     // what Arc does: the icon carries identity, the name stays legible.
     // Removed rather than left stale, since `render()` reuses nothing but the
     // row and an unset property would inherit the previous space's colour.
-    if (model.color) icon.style.color = model.color;
+    const painted = iconColorFor(model.color);
+    if (painted) icon.style.color = painted;
     else icon.style.removeProperty("color");
     el.appendChild(icon);
 

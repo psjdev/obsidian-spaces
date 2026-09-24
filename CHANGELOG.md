@@ -8,8 +8,9 @@ If you turned off **Assign a colour to new spaces**, your spaces were being
 drawn in a fixed grey rather than in whatever grey your theme uses for icons.
 That neutral swatch now means what it says in the colour popover, which is
 that no colour was chosen, so those icons take the theme's icon colour like
-every other icon in Obsidian. A space you gave a colour keeps it exactly as
-before.
+every other icon in Obsidian. That holds everywhere a space icon is drawn:
+the strip, the space header, the switcher popover, the quick switcher and the
+create form's preview. A space you gave a colour keeps it exactly as before.
 
 The strip's buttons are now Obsidian icon buttons rather than controls that
 only looked like them, so a theme restyles them along with everything else it

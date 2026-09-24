@@ -329,9 +329,9 @@ export class SpacesSettingTab extends PluginSettingTab {
       {
         name: "Active space style",
         desc:
-          "How the strip marks the space you are in. Box draws a tinted square " +
-          "with a coloured outline. Bold draws the icon at a heavier weight and " +
-          "no box.",
+          "How the strip marks the space you are in. Box shades it the way your " +
+          "theme shades a selected row. Bold draws the icon at a heavier weight " +
+          "and no shading.",
         control: {
           type: "dropdown",
           key: "activeSpaceStyle",

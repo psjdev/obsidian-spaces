@@ -27,7 +27,7 @@ import { nearestPlacement, passedThreshold, type PaneRect, type Point } from "./
 import { CLS_SPACE_DRAGGING, CLS_SPACE_DROP_LINE, SEL } from "../explorer/selectors";
 import { renameSpace, setSpaceIcon, setSpaceColor } from "../actions/spaceLifecycle";
 import { setStripPlacement } from "../actions/stripPlacement";
-import { DEFAULT_SPACE_COLOR } from "../definitions/appearance";
+import { iconColorFor } from "./spaceIconColor";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { SpaceController } from "../controller/SpaceController";
@@ -821,14 +821,12 @@ export class SwitcherView {
     // aria-label and no `title` at all — so adding `title` too produced a
     // second, OS-drawn tooltip stacked on the first.
     item.setAttribute("aria-label", entry.label);
-    // The neutral swatch is not a colour the user picked for its own sake, it
-    // is the colour popover's way of saying they picked none. Writing it would
-    // pin the icon to #808080 and shut the theme out, which is what was
-    // reported as the icons being grey. Every other colour IS their data and is
-    // written inline, where it wins over the theme's rule.
-    if (entry.color && entry.color !== DEFAULT_SPACE_COLOR) {
-      item.style.color = entry.color;
-    }
+    // `iconColorFor` answers this for every surface that draws a space icon.
+    // A real colour is the user's data and goes inline, where it wins over a
+    // theme's rule. The neutral swatch means no colour was chosen, so nothing
+    // is written and `--icon-color` applies.
+    const painted = iconColorFor(entry.color);
+    if (painted) item.style.color = painted;
 
     if (entry.active) {
       item.classList.add("is-active");

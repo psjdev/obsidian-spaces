@@ -19,6 +19,7 @@ import {
 } from "./createSpaceForm";
 import type { FormFault } from "./createSpaceForm";
 import { alignmentGap } from "./ribbonAlign";
+import { iconColorFor } from "./spaceIconColor";
 import { ancestorsOf, buildVaultTree, visibleRows, type VaultNode } from "./vaultTree";
 
 import {
@@ -522,7 +523,12 @@ export class CreateSpacePanel {
       setIcon(btn, this.state.icon);
       // Only once an icon is chosen: the dashed placeholder is a prompt rather
       // than a preview, and colouring it would claim a choice not yet made.
-      btn.style.color = this.state.color;
+      // Through `iconColorFor`, so the preview predicts the result. Painting
+      // the neutral swatch here would show grey for a space that will render
+      // in the theme's icon colour everywhere else.
+      const painted = iconColorFor(this.state.color);
+      if (painted) btn.style.color = painted;
+      else btn.style.removeProperty("color");
       return;
     }
     // Back to the stylesheet's muted grey. An inline colour left over from a

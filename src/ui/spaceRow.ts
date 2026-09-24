@@ -1,5 +1,6 @@
 import { setIcon } from "obsidian";
 import type { SpaceEntry } from "./spaceEntries";
+import { iconColorFor } from "./spaceIconColor";
 
 /**
  * The icon half of a space row, wherever one is drawn.
@@ -23,7 +24,8 @@ export function appendSpaceIcon(row: HTMLElement, entry: SpaceEntry): HTMLElemen
   const icon = row.ownerDocument.win.createDiv();
   icon.className = "spaces-spaces-row-icon";
   setIcon(icon, entry.icon);
-  if (entry.color) icon.style.color = entry.color;
+  const painted = iconColorFor(entry.color);
+  if (painted) icon.style.color = painted;
   row.appendChild(icon);
   return icon;
 }

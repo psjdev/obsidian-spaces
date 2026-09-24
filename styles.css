@@ -90,7 +90,14 @@
 }
 /* §9.11: the icon being dragged. Obsidian marks its own dragged rows the same
    way, so the strip reads as part of the app rather than a bolt-on. */
-.spaces-switcher-item.is-being-dragged { opacity: 0.35; }
+/* The bottom rung of the opacity ladder, and the only one that has to beat
+   `:hover`: the pointer is by definition over the item being dragged. Scoped
+   and given the `:hover` pair so it wins on specificity rather than on which
+   rule happens to come later in this file. */
+.spaces-switcher .spaces-switcher-item.is-being-dragged,
+.spaces-switcher .spaces-switcher-item.is-being-dragged:hover {
+  opacity: 0.35;
+}
 /* §9.10: the boundary between pinned All and the scrolling rail. Rendered
    only while something is pinned — a permanent rule that sometimes separates
    nothing is worse than no rule. `align-self: stretch` rather than a fixed
@@ -112,8 +119,14 @@
    stays here is what a theme must not decide: the box's size, its place in the
    rail, and the opacity ladder that says which space you are in. `padding: 0`
    because the component class brings `4px 6px`, and on a 28px box with
-   `border-box` that leaves 16px of content for an 18px icon. */
-.spaces-switcher-item {
+   `border-box` that leaves 16px of content for an 18px icon.
+
+   Scoped through `.spaces-switcher` on purpose. Unscoped, `.spaces-switcher-item`
+   and `.clickable-icon` are both one class and tie on every property declared
+   here, leaving the winner to whichever stylesheet the app happens to load
+   last. These are the properties the design calls the plugin's, so they should
+   not depend on load order. Two classes beats one and settles it. */
+.spaces-switcher .spaces-switcher-item {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -121,7 +134,11 @@
   flex: 0 0 auto;
   opacity: 0.55;
 }
-.spaces-switcher-item:hover { opacity: 0.85; }
+/* The hover rung of the opacity ladder: 0.55 inactive, 0.85 hovered, 1 active,
+   0.35 dragging. Hover sits inside a ladder that carries meaning, so it is
+   scoped to win rather than tie. The background is deliberately left to the
+   theme; only the rung is ours. */
+.spaces-switcher .spaces-switcher-item:hover { opacity: 0.85; }
 
 .spaces-switcher-item:focus-visible,
 .spaces-switcher-add:focus-visible,
@@ -136,7 +153,8 @@
    replaced was a 2px inset ring in the space's own colour, which no native
    icon button has, and which is what was reported as the strip standing out
    against a theme. */
-.spaces-switcher-item.is-active {
+.spaces-switcher .spaces-switcher-item.is-active,
+.spaces-switcher .spaces-switcher-item.is-active:hover {
   opacity: 1;
   background-color: var(--background-modifier-active-hover);
   /* Obsidian styles `.clickable-icon.is-active` as a toggle that is switched
@@ -153,10 +171,21 @@
    `--icon-stroke` is Obsidian's own token rather than a `stroke-width` of our
    own, so a theme that restyles icons keeps its say. Opacity is deliberately
    NOT touched -- the rule above already lifts the active icon to 1 while the
-   rest sit at 0.55, so weight is never the only thing distinguishing it. */
-.spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active {
+   rest sit at 0.55, so weight is never the only thing distinguishing it.
+
+   `no box` has to mean no box on EVERY item, not only the active one. The
+   items carry `clickable-icon`, so a theme's `.clickable-icon:hover` paints a
+   background on whichever icon the pointer is over. Left alone, the one item
+   wearing a box in Bold mode would be whichever one you happen to be hovering,
+   which is the opposite of what the option says. */
+.spaces-switcher.spaces-active-bold .spaces-switcher-item,
+.spaces-switcher.spaces-active-bold .spaces-switcher-item:hover,
+.spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active,
+.spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active:hover {
   background: transparent;
   box-shadow: none;
+}
+.spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active {
   --icon-stroke: calc(var(--spaces-base-stroke) + 1px);
 }
 .spaces-switcher-item.is-pending { opacity: 1; animation: spaces-pulse 0.6s ease-in-out infinite; }
@@ -694,10 +723,13 @@ body.spaces-switching
   font-weight: var(--font-semibold);
 }
 
-.spaces-space-header-icon {
+/* An icon, so with no colour of its own it takes the one the theme gives
+   icons rather than the one it gives body text. A space that HAS a colour
+   gets it inline from `iconColorFor`, which wins over this. */.spaces-space-header-icon {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
+  color: var(--icon-color);
 }
 
 .spaces-space-header-icon .svg-icon {
@@ -852,10 +884,13 @@ body.spaces-switching
   outline-offset: -1px;
 }
 
-.spaces-spaces-row-icon {
+/* An icon, so with no colour of its own it takes the one the theme gives
+   icons rather than the one it gives body text. A space that HAS a colour
+   gets it inline from `iconColorFor`, which wins over this. */.spaces-spaces-row-icon {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
+  color: var(--icon-color);
 }
 
 .spaces-spaces-row-icon .svg-icon {
