@@ -1,5 +1,6 @@
 import { Notice, setIcon } from "obsidian";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { swatchPaint } from "./spaceIconColor";
 import { PALETTE, PALETTE_NAMES } from "../actions/spaceLifecycle";
 import {
   addCustomColor,
@@ -81,7 +82,10 @@ export function openColorPicker(deps: ColorPickerDeps): AnchoredPopover {
       // A name, never the colour alone — a swatch announces nothing.
       cell.setAttribute("aria-label", sw.label);
       cell.setAttribute("aria-pressed", String(sw.selected));
-      cell.style.backgroundColor = sw.color;
+      // `swatchPaint`, not `sw.color`: the neutral chip previews the theme's
+      // icon colour, which is what a space on it renders in. `sw.color` is
+      // still what gets applied on click, because that is what is stored.
+      cell.style.backgroundColor = swatchPaint(sw.color);
       if (sw.selected) cell.classList.add("is-selected");
       const choose = (): void => {
         void deps.apply(sw.color).catch(fail);

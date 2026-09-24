@@ -26,3 +26,17 @@ export function iconColorFor(color: string | undefined): string | undefined {
   // stores it as given, so a lowercase-only comparison would paint the grey.
   return color.toLowerCase() === DEFAULT_SPACE_COLOR.toLowerCase() ? undefined : color;
 }
+
+/**
+ * What to paint a swatch chip in the colour popover with.
+ *
+ * The chip is a preview of the result, so the neutral one shows the colour a
+ * space on it will actually be, which is the theme's. Painting the stored
+ * `#808080` would promise a grey the strip does not deliver.
+ *
+ * Returns the variable rather than a resolved value, so a chip already on
+ * screen follows a theme switch without the popover being rebuilt.
+ */
+export function swatchPaint(color: string): string {
+  return iconColorFor(color) ?? "var(--icon-color)";
+}

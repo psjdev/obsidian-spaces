@@ -9,7 +9,7 @@
  * now answers the question for all five.
  */
 import { describe, expect, it } from "vitest";
-import { iconColorFor } from "../src/ui/spaceIconColor";
+import { iconColorFor, swatchPaint } from "../src/ui/spaceIconColor";
 import { DEFAULT_SPACE_COLOR, PALETTE } from "../src/definitions/appearance";
 
 describe("the colour a space's icon is painted", () => {
@@ -40,5 +40,23 @@ describe("the colour a space's icon is painted", () => {
     for (const colour of PALETTE.slice(1)) {
       expect(iconColorFor(colour)).toBe(colour);
     }
+  });
+});
+
+describe("what a swatch chip is painted with", () => {
+  it("paints a chosen colour as itself", () => {
+    expect(swatchPaint("#4ecdc4")).toBe("#4ecdc4");
+  });
+
+  it("paints the neutral chip with the theme's icon colour", () => {
+    // The chip is a preview of the result. A space on the neutral swatch
+    // renders in `--icon-color`, so a chip showing a fixed grey would promise
+    // something the strip does not deliver. A variable rather than a resolved
+    // value, so it follows a theme switch without the popover being rebuilt.
+    expect(swatchPaint(DEFAULT_SPACE_COLOR)).toBe("var(--icon-color)");
+  });
+
+  it("is case-insensitive about the neutral swatch, like iconColorFor", () => {
+    expect(swatchPaint("#808080".toUpperCase())).toBe("var(--icon-color)");
   });
 });
