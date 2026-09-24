@@ -54,6 +54,12 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  /* The theme's icon weight, captured so the Bold rule below can derive from
+     it. A custom property cannot reference itself: that is a cycle, and CSS
+     resolves a cycle to the guaranteed-invalid value, which would leave the
+     active icon with no stroke at all. Measured in 1.13.7: the self
+     referencing form resolves to empty, this one to `calc(1.75px + 1px)`. */
+  --spaces-base-stroke: var(--icon-stroke);
   overflow: hidden;
   padding: 6px 8px;
   border-top: 1px solid var(--background-modifier-border);
@@ -146,7 +152,7 @@
 .spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active {
   background: transparent;
   box-shadow: none;
-  --icon-stroke: 2.75px;
+  --icon-stroke: calc(var(--spaces-base-stroke) + 1px);
 }
 .spaces-switcher-item.is-pending { opacity: 1; animation: spaces-pulse 0.6s ease-in-out infinite; }
 @keyframes spaces-pulse { 50% { opacity: 0.4; } }
