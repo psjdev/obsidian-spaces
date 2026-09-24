@@ -130,10 +130,15 @@
   outline: 1px solid var(--interactive-accent);
   outline-offset: -1px;
 }
+/* Box, one of the two ways the strip marks the space you are in. The plugin
+   decides that there is a box. The theme decides what a selected control looks
+   like, through the same variable Obsidian's own active rows use. What this
+   replaced was a 2px inset ring in the space's own colour, which no native
+   icon button has, and which is what was reported as the strip standing out
+   against a theme. */
 .spaces-switcher-item.is-active {
   opacity: 1;
-  background: var(--background-modifier-hover);
-  box-shadow: inset 0 0 0 2px currentColor;
+  background-color: var(--background-modifier-active-hover);
   /* Obsidian styles `.clickable-icon.is-active` as a toggle that is switched
      on, and colours it `--text-accent`. Our `is-active` means something else:
      this is the space you are in. Colour here is identity, either the space's

@@ -221,9 +221,14 @@ describe("correlate: the folder scan is bounded", () => {
     }
     const started = Date.now();
     correlate({ buffer, event: folder("delete", "Tree", T) });
-    // 6,000 unbounded is ~9x the 2,040/281 ms measurement. Capped it is ~1 ms;
-    // the assertion is loose so it measures the cap, not the machine.
-    expect(Date.now() - started).toBeLessThan(60);
+    // 6,000 unbounded is ~9x the 2,040/281 ms measurement, so roughly 2.5 s.
+    // Capped it is ~1 ms. The bound was 60 ms, which measured the machine as
+    // well as the cap: under a full parallel suite run this took 362 ms on an
+    // otherwise idle laptop and failed twice, while passing every time the
+    // file ran alone. 500 ms is still far below the uncapped cost, so a
+    // regression in the cap fails just as loudly, and scheduling noise no
+    // longer decides the result.
+    expect(Date.now() - started).toBeLessThan(500);
   });
 
   it("still correlates a folder move whose descendants are inside the cap", () => {
