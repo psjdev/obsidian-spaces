@@ -147,12 +147,10 @@
   outline: 1px solid var(--interactive-accent);
   outline-offset: -1px;
 }
-/* Box, one of the two ways the strip marks the space you are in. The plugin
-   decides that there is a box. The theme decides what a selected control looks
-   like, through the same variable Obsidian's own active rows use. What this
-   replaced was a 2px inset ring in the space's own colour, which no native
-   icon button has, and which is what was reported as the strip standing out
-   against a theme. */
+/* Shaded, the default of the three ways the strip marks the space you are in.
+   The plugin decides that the active space is marked. The theme decides what a
+   selected control looks like, through the same variable Obsidian's own active
+   rows use. Boxed and Bolded build on this rule rather than replacing it. */
 .spaces-switcher .spaces-switcher-item.is-active,
 .spaces-switcher .spaces-switcher-item.is-active:hover {
   opacity: 1;
@@ -161,31 +159,43 @@
      on, and colours it `--text-accent`. Our `is-active` means something else:
      this is the space you are in. Colour here is identity, either the space's
      own or the theme's icon colour when it has none, and state is carried by
-     the box or by Bold. Without this line an uncoloured active space turns
+     the shading, the ring or the heavier glyph. Without this line an uncoloured active space turns
      accent-purple and reads as though it had been given a colour. A space
      that HAS a colour is unaffected either way, because that colour is an
      inline style and wins over both rules. */
   color: var(--icon-color);
 }
-/* The other way to mark the active space: no box, a heavier glyph instead.
+/* Boxed: the shading above plus a ring, for anyone who wants the active space
+   to read from further away than a background tint does. `currentColor` rather
+   than a fixed value, so the ring is the space's own colour when it has one
+   and the theme's icon colour when it does not. The rule above sets that
+   colour, so the ring follows a theme without a second variable to keep in
+   step. Inset, so the ring costs no layout and cannot shift the alignment the
+   strip works to hold with the pane beside it. */
+.spaces-switcher.spaces-active-boxed .spaces-switcher-item.is-active,
+.spaces-switcher.spaces-active-boxed .spaces-switcher-item.is-active:hover {
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+/* Bolded: no shading anywhere, a heavier glyph instead.
    `--icon-stroke` is Obsidian's own token rather than a `stroke-width` of our
    own, so a theme that restyles icons keeps its say. Opacity is deliberately
    NOT touched -- the rule above already lifts the active icon to 1 while the
    rest sit at 0.55, so weight is never the only thing distinguishing it.
 
-   `no box` has to mean no box on EVERY item, not only the active one. The
-   items carry `clickable-icon`, so a theme's `.clickable-icon:hover` paints a
-   background on whichever icon the pointer is over. Left alone, the one item
-   wearing a box in Bold mode would be whichever one you happen to be hovering,
-   which is the opposite of what the option says. */
-.spaces-switcher.spaces-active-bold .spaces-switcher-item,
-.spaces-switcher.spaces-active-bold .spaces-switcher-item:hover,
-.spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active,
-.spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active:hover {
+   No shading has to mean no shading on EVERY item, not only the active one.
+   The items carry `clickable-icon`, so a theme's `.clickable-icon:hover`
+   paints a background on whichever icon the pointer is over. Left alone, the
+   one item
+   shaded under Bolded would be whichever one you happen to be hovering, which
+   is the opposite of what the option says. */
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item,
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item:hover,
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-active,
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-active:hover {
   background: transparent;
   box-shadow: none;
 }
-.spaces-switcher.spaces-active-bold .spaces-switcher-item.is-active {
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-active {
   --icon-stroke: calc(var(--spaces-base-stroke) + 1px);
 }
 .spaces-switcher-item.is-pending { opacity: 1; animation: spaces-pulse 0.6s ease-in-out infinite; }

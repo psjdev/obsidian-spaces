@@ -17,8 +17,15 @@ only looked like them, so a theme restyles them along with everything else it
 restyles. The box marking the active space uses whatever your theme draws a
 selected row with, in place of the coloured outline it drew before.
 
-**Bold** now means one step heavier than your theme draws icons, rather than a
-fixed weight. On the default theme it looks the same as it did.
+The three active space styles are now **Shaded**, **Boxed** and **Bolded**,
+renamed from Box and Bold. Shaded is the default and shades the active icon
+the way your theme shades a selected row. Boxed puts an outline back over that
+shading, in the space's own colour, or your theme's icon colour for a space
+with no colour. Bolded drops the shading and draws the icon one step heavier
+than your theme draws icons, rather than at a fixed weight.
+
+Your setting carries over: a vault on Box gets Shaded, a vault on Bold gets
+Bolded. If you want the outline the earlier releases drew, pick Boxed.
 
 Reported by @reareaty on the forum, and tracked as #10.
 

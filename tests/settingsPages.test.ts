@@ -64,14 +64,19 @@ describe("the settings pages", () => {
 });
 
 describe("the active space style control", () => {
-  it("is a dropdown on the Appearance page offering both looks", () => {
+  it("is a dropdown on the Appearance page offering all three looks", () => {
     const control = flatten(page("Appearance").items).find(
       (i) => i.control?.key === "activeSpaceStyle"
     )?.control;
     expect(control?.type).toBe("dropdown");
-    // Both one short word: a native select sizes to its selected option, so
-    // an uneven pair makes the settings row jump on every change.
-    expect(control?.options).toEqual({ box: "Box", bold: "Bold" });
+    // One short word each, and close to the same length: a native select
+    // sizes to its selected option, so uneven labels make the settings row
+    // jump on every change.
+    expect(control?.options).toEqual({
+      shaded: "Shaded",
+      boxed: "Boxed",
+      bolded: "Bolded",
+    });
   });
 
   it("is not on any other page", () => {

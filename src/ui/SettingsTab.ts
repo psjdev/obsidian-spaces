@@ -329,20 +329,22 @@ export class SpacesSettingTab extends PluginSettingTab {
       {
         name: "Active space style",
         desc:
-          "How the strip marks the space you are in. Box shades it the way your " +
-          "theme shades a selected row. Bold draws the icon at a heavier weight " +
-          "and no shading.",
+          "How the strip marks the space you are in. Shaded shades it the way " +
+          "your theme shades a selected row. Boxed adds an outline in the " +
+          "space's colour. Bolded draws the icon at a heavier weight and no " +
+          "shading.",
         control: {
           type: "dropdown",
           key: "activeSpaceStyle",
           options: {
-            box: "Box",
+            shaded: "Shaded",
+            boxed: "Boxed",
             // Kept to one short word each. A native select sizes to its
             // selected option, so a long label makes the whole row jump when
-            // the value changes -- and the declarative settings API exposes
+            // the value changes, and the declarative settings API exposes
             // no class to scope a width rule to, only `name` and `desc`, so a
             // CSS fix would have to style every plugin's dropdowns.
-            bold: "Bold",
+            bolded: "Bolded",
           },
         },
       },

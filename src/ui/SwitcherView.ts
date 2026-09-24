@@ -16,7 +16,7 @@ import {
 } from "./spaceReorder";
 import { axisFor, pointerAlong, spanOf, type Axis, type Span } from "./stripAxis";
 import { applyDock, applyUnlockState, clearDock } from "./stripDock";
-import { ACTIVE_STYLE_CLASS, activeStyleClass } from "./activeStyle";
+import { BOLDED_CLASS, BOXED_CLASS, activeStyleClass } from "./activeStyle";
 import {
   DESIGN_PAD_TOP,
   DESIGN_RAIL_GAP,
@@ -558,12 +558,12 @@ export class SwitcherView {
     }
 
     this.revealActive(rail);
-    // Toggled rather than added: the element survives a render, so a switch
-    // back to the boxed look has to take the class off again.
-    el.classList.toggle(
-      ACTIVE_STYLE_CLASS,
-      activeStyleClass(this.defs.get().settings.activeSpaceStyle) !== null
-    );
+    // Both classes are set every render, not just the chosen one: the element
+    // survives a render, so a switch from Boxed to Bolded that only added
+    // would leave the strip wearing both and drawing both looks at once.
+    const styleClass = activeStyleClass(this.defs.get().settings.activeSpaceStyle);
+    el.classList.toggle(BOXED_CLASS, styleClass === BOXED_CLASS);
+    el.classList.toggle(BOLDED_CLASS, styleClass === BOLDED_CLASS);
     // Last: every box it measures was created above.
     this.alignToPane();
   }

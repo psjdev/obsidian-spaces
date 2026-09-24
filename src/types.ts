@@ -44,12 +44,16 @@ export interface SpaceDefinition {
 export type StripPlacement = "bottom" | "top" | "left" | "right";
 
 /**
- * How the strip marks the active space: the tinted box with a coloured ring,
- * or the icon drawn at a heavier stroke with no box at all. Both leave the
- * active icon at full opacity while the rest stay muted, so neither look
- * depends on a single cue.
+ * How the strip marks the active space. Shaded is the theme's own selected
+ * background and nothing else. Boxed adds a ring in the icon's colour over
+ * that background. Bolded drops the background and draws the icon at a heavier
+ * stroke. All three leave the active icon at full opacity while the rest stay
+ * muted, so no look depends on a single cue.
+ *
+ * Stored documents from 0.4.0 to 0.6.0 hold `box` or `bold`; `schema.ts`
+ * carries those across.
  */
-export type ActiveSpaceStyle = "box" | "bold";
+export type ActiveSpaceStyle = "shaded" | "boxed" | "bolded";
 
 interface SpacesSettings {
   globalIgnore: string[];
@@ -213,7 +217,7 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     autoAssignColor: true,
     customColors: [],
     stripPlacement: "bottom",
-    activeSpaceStyle: "box",
+    activeSpaceStyle: "shaded",
   },
   spaces: [],
 };
