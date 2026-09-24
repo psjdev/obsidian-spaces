@@ -16,6 +16,7 @@ import {
 } from "./spaceReorder";
 import { axisFor, pointerAlong, spanOf, type Axis, type Span } from "./stripAxis";
 import { applyDock, applyUnlockState, clearDock } from "./stripDock";
+import { ACTIVE_STYLE_CLASS, activeStyleClass } from "./activeStyle";
 import {
   DESIGN_PAD_TOP,
   DESIGN_RAIL_GAP,
@@ -556,6 +557,12 @@ export class SwitcherView {
     }
 
     this.revealActive(rail);
+    // Toggled rather than added: the element survives a render, so a switch
+    // back to the boxed look has to take the class off again.
+    el.classList.toggle(
+      ACTIVE_STYLE_CLASS,
+      activeStyleClass(this.defs.get().settings.activeSpaceStyle) !== null
+    );
     // Last: every box it measures was created above.
     this.alignToPane();
   }

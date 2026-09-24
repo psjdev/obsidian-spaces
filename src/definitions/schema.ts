@@ -6,6 +6,7 @@ import {
   type SpaceDefinition,
   type SpacesDefinitions,
   type StripPlacement,
+  type ActiveSpaceStyle,
 } from "../types";
 
 export type ValidationResult =
@@ -14,6 +15,7 @@ export type ValidationResult =
 
 const COLOR = /^#[0-9a-f]{6}$/i;
 const STRIP_PLACEMENTS = new Set(["bottom", "top", "left", "right"]);
+const ACTIVE_SPACE_STYLES = new Set(["box", "bold"]);
 /** The same cap the picker enforces, applied to hand-edited documents. */
 const MAX_CUSTOM_COLORS = 12;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -255,6 +257,14 @@ export function validateDefinitions(raw: unknown): ValidationResult {
           typeof st.stripPlacement === "string" && STRIP_PLACEMENTS.has(st.stripPlacement)
             ? (st.stripPlacement as StripPlacement)
             : "bottom",
+        // Degrades for the same reason as the placement above, and to the
+        // look every existing vault already has: a document written before
+        // this setting existed carries no key at all.
+        activeSpaceStyle:
+          typeof st.activeSpaceStyle === "string" &&
+          ACTIVE_SPACE_STYLES.has(st.activeSpaceStyle)
+            ? (st.activeSpaceStyle as ActiveSpaceStyle)
+            : "box",
         // Defaults to FALSE, so absent and non-boolean collapse to the
         // same answer and no `undefined` branch is needed. Strict for the same
         // reason as the keys above — `pinAllSpace: 1` must not read as true.

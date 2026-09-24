@@ -43,6 +43,14 @@ export interface SpaceDefinition {
  */
 export type StripPlacement = "bottom" | "top" | "left" | "right";
 
+/**
+ * How the strip marks the active space: the tinted box with a coloured ring,
+ * or the icon drawn at a heavier stroke with no box at all. Both leave the
+ * active icon at full opacity while the rest stay muted, so neither look
+ * depends on a single cue.
+ */
+export type ActiveSpaceStyle = "box" | "bold";
+
 interface SpacesSettings {
   globalIgnore: string[];
   /**
@@ -101,6 +109,8 @@ interface SpacesSettings {
   revealVisitors: boolean;
   /** Where the strip sits. See `StripPlacement`. */
   stripPlacement: StripPlacement;
+  /** How the active space is marked. See `ActiveSpaceStyle`. */
+  activeSpaceStyle: ActiveSpaceStyle;
 }
 
 /**
@@ -203,6 +213,7 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     autoAssignColor: true,
     customColors: [],
     stripPlacement: "bottom",
+    activeSpaceStyle: "box",
   },
   spaces: [],
 };

@@ -161,6 +161,10 @@ export class SpacesSettingTab extends PluginSettingTab {
    */
   override getSettingDefinitions(): SettingDefinitionItem[] {
     return [
+      // First, and its own page rather than a group inside Preferences: it is
+      // the half of the settings people go looking for. Preferences keeps the
+      // behavioural groups behind it.
+      { type: "page", name: "Appearance", items: this.appearanceItems() },
       { type: "page", name: "Preferences", items: this.preferenceItems() },
       { type: "page", name: "Spaces", items: this.spaceItems() },
     ];
@@ -268,66 +272,89 @@ export class SpacesSettingTab extends PluginSettingTab {
     return frag;
   }
 
+  /**
+   * The Appearance page's items, flat rather than wrapped in a group: the
+   * page is the heading, and a group repeating it would read as a stutter.
+   */
+  private appearanceItems(): SettingDefinitionItem[] {
+    return [
+      {
+        name: "Show the space name above the file tree",
+        desc:
+          "Shows the active space's icon and name at the top of the file explorer. " +
+          "Turn it off if the icon strip along the bottom is orientation enough.",
+        control: { type: "toggle", key: "showSpaceHeader" },
+      },
+      {
+        name: "Mark folder pinned spaces with a pin",
+        desc:
+          "When the space name row above is shown, a folder pinned space gets a pin " +
+          "on the right. Hover it to see which folder.",
+        control: { type: "toggle", key: "showPinnedFolder" },
+      },
+      {
+        // Led by "All" rather than "Pin All …": sentence case is linted,
+        // and mid-sentence the view's own label is indistinguishable from
+        // the quantifier — "Pin all …" would read as pinning every icon.
+        name: "All stays at the left of the space strip",
+        desc:
+          "Keeps All in place while the other space icons scroll past it, " +
+          "the way the + button stays pinned to the right.",
+        control: { type: "toggle", key: "pinAllSpace" },
+      },
+      {
+        name: "Space strip position",
+        desc:
+          "Where the strip of space icons sits in the file explorer. Left and " +
+          "right show it as a vertical ribbon.",
+        control: {
+          type: "dropdown",
+          key: "stripPlacement",
+          options: {
+            bottom: "Bottom",
+            top: "Top",
+            left: "Left",
+            right: "Right",
+          },
+        },
+      },
+      {
+        name: "Assign a colour to new spaces",
+        desc:
+          "New spaces take the next colour in the palette, so consecutive " +
+          "spaces are easy to tell apart. Turn this off to start every new " +
+          "space neutral and pick its colour yourself.",
+        control: { type: "toggle", key: "autoAssignColor" },
+      },
+      {
+        name: "Active space style",
+        desc:
+          "How the strip marks the space you are in. Box draws a tinted square " +
+          "with a coloured outline. Bold draws the icon at a heavier weight and " +
+          "no box.",
+        control: {
+          type: "dropdown",
+          key: "activeSpaceStyle",
+          options: {
+            box: "Box",
+            // Kept to one short word each. A native select sizes to its
+            // selected option, so a long label makes the whole row jump when
+            // the value changes -- and the declarative settings API exposes
+            // no class to scope a width rule to, only `name` and `desc`, so a
+            // CSS fix would have to style every plugin's dropdowns.
+            bold: "Bold",
+          },
+        },
+      },
+    ];
+  }
+
   private preferenceItems(): SettingDefinitionItem[] {
     const settings = this.defs.get().settings;
     const orderingUnavailable = this.getOrderingStatus ? !this.getOrderingStatus().available : false;
     const restoreBlocked = this.getEffectiveRestore?.().reason;
 
     return [
-      {
-        type: "group",
-        heading: "Appearance",
-        items: [
-          {
-            name: "Show the space name above the file tree",
-            desc:
-              "Shows the active space's icon and name at the top of the file explorer. " +
-              "Turn it off if the icon strip along the bottom is orientation enough.",
-            control: { type: "toggle", key: "showSpaceHeader" },
-          },
-          {
-            name: "Mark folder pinned spaces with a pin",
-            desc:
-              "When the space name row above is shown, a folder pinned space gets a pin " +
-              "on the right. Hover it to see which folder.",
-            control: { type: "toggle", key: "showPinnedFolder" },
-          },
-          {
-            // Led by "All" rather than "Pin All …": sentence case is linted,
-            // and mid-sentence the view's own label is indistinguishable from
-            // the quantifier — "Pin all …" would read as pinning every icon.
-            name: "All stays at the left of the space strip",
-            desc:
-              "Keeps All in place while the other space icons scroll past it, " +
-              "the way the + button stays pinned to the right.",
-            control: { type: "toggle", key: "pinAllSpace" },
-          },
-          {
-            name: "Space strip position",
-            desc:
-              "Where the strip of space icons sits in the file explorer. Left and " +
-              "right show it as a vertical ribbon.",
-            control: {
-              type: "dropdown",
-              key: "stripPlacement",
-              options: {
-                bottom: "Bottom",
-                top: "Top",
-                left: "Left",
-                right: "Right",
-              },
-            },
-          },
-          {
-            name: "Assign a colour to new spaces",
-            desc:
-              "New spaces take the next colour in the palette, so consecutive " +
-              "spaces are easy to tell apart. Turn this off to start every new " +
-              "space neutral and pick its colour yourself.",
-            control: { type: "toggle", key: "autoAssignColor" },
-          },
-        ],
-      },
       {
         type: "group",
         heading: "File tree",

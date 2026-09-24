@@ -49,3 +49,21 @@ class NoopResizeObserver implements ResizeObserver {
 }
 
 globalThis.ResizeObserver ??= NoopResizeObserver;
+
+/**
+ * `appendText` is Obsidian's own extension to `Node` (obsidian.d.ts:55), not a
+ * Web Platform method, so jsdom has nothing by that name.
+ *
+ * Declarative settings build their descriptions into a `DocumentFragment` with
+ * it, which means a tab that merely ASKS for its definitions throws here
+ * without this -- long before anything renders.
+ *
+ * Guarded on `Node` existing at all: this file is a setup file for every test,
+ * including the ones that run under the node environment with no DOM.
+ */
+if (typeof Node !== "undefined") {
+  const proto = Node.prototype as Node & { appendText?: (val: string) => void };
+  proto.appendText ??= function (this: Node, val: string): void {
+    this.appendChild(this.ownerDocument?.createTextNode(val) ?? document.createTextNode(val));
+  };
+}
