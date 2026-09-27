@@ -160,6 +160,13 @@ export const CLS_DROP_BOX = "spaces-drop-box";
 export const CLS_GAP_DRAG = "spaces-gap-drag";
 
 /**
+ * On the box once it should be visible. The fade it drives is what keeps the
+ * box from being drawn at full strength on a row that has not finished moving
+ * out of its way.
+ */
+export const CLS_BOX_OPEN = "is-open";
+
+/**
  * The insertion line for reordering SPACES, vertical, drawn inside
  * `.spaces-switcher-rail`.
  *

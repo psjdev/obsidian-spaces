@@ -14,7 +14,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DragOrdering, type DragOrderingDeps } from "../src/order/DragOrdering";
-import { CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG } from "../src/explorer/selectors";
+import { CLS_BOX_OPEN, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG } from "../src/explorer/selectors";
 import type { DropIndicatorStyle } from "../src/types";
 
 const ROW_H = 24;
@@ -145,7 +145,18 @@ describe("what a drag draws", () => {
   describe("the box style", () => {
     it("wears the box class and not the line class", () => {
       dragBBeforeA();
-      expect(indicator()?.className).toBe(CLS_DROP_BOX);
+      const el = indicator();
+      expect(el?.classList.contains(CLS_DROP_BOX)).toBe(true);
+      expect(el?.classList.contains(CLS_DROP_LINE)).toBe(false);
+    });
+
+    it("is marked open, which is what fades it in", () => {
+      // The box is transparent until this lands. Without it the box would be
+      // drawn at full strength on a row that has not finished sliding out of
+      // its way, which is the state that read as the indicator sitting ON an
+      // item rather than between two.
+      dragBBeforeA();
+      expect(indicator()?.classList.contains(CLS_BOX_OPEN)).toBe(true);
     });
 
     it("sizes the box to the target row's own height and indent", () => {
@@ -199,7 +210,9 @@ describe("what a drag draws", () => {
 
     it("wears the line class", () => {
       dragBBeforeA();
-      expect(indicator()?.className).toBe(CLS_DROP_LINE);
+      const el = indicator();
+      expect(el?.classList.contains(CLS_DROP_LINE)).toBe(true);
+      expect(el?.classList.contains(CLS_DROP_BOX)).toBe(false);
     });
 
     it("moves no rows at all", () => {

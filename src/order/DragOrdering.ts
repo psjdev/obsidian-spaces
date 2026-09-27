@@ -1,4 +1,4 @@
-import { CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG, SEL } from "../explorer/selectors";
+import { CLS_BOX_OPEN, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG, SEL } from "../explorer/selectors";
 import { gapLayout, type GapRow } from "./gapLayout";
 import type { DropIndicatorStyle } from "../types";
 
@@ -124,6 +124,8 @@ export class DragOrdering {
    * what keeps the stored value honest.
    */
   private geo = new Map<HTMLElement, GapRow>();
+  /** Where the box currently sits, so its fade replays only when it moves. */
+  private openAt: number | null = null;
   private dragged: string[] = [];
   /**
    * Whether `dragged` may be only part of the user's selection, because
@@ -902,12 +904,25 @@ export class DragOrdering {
       this.shiftOf.set(el, shift);
     }
 
+    // Restarted only when the gap actually moves. The fade has to replay for
+    // a new position, and forcing a reflow on every frame of a held pointer
+    // would be work for an animation nobody asked to see again.
+    const moved = this.openAt !== layout.box.top;
+    this.openAt = layout.box.top;
+    if (moved) el.classList.remove(CLS_BOX_OPEN);
     el.className = CLS_DROP_BOX;
     el.style.top = layout.box.top + "px";
     el.style.left = layout.box.left + "px";
     el.style.width = layout.box.width + "px";
     el.style.height = layout.box.height + "px";
     el.hidden = false;
+    if (moved) {
+      // Reading a layout property between the two writes is what makes the
+      // browser treat them as separate states rather than collapsing them and
+      // skipping the transition entirely.
+      void el.offsetWidth;
+    }
+    el.classList.add(CLS_BOX_OPEN);
   }
 
   /**
@@ -934,7 +949,11 @@ export class DragOrdering {
 
   /** Hides, never removes: removal during a drag is what caused the flicker. */
   private clearIndicator(): void {
-    if (this.indicator) this.indicator.hidden = true;
+    if (this.indicator) {
+      this.indicator.hidden = true;
+      this.indicator.classList.remove(CLS_BOX_OPEN);
+    }
+    this.openAt = null;
     this.clearShifts();
   }
 }
