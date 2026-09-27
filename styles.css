@@ -498,6 +498,36 @@ body.spaces-switching
   z-index: 1;
 }
 
+/* The other indicator: a slot the rows have opened, rather than a rule drawn
+   between them. The SAME element as the line above wears this instead, because
+   the indicator is created once at `bind` and never inserted or removed during
+   a drag.
+
+   The fill is the theme's accent mixed down to a wash, so a theme that
+   restyles `--interactive-accent` restyles this too. The flat declaration
+   comes first as the fallback for a renderer without `color-mix`, which would
+   otherwise drop the rule and draw an invisible box.
+
+   No `margin-top`: the line above pulls itself up by half its 2px so it
+   straddles the boundary, and a box sits below the boundary rather than
+   across it. */
+.spaces-drop-box {
+  position: absolute;
+  background-color: var(--background-modifier-hover);
+  background-color: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+  border-radius: var(--radius-s);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* On the container only while a gap is open, so rows are not carrying a
+   transition for the rest of their life. The transform itself is written
+   inline per row, which is also how Obsidian animates its own ribbon reorder:
+   no selector in `app.css` carries a transform for it. */
+.nav-files-container.spaces-gap-drag [data-path] {
+  transition: transform 100ms ease;
+}
+
 /* §9.7: the icon picker. A small popover anchored above the switcher strip,
    NOT a centred modal — see IconPickerPopover's header for why. On body with
    position:fixed, because the sidebar clips its own overflow and a popover

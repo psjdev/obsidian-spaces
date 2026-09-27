@@ -146,6 +146,20 @@ export const CLS_SWITCHING = "spaces-switching";
 export const CLS_DROP_LINE = "spaces-drop-line";
 
 /**
+ * The other drop indicator: a tinted box in a gap the rows open, which is what
+ * Obsidian's ribbon draws when you reorder an icon. The same ELEMENT as
+ * `CLS_DROP_LINE` wears this instead, because the indicator is created once at
+ * `bind` and swapping a class is not a DOM mutation the drag can notice.
+ */
+export const CLS_DROP_BOX = "spaces-drop-box";
+
+/**
+ * On the container while a gap is open. Carries the transition for the rows,
+ * so a transition is not written inline onto every row on every frame.
+ */
+export const CLS_GAP_DRAG = "spaces-gap-drag";
+
+/**
  * The insertion line for reordering SPACES, vertical, drawn inside
  * `.spaces-switcher-rail`.
  *

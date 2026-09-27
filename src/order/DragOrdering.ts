@@ -1,4 +1,6 @@
-import { CLS_DROP_LINE, SEL } from "../explorer/selectors";
+import { CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG, SEL } from "../explorer/selectors";
+import { gapLayout, type GapRow } from "./gapLayout";
+import type { DropIndicatorStyle } from "../types";
 import { computeDrop, intentFor, movesIntoOwnSubtree, type DropEdge } from "./dropIntent";
 
 /**
@@ -57,6 +59,12 @@ export interface DragOrderingDeps {
   moveInto(paths: string[], targetFolder: string, edge: DropEdge, targetPath: string): Promise<void>;
   enabled(): boolean;
   /**
+   * Which indicator to draw, read per frame rather than captured. The setting
+   * can change while a pane is bound, and a captured value would need the
+   * explorer reloaded to take effect.
+   */
+  indicatorStyle(): DropIndicatorStyle;
+  /**
    * Called once per dragstart that `enabled()` refuses. The controller
    * says nothing itself — whether a blocked drag is worth explaining depends
    * on WHY it is blocked, and only the caller knows that.
@@ -75,7 +83,9 @@ export interface DragOrderingDeps {
 export class DragOrdering {
   private container: HTMLElement | null = null;
   private doc: Document | null = null;
-  private line: HTMLElement | null = null;
+  private indicator: HTMLElement | null = null;
+  /** Rows currently carrying a transform, so they can all be put back. */
+  private shifted: HTMLElement[] = [];
   private dragged: string[] = [];
   /**
    * Whether `dragged` may be only part of the user's selection, because
@@ -97,7 +107,7 @@ export class DragOrdering {
     // the last rebind. Listeners are therefore always attached; a blocked
     // `dragstart` never populates `this.dragged`, and both handlers bail on it.
     this.container = container;
-    this.ensureLine(container);
+    this.ensureIndicator(container);
     this.doc = container.ownerDocument;
     // dragstart originates on a row, so the container is the right scope.
     container.addEventListener("dragstart", this.onDragStart, true);
@@ -113,14 +123,18 @@ export class DragOrdering {
   unbind(): void {
     const c = this.container;
     if (!c) return;
+    // Before anything else, and before `this.container` is dropped below:
+    // `clearShifts` needs it to take the gap class off, and a plugin disabled
+    // mid-drag must not leave the pane displaced.
+    this.clearShifts();
     c.removeEventListener("dragstart", this.onDragStart, true);
     this.doc?.removeEventListener("dragover", this.onDragOver, false);
     this.doc?.removeEventListener("drop", this.onDrop, true);
     this.doc?.removeEventListener("dragend", this.onDragEnd, true);
     this.doc = null;
     // The element itself goes, not just its visibility.
-    this.line?.remove();
-    this.line = null;
+    this.indicator?.remove();
+    this.indicator = null;
     this.dragged = [];
     this.draggedTruncated = false;
     this.container = null;
@@ -131,7 +145,7 @@ export class DragOrdering {
     try {
       fn();
     } catch (e) {
-      this.clearLine();
+      this.clearIndicator();
       if (!this.warned) {
         this.warned = true;
         console.error("Spaces: reordering drag failed; leaving the drag to Obsidian", e);
@@ -344,30 +358,30 @@ export class DragOrdering {
         // The pointer left the tree — over the editor, a tab, or off-window.
         // The line must go with it, which a container-scoped listener could
         // never notice.
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
       // The pointer is over the tree's box, but something else may be
       // drawn there. See `targetIsOurs`.
       if (!this.targetIsOurs(e.target)) {
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
       // No line for a drop that cannot happen: this drop is going to be
       // declined, and promising a position and then refusing it is the
       // silent-partial-move defect wearing a hint.
       if (this.draggedTruncated) {
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
       const row = this.rowAt(e.target, clientY);
       if (!row) {
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
       const info = this.deps.describeRow(row.path);
       if (!info) {
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
       // Geometry from the row's own box, for the same reason `rowAt` exists:
@@ -382,14 +396,14 @@ export class DragOrdering {
       if (intent.kind !== "between") {
         // Let Obsidian have it — this is drop-into-folder, and not stopping
         // propagation is exactly what keeps that working.
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
 
       // No line for a drop that cannot happen: the user must never be offered a
       // target inside the folder being dragged.
       if (this.illegalTarget(this.dragged, info.parent)) {
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
 
@@ -404,7 +418,7 @@ export class DragOrdering {
       // Same-parent only, because that is the only case `computeDrop` describes;
       // a cross-folder drop always changes something by definition.
       if (this.isNoOpReorder(this.dragged, info.parent, row.path, intent.edge)) {
-        this.clearLine();
+        this.clearIndicator();
         return;
       }
 
@@ -413,7 +427,7 @@ export class DragOrdering {
       // with spaces's listeners detached entirely, a dragover over the tree
       // still comes back `defaultPrevented`. So the drop is permitted without us
       // touching the event, and the tint and its label survive.
-      this.showLine(row.el, intent.edge);
+      this.showIndicator(row.el, intent.edge);
     });
 
   /**
@@ -464,7 +478,7 @@ export class DragOrdering {
 
   private readonly onDragEnd = (): void =>
     this.guard(() => {
-      this.clearLine();
+      this.clearIndicator();
       this.dragged = [];
       this.draggedTruncated = false;
       this.sourceEl = null;
@@ -478,7 +492,7 @@ export class DragOrdering {
       this.draggedTruncated = false;
       if (dragged.length === 0) return;
       const clientY = (e as MouseEvent).clientY ?? 0;
-      this.clearLine();
+      this.clearIndicator();
       // A document-wide listener must not touch a drop anywhere but the tree.
       if (!this.pointerInside((e as MouseEvent).clientX ?? 0, clientY)) return;
       // Nor one that landed on a surface stacked over the tree, whose
@@ -593,15 +607,15 @@ export class DragOrdering {
     console.error("Spaces: could not save the new order", err);
   }
 
-  private ensureLine(container: HTMLElement): void {
-    if (this.line) return;
+  private ensureIndicator(container: HTMLElement): void {
+    if (this.indicator) return;
     const el = container.ownerDocument.win.createDiv();
     el.className = CLS_DROP_LINE;
     // Created hidden, and it stays in the DOM for the life of the binding: see
     // the class comment on why inserting it mid-drag caused the flicker.
     el.hidden = true;
     container.appendChild(el);
-    this.line = el;
+    this.indicator = el;
   }
 
   /**
@@ -611,7 +625,7 @@ export class DragOrdering {
    * wrapper contains its entire subtree, so its box runs from the folder row to
    * the bottom of its last descendant; hit-testing and `boundaryY` both depend
    * on this being the row strip and nothing more. It is equally wrong to measure
-   * HORIZONTALLY, in the opposite direction — see `showLine`, which is why that
+   * HORIZONTALLY, in the opposite direction — see `showIndicator`, which is why that
    * one caller does not use this.
    */
   private rowBox(row: HTMLElement): DOMRect {
@@ -660,39 +674,143 @@ export class DragOrdering {
       : (nRect.bottom + rect.top) / 2;
   }
 
-  private showLine(row: HTMLElement, edge: DropEdge): void {
-    const c = this.container;
-    if (!c) return;
-    this.ensureLine(c);
-    if (!this.line) return;
-    // The WRAPPER, not `rowBox`'s `.tree-item-self`, and only for the
-    // horizontal span — `top` comes from `boundaryY` below.
-    //
-    // Measured against 1.13.7: Obsidian indents a row by indenting the
-    // `.tree-item` WRAPPER while stretching `.tree-item-self` back to the pane's
-    // edge (`margin-inline-start: 0`, the indent applied as
-    // `padding-inline-start`) so hover and selection backgrounds run full width.
-    // At depth 0 both boxes read l=12 w=305; at depth 1 the wrapper reads l=29
-    // w=288 while the self is still l=12 w=305, so taking the self produced a
-    // pane-wide line at every depth. The wrapper is also what Obsidian's own
-    // drop highlight paints (`.nav-folder.is-being-dragged-over`), so matching
-    // it makes our line agree with the bubble the user is aiming at.
-    const rowRect = row.getBoundingClientRect();
+  /**
+   * The rows on screen, in document order, measured for `gapLayout`.
+   *
+   * The unit of movement is the row's own strip (`[data-path]`), NOT the
+   * `.tree-item` wrapper. A folder's wrapper contains its whole subtree, so
+   * transforming wrappers would move a folder's children twice: once with the
+   * folder and once on their own. Strips are never nested inside each other.
+   *
+   * Horizontal geometry still comes from the wrapper, which is what carries
+   * the indent. `showIndicator` has always split its measurements this way.
+   */
+  private visibleRows(c: HTMLElement): { el: HTMLElement; row: GapRow }[] {
     const cRect = c.getBoundingClientRect();
-    // The container is the scroller and is already `position: relative`
-    // (measured), so an absolute child is positioned against its padding box and
-    // scrolls with the content — hence the scroll terms. Rounded to a whole
-    // pixel: a 2px line at a fractional offset straddles two device rows and
-    // renders at half intensity, the dim "thin" state in the report.
-    const top = Math.round(this.boundaryY(row, edge) - cRect.top + c.scrollTop);
-    this.line.style.top = `${top}px`;
-    this.line.style.left = `${Math.round(rowRect.left - cRect.left + c.scrollLeft)}px`;
-    this.line.style.width = `${Math.round(rowRect.width)}px`;
-    this.line.hidden = false;
+    const out: { el: HTMLElement; row: GapRow }[] = [];
+    for (const strip of Array.from(c.querySelectorAll(SEL.titleWithPath))) {
+      if (!strip.instanceOf(HTMLElement)) continue;
+      const wrapper = strip.closest(SEL.rowWrapper);
+      // `closest` answers null at the top of the tree, and `instanceOf` is a
+      // method on the node, so the null has to go first.
+      if (!wrapper || !wrapper.instanceOf(HTMLElement)) continue;
+      const sRect = strip.getBoundingClientRect();
+      // A hidden row measures zero. `ExplorerAdapter` hides filtered rows, and
+      // a zero-height row must contribute no height and take no transform, or
+      // the gap opens in the wrong place in a filtered space.
+      if (!(sRect.height > 0)) continue;
+      const wRect = wrapper.getBoundingClientRect();
+      out.push({
+        el: strip,
+        row: {
+          top: sRect.top - cRect.top + c.scrollTop,
+          height: sRect.height,
+          left: Math.round(wRect.left - cRect.left + c.scrollLeft),
+          width: Math.round(wRect.width),
+        },
+      });
+    }
+    return out;
   }
 
-  /** Hides, never removes — removal during a drag is what caused the flicker. */
-  private clearLine(): void {
-    if (this.line) this.line.hidden = true;
+  private showIndicator(row: HTMLElement, edge: DropEdge): void {
+    const c = this.container;
+    if (!c) return;
+    this.ensureIndicator(c);
+    const el = this.indicator;
+    if (!el) return;
+    const cRect = c.getBoundingClientRect();
+    // The container is the scroller and is already `position: relative`
+    // (measured), so an absolute child is positioned against its padding box
+    // and scrolls with the content, hence the scroll terms. Rounded to a whole
+    // pixel: a 2px line at a fractional offset straddles two device rows and
+    // renders at half intensity, the dim "thin" state in the report.
+    const boundaryTop = Math.round(this.boundaryY(row, edge) - cRect.top + c.scrollTop);
+
+    if (this.deps.indicatorStyle() === "line") {
+      // The setting can change mid-drag, so a gap left open by a previous
+      // frame has to close rather than sitting there under a line.
+      this.clearShifts();
+      el.className = CLS_DROP_LINE;
+      // The WRAPPER, not `rowBox`'s `.tree-item-self`, and only for the
+      // horizontal span. `top` comes from `boundaryY` above.
+      //
+      // Measured against 1.13.7: Obsidian indents a row by indenting the
+      // `.tree-item` WRAPPER while stretching `.tree-item-self` back to the
+      // pane's edge (`margin-inline-start: 0`, the indent applied as
+      // `padding-inline-start`) so hover and selection backgrounds run full
+      // width. At depth 0 both boxes read l=12 w=305; at depth 1 the wrapper
+      // reads l=29 w=288 while the self is still l=12 w=305, so taking the
+      // self produced a pane-wide line at every depth. The wrapper is also
+      // what Obsidian's own drop highlight paints
+      // (`.nav-folder.is-being-dragged-over`), so matching it makes our line
+      // agree with the bubble the user is aiming at.
+      const rowRect = row.getBoundingClientRect();
+      el.style.top = boundaryTop + "px";
+      el.style.left = Math.round(rowRect.left - cRect.left + c.scrollLeft) + "px";
+      el.style.width = Math.round(rowRect.width) + "px";
+      // The line takes its 2px from the stylesheet. A height left over from a
+      // box drawn a frame ago would out-specify it. Removed rather than set to
+      // an empty string, which `no-static-styles-assignment` reads as a static
+      // write and which the rest of this codebase already avoids the same way.
+      el.style.removeProperty("height");
+      el.hidden = false;
+      return;
+    }
+
+    const rows = this.visibleRows(c);
+    const strip = row.querySelector(SEL.titleWithPath);
+    const targetIndex = rows.findIndex((r) => r.el === strip);
+    const layout = gapLayout({
+      rows: rows.map((r) => r.row),
+      targetIndex,
+      edge,
+      boundaryTop,
+    });
+    // No layout means no honest way to draw the gap, so draw nothing at all
+    // rather than a box describing a position the drop will not use.
+    if (!layout) {
+      this.clearIndicator();
+      return;
+    }
+
+    // Written in full every time, not as a diff against the last frame. A row
+    // that `infinityScroll` rendered into view a moment ago carries no
+    // transform, and rewriting the whole set is what puts one on it.
+    // Idempotent beats clever when the DOM is not ours.
+    c.classList.add(CLS_GAP_DRAG);
+    for (let i = 0; i < rows.length; i++) {
+      const shift = layout.shift[i];
+      if (shift) rows[i].el.style.transform = `translateY(${shift}px)`;
+      else rows[i].el.style.removeProperty("transform");
+    }
+    this.shifted = rows.map((r) => r.el);
+
+    el.className = CLS_DROP_BOX;
+    el.style.top = layout.box.top + "px";
+    el.style.left = layout.box.left + "px";
+    el.style.width = layout.box.width + "px";
+    el.style.height = layout.box.height + "px";
+    el.hidden = false;
+  }
+
+  /**
+   * Puts every displaced row back.
+   *
+   * Separate from hiding the indicator because the two failures are not
+   * equally bad. An indicator left showing is a stale hint that the next frame
+   * corrects. A transform left behind is a tree sitting permanently out of
+   * position, which survives the drag and reads as corruption.
+   */
+  private clearShifts(): void {
+    for (const el of this.shifted) el.style.removeProperty("transform");
+    this.shifted = [];
+    this.container?.classList.remove(CLS_GAP_DRAG);
+  }
+
+  /** Hides, never removes: removal during a drag is what caused the flicker. */
+  private clearIndicator(): void {
+    if (this.indicator) this.indicator.hidden = true;
+    this.clearShifts();
   }
 }

@@ -133,6 +133,7 @@ describe("DragOrdering", () => {
       writeOrder: writeOrder as unknown as DragOrderingDeps["writeOrder"],
       moveInto: moveInto as unknown as DragOrderingDeps["moveInto"],
       enabled: () => enabled,
+      indicatorStyle: () => "line" as const,
     };
   });
 
@@ -530,6 +531,7 @@ describe("DragOrdering: a folder may not be dropped inside itself (spec 20.4)", 
       writeOrder: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["writeOrder"],
       moveInto: moveInto as unknown as DragOrderingDeps["moveInto"],
       enabled: () => true,
+      indicatorStyle: () => "line" as const,
     };
     const d = new DragOrdering(deps);
     d.bind(tree.container);
@@ -613,6 +615,7 @@ describe("DragOrdering: no line for a no-op position (spec 20.4)", () => {
       writeOrder: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["writeOrder"],
       moveInto: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["moveInto"],
       enabled: () => true,
+      indicatorStyle: () => "line" as const,
     };
     const d = new DragOrdering(deps);
     d.bind(tree.container);
@@ -653,6 +656,7 @@ describe("DragOrdering: a blocked drag reports itself once (spec 22.5)", () => {
       writeOrder: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["writeOrder"],
       moveInto: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["moveInto"],
       enabled: () => enabled,
+      indicatorStyle: () => "line" as const,
       onBlockedDrag,
     };
     const d = new DragOrdering(deps);
@@ -746,6 +750,7 @@ describe("DragOrdering — a selection that may extend past the render window", 
       writeOrder: writeOrder as unknown as DragOrderingDeps["writeOrder"],
       moveInto: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["moveInto"],
       enabled: () => true,
+      indicatorStyle: () => "line" as const,
       onSelectionOutsideWindow,
     };
     const d = new DragOrdering(deps);
@@ -864,6 +869,7 @@ describe("DragOrdering — a drop on a surface covering the tree", () => {
       writeOrder: writeOrder as unknown as DragOrderingDeps["writeOrder"],
       moveInto: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["moveInto"],
       enabled: () => true,
+      indicatorStyle: () => "line" as const,
     };
     const d = new DragOrdering(deps);
     d.bind(tree.container);
