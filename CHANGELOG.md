@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0 — 2026-09-27
+
+Dragging a note or folder in the file pane looks different. The rows now open
+a gap where the item will land and a tinted box fills it, instead of a thin
+line appearing at the boundary. The gap shows you the shape of the result
+before you let go.
+
+If you preferred the line, it is still there. Settings → Appearance → **Drag
+indicator** → **Line**.
+
+The box takes its tint from your theme's accent color, so a theme that
+restyles that restyles this.
+
 ## 0.6.0 — 2026-09-24
 
 Spaces now takes its colors from your theme instead of setting its own.
