@@ -7,6 +7,7 @@ import {
   type SpacesDefinitions,
   type StripPlacement,
   type ActiveSpaceStyle,
+  type DropIndicatorStyle,
 } from "../types";
 
 export type ValidationResult =
@@ -15,6 +16,7 @@ export type ValidationResult =
 
 const COLOR = /^#[0-9a-f]{6}$/i;
 const STRIP_PLACEMENTS = new Set(["bottom", "top", "left", "right"]);
+const DROP_INDICATOR_STYLES = new Set(["box", "line"]);
 /**
  * Each stored value and the style it means. `box` and `bold` were the names
  * up to 0.6.0: `box` drew the theme's shading and nothing else by then, which
@@ -276,6 +278,13 @@ export function validateDefinitions(raw: unknown): ValidationResult {
           (typeof st.activeSpaceStyle === "string"
             ? ACTIVE_SPACE_STYLES.get(st.activeSpaceStyle)
             : undefined) ?? "shaded",
+        // Degrades rather than rejects, like the two above. A wrong indicator
+        // is a cosmetic complaint and must never cost someone their spaces.
+        dropIndicatorStyle:
+          typeof st.dropIndicatorStyle === "string" &&
+          DROP_INDICATOR_STYLES.has(st.dropIndicatorStyle)
+            ? (st.dropIndicatorStyle as DropIndicatorStyle)
+            : "box",
         // Defaults to FALSE, so absent and non-boolean collapse to the
         // same answer and no `undefined` branch is needed. Strict for the same
         // reason as the keys above — `pinAllSpace: 1` must not read as true.

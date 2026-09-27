@@ -92,6 +92,34 @@ describe("the theme icon color control", () => {
   });
 });
 
+describe("the drop indicator control", () => {
+  it("is a dropdown on the Appearance page", () => {
+    const control = flatten(page("Appearance").items).find(
+      (i) => i.control?.key === "dropIndicatorStyle"
+    )?.control;
+    expect(control?.type).toBe("dropdown");
+    expect(control?.options).toEqual({ box: "Box", line: "Line" });
+  });
+
+  it("says what each choice draws", () => {
+    // Someone reading the settings page has not seen either one yet, so the
+    // description has to describe the drawing rather than name it.
+    const item = flatten(page("Appearance").items).find(
+      (i) => i.control?.key === "dropIndicatorStyle"
+    );
+    expect(item?.desc).toMatch(/gap/i);
+    expect(item?.desc).toMatch(/line/i);
+  });
+
+  it("is not on any other page", () => {
+    for (const name of ["Preferences", "Spaces"]) {
+      expect(
+        flatten(page(name).items).some((i) => i.control?.key === "dropIndicatorStyle")
+      ).toBe(false);
+    }
+  });
+});
+
 describe("the active space style control", () => {
   it("is a dropdown on the Appearance page offering all three looks", () => {
     const control = flatten(page("Appearance").items).find(

@@ -55,6 +55,15 @@ export type StripPlacement = "bottom" | "top" | "left" | "right";
  */
 export type ActiveSpaceStyle = "shaded" | "boxed" | "bolded";
 
+/**
+ * How the file pane marks where a dragged row will land. `box` opens a gap
+ * between the rows and fills it, which is what Obsidian's ribbon does when you
+ * reorder an icon. `line` draws a 2px rule at the boundary and moves nothing,
+ * which is what Obsidian's own `.drop-indicator` does and what this plugin
+ * drew before 0.7.0.
+ */
+export type DropIndicatorStyle = "box" | "line";
+
 interface SpacesSettings {
   globalIgnore: string[];
   /**
@@ -129,6 +138,8 @@ interface SpacesSettings {
   stripPlacement: StripPlacement;
   /** How the active space is marked. See `ActiveSpaceStyle`. */
   activeSpaceStyle: ActiveSpaceStyle;
+  /** How a drag's destination is drawn. See `DropIndicatorStyle`. */
+  dropIndicatorStyle: DropIndicatorStyle;
 }
 
 /**
@@ -236,6 +247,11 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     customColors: [],
     stripPlacement: "bottom",
     activeSpaceStyle: "shaded",
+    // `box` even though it changes how an existing install looks on upgrade,
+    // which the neighbouring defaults deliberately avoid doing. The gap is the
+    // better answer to "where does this land" and the line remains one click
+    // away, so the upgrade is worth the surprise.
+    dropIndicatorStyle: "box",
   },
   spaces: [],
 };
