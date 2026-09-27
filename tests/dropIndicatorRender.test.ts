@@ -47,9 +47,20 @@ function makeTree() {
     item.getBoundingClientRect = () =>
       ({ top, bottom: top + ROW_H, height: ROW_H, left: indent, right: 100,
          width: 100 - indent, x: indent, y: top }) as DOMRect;
-    self.getBoundingClientRect = () =>
-      ({ top, bottom: top + SELF_H, height: SELF_H, left: 0, right: 100,
-         width: 100, x: 0, y: top }) as DOMRect;
+    // The strip's rect FOLLOWS ITS OWN TRANSFORM, because a real one does.
+    // A CSS transform changes what `getBoundingClientRect` returns and what
+    // the browser hit-tests, so a fixture whose rects ignore it cannot see the
+    // defect where frame N+1 measures the rows frame N displaced. The first
+    // version of this file stubbed a constant `top` and every assertion in it
+    // agreed with an implementation that resolved a different drop target on
+    // the second frame.
+    self.getBoundingClientRect = () => {
+      const m = /translateY\((-?[\d.]+)px\)/.exec(self.style.transform || "");
+      const shift = m ? parseFloat(m[1]) : 0;
+      const t = top + shift;
+      return { top: t, bottom: t + SELF_H, height: SELF_H, left: 0, right: 100,
+               width: 100, x: 0, y: t } as DOMRect;
+    };
     rows[path] = item;
     return item;
   }
@@ -71,11 +82,19 @@ function transforms(): string[] {
   ).map((el) => el.style.transform);
 }
 
+/**
+ * The indicator, only while it is actually showing.
+ *
+ * `:not([hidden])` is load-bearing. `clearIndicator` hides the element and
+ * leaves its inline styles alone, so a helper that matched a hidden one let an
+ * assertion read coordinates from the frame before and pass against an
+ * implementation that had just cleared the indicator entirely.
+ */
 function indicator(): HTMLElement | null {
-  const el = document.querySelector<HTMLElement>(
-    ".nav-files-container > ." + CLS_DROP_BOX + ", .nav-files-container > ." + CLS_DROP_LINE
+  return document.querySelector<HTMLElement>(
+    ".nav-files-container > ." + CLS_DROP_BOX + ":not([hidden])" +
+      ", .nav-files-container > ." + CLS_DROP_LINE + ":not([hidden])"
   );
-  return el;
 }
 
 describe("what a drag draws", () => {
@@ -232,6 +251,66 @@ describe("what a drag draws", () => {
       expect(transforms()).not.toEqual(["", "", ""]);
       fire(tree.rows["G"], "dragover", 58);
       expect(transforms()).toEqual(["", "", ""]);
+    });
+  });
+
+  describe("a pointer that has not moved", () => {
+    /**
+     * The gesture this feature exists for is a pointer held still while the
+     * tree rearranges around it. Every `dragover` that arrives during that
+     * hold must resolve the same drop, or the drop the user gets is decided by
+     * which frame they happened to release on.
+     *
+     * The rows this code displaces are the rows it measures. Reproduced in a
+     * running vault before this test existed: hovering 3px into the first
+     * child of a folder drew the box at `left 29 width 298`, the indented
+     * child, and the very next frame drew it at `left 12 width 314`, which is
+     * the parent folder at root level. The pointer never moved. A drop on the
+     * second frame would have put the note in the vault root instead of in the
+     * folder the user was aiming at.
+     */
+    it("resolves the same indicator on every frame", () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      const first = {
+        top: indicator()?.style.top,
+        left: indicator()?.style.left,
+        width: indicator()?.style.width,
+        height: indicator()?.style.height,
+      };
+
+      expect(first.top).toBeDefined();
+
+      // The same pointer, again. Nothing about the drop has changed.
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      expect(indicator()).not.toBeNull();
+      expect({
+        top: indicator()?.style.top,
+        left: indicator()?.style.left,
+        width: indicator()?.style.width,
+        height: indicator()?.style.height,
+      }).toEqual(first);
+      d.unbind();
+    });
+
+    it("keeps displacing the same rows on every frame", () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      const first = transforms();
+      expect(first).not.toEqual(["", "", ""]);
+
+      // Checked after EVERY frame, not after a batch. The defect alternates:
+      // the gap opens, the rows move out from under the pointer, the next
+      // frame finds nothing there and closes it, the frame after that reopens
+      // it. Comparing only after an even number of frames reads as stable.
+      for (let frame = 2; frame <= 4; frame += 1) {
+        fire(tree.rows["F/a.md"], "dragover", 2);
+        expect(transforms(), `frame ${frame}`).toEqual(first);
+      }
+      d.unbind();
     });
   });
 

@@ -1,6 +1,15 @@
 import { CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG, SEL } from "../explorer/selectors";
 import { gapLayout, type GapRow } from "./gapLayout";
 import type { DropIndicatorStyle } from "../types";
+
+/** The part of a rect the drop rules read. Undisplaced, in viewport space. */
+interface StripRect {
+  top: number;
+  bottom: number;
+  height: number;
+  left: number;
+  width: number;
+}
 import { computeDrop, intentFor, movesIntoOwnSubtree, type DropEdge } from "./dropIntent";
 
 /**
@@ -84,8 +93,37 @@ export class DragOrdering {
   private container: HTMLElement | null = null;
   private doc: Document | null = null;
   private indicator: HTMLElement | null = null;
-  /** Rows currently carrying a transform, so they can all be put back. */
-  private shifted: HTMLElement[] = [];
+  /**
+   * Every strip this drag has ever displaced, and by how much.
+   *
+   * Never pruned while the drag runs, only emptied by `clearShifts`. An
+   * earlier version replaced this wholesale on every frame, which meant a row
+   * that carried a transform and then left the render window was untracked
+   * from that moment and never put back by anything.
+   */
+  private shiftOf = new Map<HTMLElement, number>();
+  /**
+   * Where each strip sits when nothing has displaced it, in CONTAINER
+   * coordinates so scrolling does not invalidate it.
+   *
+   * Every decision reads this instead of the live DOM. A transform changes
+   * what `getBoundingClientRect` returns and what the browser hit-tests, so
+   * measuring live meant each frame resolved the drop from rows the previous
+   * frame had moved. Observed in a running vault: hovering 3px into a folder's
+   * first child drew the box on that child, and the next frame resolved the
+   * PARENT FOLDER at root level with the pointer untouched, so the drop would
+   * have landed in the vault root. It also opened a hole under the pointer,
+   * which made the indicator flicker on and off at the `dragover` rate.
+   *
+   * Subtracting the applied shift from a live measurement is NOT equivalent
+   * and was rejected: the rows animate over 100ms, so a live rect read
+   * mid-transition is only partway there and subtracting the full shift
+   * overshoots by whatever is left of the animation.
+   *
+   * An entry is only ever recorded from a strip carrying no shift, which is
+   * what keeps the stored value honest.
+   */
+  private geo = new Map<HTMLElement, GapRow>();
   private dragged: string[] = [];
   /**
    * Whether `dragged` may be only part of the user's selection, because
@@ -127,6 +165,7 @@ export class DragOrdering {
     // `clearShifts` needs it to take the gap class off, and a plugin disabled
     // mid-drag must not leave the pane displaced.
     this.clearShifts();
+    this.geo.clear();
     c.removeEventListener("dragstart", this.onDragStart, true);
     this.doc?.removeEventListener("dragover", this.onDragOver, false);
     this.doc?.removeEventListener("drop", this.onDrop, true);
@@ -233,8 +272,11 @@ export class DragOrdering {
     let bestDist = Number.POSITIVE_INFINITY;
     for (const titled of Array.from(c.querySelectorAll(SEL.titleWithPath))) {
       if (!titled.instanceOf(HTMLElement)) continue;
-      const r = titled.getBoundingClientRect();
-      if (r.height <= 0) continue;
+      // The SNAPSHOT, never the live rect. A displaced row paints somewhere
+      // its drop meaning did not move to, and hit-testing where it paints is
+      // what let the gap open a hole under the pointer and flicker.
+      const r = this.stableRect(titled);
+      if (!r || r.height <= 0) continue;
       const path = titled.getAttribute("data-path");
       const el = titled.closest(SEL.rowWrapper);
       if (!path || !(el instanceof HTMLElement)) continue;
@@ -262,6 +304,12 @@ export class DragOrdering {
       }
       // Deliberately no preventDefault and no stopPropagation: Obsidian owns
       // the drag, we only observe what is being dragged.
+      // The first snapshot of the drag. `rowAt` answers from it, so without
+      // this the gesture never resolves a row and never registers at all.
+      // A fresh drag measures the tree as it is now, never as a previous drag
+      // left it.
+      this.geo.clear();
+      this.syncGeometry();
       const row = this.rowAt(e.target, (e as MouseEvent).clientY ?? 0);
       if (!row) {
         this.dragged = [];
@@ -368,6 +416,10 @@ export class DragOrdering {
   private readonly onDragOver = (e: Event): void =>
     this.guard(() => {
       if (this.dragged.length === 0) return;
+      // Before anything is decided: a row the explorer rendered into view
+      // since the last frame has to be measured while it still carries no
+      // transform of ours.
+      this.syncGeometry();
       const clientY = (e as MouseEvent).clientY ?? 0;
       if (!this.pointerInside((e as MouseEvent).clientX ?? 0, clientY)) {
         // The pointer left the tree — over the editor, a tab, or off-window.
@@ -501,10 +553,14 @@ export class DragOrdering {
       // listener armed for a drag that is already over.
       this.sourceEl?.removeEventListener("dragend", this.onDragEnd);
       this.sourceEl = null;
+      this.geo.clear();
     });
 
   private readonly onDrop = (e: Event): void =>
     this.guard(() => {
+      // The drop resolves its target the same way the indicator did, from the
+      // same snapshot, so what lands is what was shown.
+      this.syncGeometry();
       const dragged = this.dragged;
       const truncated = this.draggedTruncated;
       this.dragged = [];
@@ -647,9 +703,16 @@ export class DragOrdering {
    * HORIZONTALLY, in the opposite direction — see `showIndicator`, which is why that
    * one caller does not use this.
    */
-  private rowBox(row: HTMLElement): DOMRect {
+  private rowBox(row: HTMLElement): StripRect {
     const box = row.querySelector(SEL.titleWithPath);
-    return (box instanceof HTMLElement ? box : row).getBoundingClientRect();
+    const strip = box instanceof HTMLElement ? box : row;
+    // Undisplaced, for the same reason `rowAt` is. Falling back to the live
+    // rect covers only the case where the strip has no snapshot entry yet,
+    // and such a strip carries no transform either, so the two agree.
+    const stable = strip.instanceOf(HTMLElement) ? this.stableRect(strip) : null;
+    if (stable) return stable;
+    const r = strip.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, height: r.height, left: r.left, width: r.width };
   }
 
   /**
@@ -704,30 +767,60 @@ export class DragOrdering {
    * Horizontal geometry still comes from the wrapper, which is what carries
    * the indent. `showIndicator` has always split its measurements this way.
    */
-  private visibleRows(c: HTMLElement): { el: HTMLElement; row: GapRow }[] {
+  /**
+   * Bring `geo` up to date, then answer from it alone.
+   *
+   * Called at the top of every handler that decides anything, so a row that
+   * the explorer rendered into view a moment ago is measured before it is
+   * asked about. A strip that already carries a shift is skipped rather than
+   * re-measured, because its live rect is displaced and would poison the
+   * entry the rest of the drag depends on.
+   */
+  private syncGeometry(): void {
+    const c = this.container;
+    if (!c) return;
     const cRect = c.getBoundingClientRect();
+    for (const strip of Array.from(c.querySelectorAll(SEL.titleWithPath))) {
+      if (!strip.instanceOf(HTMLElement)) continue;
+      if ((this.shiftOf.get(strip) ?? 0) !== 0) continue;
+      const wrapper = strip.closest(SEL.rowWrapper);
+      if (!wrapper || !wrapper.instanceOf(HTMLElement)) continue;
+      const sRect = strip.getBoundingClientRect();
+      const wRect = wrapper.getBoundingClientRect();
+      this.geo.set(strip, {
+        top: sRect.top - cRect.top + c.scrollTop,
+        height: sRect.height,
+        left: Math.round(wRect.left - cRect.left + c.scrollLeft),
+        width: Math.round(wRect.width),
+      });
+    }
+  }
+
+  /**
+   * A strip's undisplaced box in VIEWPORT coordinates, for comparing against a
+   * pointer's `clientY`. Derived from the container-relative snapshot, so it
+   * is correct at any scroll position and during any animation.
+   */
+  private stableRect(strip: HTMLElement): StripRect | null {
+    const c = this.container;
+    const g = this.geo.get(strip);
+    if (!c || !g) return null;
+    const cRect = c.getBoundingClientRect();
+    const top = g.top + cRect.top - c.scrollTop;
+    return { top, bottom: top + g.height, height: g.height, left: g.left, width: g.width };
+  }
+
+  private visibleRows(c: HTMLElement): { el: HTMLElement; row: GapRow }[] {
     const out: { el: HTMLElement; row: GapRow }[] = [];
     for (const strip of Array.from(c.querySelectorAll(SEL.titleWithPath))) {
       if (!strip.instanceOf(HTMLElement)) continue;
-      const wrapper = strip.closest(SEL.rowWrapper);
-      // `closest` answers null at the top of the tree, and `instanceOf` is a
-      // method on the node, so the null has to go first.
-      if (!wrapper || !wrapper.instanceOf(HTMLElement)) continue;
-      const sRect = strip.getBoundingClientRect();
-      // A hidden row measures zero. `ExplorerAdapter` hides filtered rows, and
-      // a zero-height row must contribute no height and take no transform, or
-      // the gap opens in the wrong place in a filtered space.
-      if (!(sRect.height > 0)) continue;
-      const wRect = wrapper.getBoundingClientRect();
-      out.push({
-        el: strip,
-        row: {
-          top: sRect.top - cRect.top + c.scrollTop,
-          height: sRect.height,
-          left: Math.round(wRect.left - cRect.left + c.scrollLeft),
-          width: Math.round(wRect.width),
-        },
-      });
+      const row = this.geo.get(strip);
+      if (!row) continue;
+      // A row that is not laid out measures zero: collapsed, detached, or
+      // mid-teardown. It contributes no height, takes no transform, and is
+      // not a drop target.
+      if (!(row.height > 0)) continue;
+      out.push({ el: strip, row });
     }
     return out;
   }
@@ -800,10 +893,14 @@ export class DragOrdering {
     c.classList.add(CLS_GAP_DRAG);
     for (let i = 0; i < rows.length; i++) {
       const shift = layout.shift[i];
-      if (shift) rows[i].el.style.transform = `translateY(${shift}px)`;
-      else rows[i].el.style.removeProperty("transform");
+      const el = rows[i].el;
+      if (shift) el.style.transform = `translateY(${shift}px)`;
+      else el.style.removeProperty("transform");
+      // Recorded even when it is zero, so `clearShifts` knows about every row
+      // this drag has touched. Rows that leave the render window keep their
+      // entry and are put back at the end rather than stranded.
+      this.shiftOf.set(el, shift);
     }
-    this.shifted = rows.map((r) => r.el);
 
     el.className = CLS_DROP_BOX;
     el.style.top = layout.box.top + "px";
@@ -822,8 +919,16 @@ export class DragOrdering {
    * position, which survives the drag and reads as corruption.
    */
   private clearShifts(): void {
-    for (const el of this.shifted) el.style.removeProperty("transform");
-    this.shifted = [];
+    // Every strip the drag ever touched, not merely the ones visible now. A
+    // row displaced on one frame and gone from the render window on the next
+    // still has to be put back, or it returns from a scroll still translated.
+    for (const el of this.shiftOf.keys()) el.style.removeProperty("transform");
+    this.shiftOf.clear();
+    // The SNAPSHOT SURVIVES. `clearIndicator` runs on every frame that draws
+    // nothing, and `onDrop` calls it before resolving its target, so clearing
+    // the geometry here left the drop with nothing to resolve against and it
+    // silently declined every time. The snapshot belongs to the drag; it is
+    // emptied when one starts and when one ends.
     this.container?.classList.remove(CLS_GAP_DRAG);
   }
 
