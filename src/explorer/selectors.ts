@@ -43,6 +43,7 @@ export const SEL = {
    * fallback is the correct single-row drag.
    */
   selectedRow: ".is-selected",
+
   /**
    * The sort button specifically, among the buttons above. Unlike the
    * creation-intent arming above, this one must discriminate — matching
@@ -165,6 +166,26 @@ export const CLS_GAP_DRAG = "spaces-gap-drag";
  * out of its way.
  */
 export const CLS_BOX_OPEN = "is-open";
+
+/**
+ * On `document.body` for as long as spaces is claiming the current drag
+ * frame as a reorder.
+ *
+ * `intentFor` carves the top and bottom quarter of a folder row out as
+ * "between, in the parent". Obsidian draws no such bands: it tints the whole
+ * row and captions the drag "Move into <folder>". Measured at 2px into a 25px
+ * folder row, both were on screen at once, and since its tint is 10% accent
+ * under our 22% box the overlap also read as a second, denser box.
+ *
+ * A CLASS, not a strip of Obsidian's own class. Removing
+ * `is-being-dragged-over` does suppress the tint, and was tried: Obsidian
+ * sets it only on a transition, so taking it off behind its back means the
+ * legitimate highlight never returns when the pointer moves back into the
+ * folder's middle. Measured: into gave 1, our band gave 0, back to into gave
+ * 0. Leaving its state alone and neutralising the paint costs nothing and
+ * reverses cleanly.
+ */
+export const CLS_CLAIMS_DROP = "spaces-claims-drop";
 
 /**
  * The insertion line for reordering SPACES, vertical, drawn inside

@@ -14,7 +14,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DragOrdering, type DragOrderingDeps } from "../src/order/DragOrdering";
-import { CLS_BOX_OPEN, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG } from "../src/explorer/selectors";
+import { CLS_BOX_OPEN, CLS_CLAIMS_DROP, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG } from "../src/explorer/selectors";
 import type { DropIndicatorStyle } from "../src/types";
 
 const ROW_H = 24;
@@ -200,6 +200,49 @@ describe("what a drag draws", () => {
     it("puts the gap class on the container", () => {
       dragBBeforeA();
       expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(true);
+    });
+  });
+
+  describe("Obsidian's own into-the-folder highlight", () => {
+    /**
+     * `intentFor` gives a folder row a "before" band at the top and an
+     * "after" band at the bottom, and treats only the middle as Obsidian's
+     * drop-into. Obsidian draws no such bands: it tints the whole row and
+     * captions the drag "Move into folder".
+     *
+     * Measured in a running vault at 2px into a 25px folder row: the box was
+     * drawn above the folder and `is-being-dragged-over` was on the folder at
+     * the same moment. Spaces claims that drop and reorders, so the caption
+     * was describing something that was not going to happen.
+     */
+    it("is taken off when spaces claims the frame as a reorder", () => {
+      const folder = tree.rows["G"];
+      folder.classList.add("is-being-dragged-over");
+      boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      // 2 is inside a's leading band, so this is a "between" and ours.
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      expect(indicator()).not.toBeNull();
+      // Obsidian keeps its class. Spaces marks the body instead, and the
+      // stylesheet hides the tint and the caption for as long as it is set.
+      // Stripping the class was tried and loses the legitimate highlight for
+      // the rest of the drag, because Obsidian only sets it on a transition.
+      expect(folder.classList.contains("is-being-dragged-over")).toBe(true);
+      expect(document.body.classList.contains(CLS_CLAIMS_DROP)).toBe(true);
+    });
+
+    it("is left alone when the drop really is into a folder", () => {
+      // The middle of G, which intentFor calls "into". Obsidian owns that
+      // drop and its highlight is the correct feedback for it.
+      const folder = tree.rows["G"];
+      boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      folder.classList.add("is-being-dragged-over");
+      fire(folder, "dragover", 58);
+      expect(indicator()).toBeNull();
+      expect(folder.classList.contains("is-being-dragged-over")).toBe(true);
+      // Not claiming, so Obsidian's tint and caption show normally.
+      expect(document.body.classList.contains(CLS_CLAIMS_DROP)).toBe(false);
     });
   });
 

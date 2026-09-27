@@ -541,6 +541,29 @@ body.spaces-switching
   transition: transform 100ms ease;
 }
 
+/* While spaces owns the drop, Obsidian's own answer to the same pointer is
+   wrong and has to stop being shown.
+
+   `intentFor` treats the top and bottom quarter of a folder row as "between,
+   in the parent". Obsidian has no bands and reads the whole row as "into this
+   folder", so in those pixels it tints the row and captions the drag "Move
+   into <folder>" while spaces draws an insertion point above or below it. The
+   drop goes to spaces and reorders, so the caption was describing something
+   that would not happen, and its 10% accent tint under our 22% box also read
+   as a second, denser box.
+
+   Neutralised rather than removed. Obsidian sets `is-being-dragged-over` only
+   on a transition, so stripping the class means the real highlight never
+   comes back when the pointer returns to the folder's middle. Leaving its
+   state alone and hiding the paint reverses the moment the body class goes. */
+body.spaces-claims-drop .nav-files-container .is-being-dragged-over {
+  background: transparent;
+  color: inherit;
+}
+body.spaces-claims-drop .drag-ghost-action {
+  display: none;
+}
+
 /* §9.7: the icon picker. A small popover anchored above the switcher strip,
    NOT a centred modal — see IconPickerPopover's header for why. On body with
    position:fixed, because the sidebar clips its own overflow and a popover

@@ -1,4 +1,4 @@
-import { CLS_BOX_OPEN, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG, SEL } from "../explorer/selectors";
+import { CLS_BOX_OPEN, CLS_CLAIMS_DROP, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG, SEL } from "../explorer/selectors";
 import { gapLayout, type GapRow } from "./gapLayout";
 import type { DropIndicatorStyle } from "../types";
 
@@ -168,6 +168,8 @@ export class DragOrdering {
     // mid-drag must not leave the pane displaced.
     this.clearShifts();
     this.geo.clear();
+    // The body is not ours and must not keep a class of ours after unload.
+    this.setClaimingDrop(false);
     c.removeEventListener("dragstart", this.onDragStart, true);
     this.doc?.removeEventListener("dragover", this.onDragOver, false);
     this.doc?.removeEventListener("drop", this.onDrop, true);
@@ -490,6 +492,13 @@ export class DragOrdering {
         this.clearIndicator();
         return;
       }
+
+      // Obsidian's row handler has already run and, for a FOLDER, has tinted
+      // it and captioned the drag "Move into <folder>" whichever part of the
+      // row the pointer is in. This frame is a "between", so that caption
+      // describes a drop that will not happen: spaces claims this one and
+      // reorders. The stylesheet hides both while this is set.
+      this.setClaimingDrop(true);
 
       // Neither preventDefault nor stopPropagation. Obsidian's own handler has
       // already run (bubble phase) and calls preventDefault itself — measured:
@@ -926,6 +935,21 @@ export class DragOrdering {
   }
 
   /**
+   * Marks, on the body, whether spaces owns the drop this frame.
+   *
+   * The stylesheet reads it to neutralise Obsidian's into-the-folder tint and
+   * its "Move into <folder>" caption for exactly the frames where spaces is
+   * drawing its own insertion point instead. Obsidian's own state is left
+   * untouched, so the moment spaces stops claiming, its feedback comes back
+   * by itself.
+   */
+  private setClaimingDrop(on: boolean): void {
+    const body = this.doc?.body;
+    if (!body) return;
+    body.classList.toggle(CLS_CLAIMS_DROP, on);
+  }
+
+  /**
    * Puts every displaced row back.
    *
    * Separate from hiding the indicator because the two failures are not
@@ -954,6 +978,8 @@ export class DragOrdering {
       this.indicator.classList.remove(CLS_BOX_OPEN);
     }
     this.openAt = null;
+    // Obsidian's feedback is correct again the moment spaces stops claiming.
+    this.setClaimingDrop(false);
     this.clearShifts();
   }
 }
