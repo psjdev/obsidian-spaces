@@ -246,6 +246,43 @@ describe("what a drag draws", () => {
     });
   });
 
+  describe("the open gap is sticky", () => {
+    /**
+     * Once the gap opens, the pointer is inside it and the row that used to
+     * be there has slid away. The decision still works from that row's
+     * ORIGINAL slot, whose midpoint now sits inside the gap, so without this
+     * the answer flips from before to after while the pointer has not left
+     * the box it is pointing at. Reported as the box refusing to go below a
+     * row until the pointer moved well past it, and as the box appearing on
+     * top of that row while the two swapped places.
+     */
+    it("keeps its answer while the pointer stays inside the box", () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      const opened = indicator()?.style.top;
+      expect(opened).toBe("0px");
+
+      // 15 is past a's original midpoint of 11, so the old code called this
+      // "after a" and moved the box. It is still inside the gap at 0..22.
+      fire(tree.rows["F/a.md"], "dragover", 15);
+      expect(indicator()?.style.top).toBe(opened);
+      d.unbind();
+    });
+
+    it("lets go once the pointer leaves the box", () => {
+      // Stickiness must not become a trap: past the gap, the answer moves.
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      expect(indicator()?.style.top).toBe("0px");
+
+      fire(tree.rows["G"], "dragover", 58);
+      expect(indicator()?.style.top).not.toBe("0px");
+      d.unbind();
+    });
+  });
+
   describe("the line style", () => {
     beforeEach(() => {
       style = "line";

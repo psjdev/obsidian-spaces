@@ -126,6 +126,8 @@ export class DragOrdering {
   private geo = new Map<HTMLElement, GapRow>();
   /** Where the box currently sits, so its fade replays only when it moves. */
   private openAt: number | null = null;
+  /** Its height, so the pointer can be tested against the open gap. */
+  private openHeight = 0;
   private dragged: string[] = [];
   /**
    * Whether `dragged` may be only part of the user's selection, because
@@ -445,6 +447,17 @@ export class DragOrdering {
         this.clearIndicator();
         return;
       }
+      // The open gap is STICKY. Once it opens, the row that was there has
+      // slid away and the pointer is inside the space it left, but the
+      // decision still works from that row's ORIGINAL slot, whose midpoint is
+      // now inside the gap. Without this the answer flips while the pointer
+      // has not left the box it is pointing at: the box jumps to the far side
+      // of a row, or disappears when that side happens to be a no-op, and the
+      // row animates back through wherever the box just went.
+      //
+      // Leaving the gap is what changes the answer, which is also what the
+      // eye expects of a hole it is pointing into.
+      if (this.pointerInOpenGap(clientY)) return;
       const row = this.rowAt(e.target, clientY);
       if (!row) {
         this.clearIndicator();
@@ -918,6 +931,7 @@ export class DragOrdering {
     // would be work for an animation nobody asked to see again.
     const moved = this.openAt !== layout.box.top;
     this.openAt = layout.box.top;
+    this.openHeight = layout.box.height;
     if (moved) el.classList.remove(CLS_BOX_OPEN);
     el.className = CLS_DROP_BOX;
     el.style.top = layout.box.top + "px";
@@ -943,6 +957,20 @@ export class DragOrdering {
    * untouched, so the moment spaces stops claiming, its feedback comes back
    * by itself.
    */
+  /**
+   * Is the pointer inside the gap that is already open?
+   *
+   * Box style only. The line opens no gap, so there is nothing to be inside
+   * and its behaviour is unchanged.
+   */
+  private pointerInOpenGap(clientY: number): boolean {
+    const c = this.container;
+    if (!c || this.openAt === null || this.openHeight <= 0) return false;
+    if (this.deps.indicatorStyle() !== "box") return false;
+    const top = this.openAt + c.getBoundingClientRect().top - c.scrollTop;
+    return clientY >= top && clientY < top + this.openHeight;
+  }
+
   private setClaimingDrop(on: boolean): void {
     const body = this.doc?.body;
     if (!body) return;
@@ -978,6 +1006,7 @@ export class DragOrdering {
       this.indicator.classList.remove(CLS_BOX_OPEN);
     }
     this.openAt = null;
+    this.openHeight = 0;
     // Obsidian's feedback is correct again the moment spaces stops claiming.
     this.setClaimingDrop(false);
     this.clearShifts();
