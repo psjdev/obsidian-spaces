@@ -268,6 +268,21 @@ export class DragOrdering {
         return;
       }
       this.sourceEl = row.el;
+      // ALSO on the row itself, not only on the document where `bind` put it.
+      // The explorer renders in blocks and drops them as the pane scrolls, so
+      // autoscrolling far enough during a drag destroys the row the drag
+      // started on. Measured in a running vault with a 240-child folder open:
+      // a 3000px scroll mid-drag replaced 48 of the 49 rendered rows and left
+      // `document.contains(sourceRow)` false. The browser still sends
+      // `dragend` to that node, but an event dispatched at a detached node
+      // reaches no listener on the document, so the teardown never ran and the
+      // tree kept every row translated down until the next drag.
+      //
+      // A node runs its OWN listeners whether or not it is still in the
+      // document, which is the whole point of putting one here. `once` so a
+      // row cannot accumulate one per drag, and removed again below for the
+      // ordinary case where the document listener got there first.
+      row.el.addEventListener("dragend", this.onDragEnd, { once: true });
       const collected = this.collectDragged(row);
       this.dragged = collected.paths;
       this.draggedTruncated = collected.truncated;
@@ -481,6 +496,10 @@ export class DragOrdering {
       this.clearIndicator();
       this.dragged = [];
       this.draggedTruncated = false;
+      // Taken off explicitly as well as by `once`: this handler is reached
+      // from the document listener too, and that path leaves the row's own
+      // listener armed for a drag that is already over.
+      this.sourceEl?.removeEventListener("dragend", this.onDragEnd);
       this.sourceEl = null;
     });
 

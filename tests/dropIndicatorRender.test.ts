@@ -235,6 +235,67 @@ describe("what a drag draws", () => {
     });
   });
 
+  describe("a source row the explorer recycled mid-drag", () => {
+    /**
+     * The explorer renders its rows in blocks and drops them as the pane
+     * scrolls, so autoscrolling far enough during a drag destroys the very row
+     * the drag started on. Measured in a running vault with a 240-child folder
+     * open: scrolling 3000px mid-drag replaced 48 of the 49 rendered rows, and
+     * `document.contains(sourceRow)` came back false.
+     *
+     * `dragend` is then dispatched at a node that is no longer in the
+     * document, and an event dispatched at a detached node never reaches a
+     * listener on the document. The teardown simply never ran, and the tree
+     * kept 34 rows translated down until the next drag.
+     */
+    it("still clears the transforms when dragend reaches only the detached row", () => {
+      const d = dragBBeforeA();
+      expect(transforms()).not.toEqual(["", "", ""]);
+
+      const src = tree.rows["F/b.md"];
+      const strip = src.querySelector<HTMLElement>("[data-path]");
+      if (!strip) throw new Error("fixture has no strip on b");
+      // What `infinityScroll` does to a row that scrolls out of its block.
+      src.remove();
+      expect(document.contains(strip)).toBe(false);
+
+      // Dispatched AT the detached row, which is where the browser sends it.
+      // Nothing propagates to the document from here.
+      strip.dispatchEvent(new MouseEvent("dragend", { bubbles: true, cancelable: true }));
+
+      expect(transforms()).toEqual(["", ""]);
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+      d.unbind();
+    });
+
+    it("does not leave a listener behind on a drag that ended normally", () => {
+      // The per-row listener is the fix, so it must not accumulate one row per
+      // drag on a tree the plugin does not own.
+      const d = boundDrag();
+      const src = tree.rows["F/b.md"];
+      const strip = src.querySelector<HTMLElement>("[data-path]");
+      if (!strip) throw new Error("fixture has no strip on b");
+      let ends = 0;
+      strip.addEventListener("dragend", () => {
+        ends += 1;
+      });
+
+      fire(src, "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(transforms()).toEqual(["", "", ""]);
+
+      // A second drag on the same row, ended the same way. If the first
+      // listener were still attached the teardown would run twice per event.
+      fire(src, "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      strip.dispatchEvent(new MouseEvent("dragend", { bubbles: true }));
+      expect(ends).toBe(1);
+      expect(transforms()).toEqual(["", "", ""]);
+      d.unbind();
+    });
+  });
+
   describe("rows that are not laid out", () => {
     it("gives a hidden row no transform", () => {
       // `ExplorerAdapter` hides filtered rows. A zero-height row must take no
