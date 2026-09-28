@@ -457,7 +457,14 @@ export class DragOrdering {
       //
       // Leaving the gap is what changes the answer, which is also what the
       // eye expects of a hole it is pointing into.
-      if (this.pointerInOpenGap(clientY)) return;
+      if (this.pointerInOpenGap(clientY)) {
+        // Re-asserted, not assumed. The box being on screen while spaces is
+        // not claiming the drop is the state where Obsidian paints its own
+        // answer underneath ours, and a frame that holds the gap skips the
+        // code further down that would otherwise set this.
+        this.setClaimingDrop(true);
+        return;
+      }
       const row = this.rowAt(e.target, clientY);
       if (!row) {
         this.clearIndicator();

@@ -270,6 +270,22 @@ describe("what a drag draws", () => {
       d.unbind();
     });
 
+    it("keeps claiming the drop while it holds", () => {
+      // The box being visible and spaces not claiming the drop is the state
+      // where Obsidian paints its own answer underneath ours: two tints, and
+      // a caption for a move that will not happen. A frame that holds the gap
+      // has to re-assert the claim, not just skip the work.
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      document.body.classList.remove(CLS_CLAIMS_DROP);
+
+      fire(tree.rows["F/a.md"], "dragover", 15);
+      expect(indicator()).not.toBeNull();
+      expect(document.body.classList.contains(CLS_CLAIMS_DROP)).toBe(true);
+      d.unbind();
+    });
+
     it("lets go once the pointer leaves the box", () => {
       // Stickiness must not become a trap: past the gap, the answer moves.
       const d = boundDrag();
