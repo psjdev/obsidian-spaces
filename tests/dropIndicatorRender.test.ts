@@ -14,7 +14,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DragOrdering, type DragOrderingDeps } from "../src/order/DragOrdering";
-import { CLS_BOX_OPEN, CLS_CLAIMS_DROP, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG } from "../src/explorer/selectors";
+import { CLS_BOX_OPEN, CLS_CLAIMS_DROP, CLS_DROP_BOX, CLS_DROP_LINE, CLS_DROP_PARENT, CLS_GAP_DRAG } from "../src/explorer/selectors";
 import type { DropIndicatorStyle } from "../src/types";
 
 const ROW_H = 24;
@@ -315,6 +315,62 @@ describe("what a drag draws", () => {
 
       fire(tree.rows["G"], "dragover", 58);
       expect(indicator()?.style.top).not.toBe("0px");
+      d.unbind();
+    });
+  });
+
+  describe("the folder a drop will land in", () => {
+    /**
+     * The space below a folder's last child is also the space above the next
+     * row at root level, and the two mean different parents. Measured in a
+     * running vault, the boxes for them are drawn 2px apart and differ only
+     * by a 17px indent, so approaching the boundary from above lands inside
+     * the folder and from below lands beside it, with almost nothing on
+     * screen to tell you which you are about to get.
+     *
+     * Marking the destination folder is the signal that was missing. The
+     * indent stays, and the folder lighting up says where the row is going.
+     */
+    it("marks the folder when the drop lands inside one", () => {
+      const folderRow = tree.addRow("F", true);
+      const folderStrip = folderRow.querySelector<HTMLElement>("[data-path]");
+      if (!folderStrip) throw new Error("fixture built no strip for F");
+
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      // Before F/a.md, whose parent is F.
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      expect(indicator()).not.toBeNull();
+      expect(folderStrip.classList.contains(CLS_DROP_PARENT)).toBe(true);
+      d.unbind();
+    });
+
+    it("leaves it unmarked when the drop lands at the root", () => {
+      const folderRow = tree.addRow("F", true);
+      const folderStrip = folderRow.querySelector<HTMLElement>("[data-path]");
+      if (!folderStrip) throw new Error("fixture built no strip for F");
+
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      expect(folderStrip.classList.contains(CLS_DROP_PARENT)).toBe(true);
+
+      // G sits at the root, so this drop is not going into F any more.
+      fire(tree.rows["G"], "dragover", 68);
+      expect(folderStrip.classList.contains(CLS_DROP_PARENT)).toBe(false);
+      d.unbind();
+    });
+
+    it("takes the mark off when the drag ends", () => {
+      const folderRow = tree.addRow("F", true);
+      const folderStrip = folderRow.querySelector<HTMLElement>("[data-path]");
+      if (!folderStrip) throw new Error("fixture built no strip for F");
+
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(folderStrip.classList.contains(CLS_DROP_PARENT)).toBe(false);
       d.unbind();
     });
   });

@@ -564,6 +564,17 @@ body.spaces-claims-drop .drag-ghost-action {
   display: none;
 }
 
+/* The folder a drop is going to land inside.
+   Deliberately the same wash Obsidian uses for its own drop-into-folder
+   highlight, because it means the same thing to the person dragging. The
+   difference is when it appears: Obsidian shows it whenever the pointer is
+   over the folder's row, and this shows it whenever the ROW WILL LAND IN
+   THAT FOLDER, including when the pointer is well below the folder among its
+   children. */
+.nav-files-container .spaces-drop-parent {
+  background: color-mix(in oklch, var(--interactive-accent) 10%, transparent);
+}
+
 /* §9.7: the icon picker. A small popover anchored above the switcher strip,
    NOT a centred modal — see IconPickerPopover's header for why. On body with
    position:fixed, because the sidebar clips its own overflow and a popover

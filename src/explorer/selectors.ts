@@ -188,6 +188,19 @@ export const CLS_BOX_OPEN = "is-open";
 export const CLS_CLAIMS_DROP = "spaces-claims-drop";
 
 /**
+ * On the row of the folder a drop is going to land inside.
+ *
+ * The space below a folder's last child is also the space above the next row
+ * at root level, and those are different parents. Measured in a running
+ * vault: the two indicators are drawn 2px apart and differ only by a 17px
+ * indent, so the same gesture approached from above lands inside the folder
+ * and from below lands beside it, with almost nothing on screen to say which.
+ *
+ * The indent stays, and this says the rest.
+ */
+export const CLS_DROP_PARENT = "spaces-drop-parent";
+
+/**
  * The insertion line for reordering SPACES, vertical, drawn inside
  * `.spaces-switcher-rail`.
  *

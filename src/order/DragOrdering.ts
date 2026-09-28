@@ -1,4 +1,12 @@
-import { CLS_BOX_OPEN, CLS_CLAIMS_DROP, CLS_DROP_BOX, CLS_DROP_LINE, CLS_GAP_DRAG, SEL } from "../explorer/selectors";
+import {
+  CLS_BOX_OPEN,
+  CLS_CLAIMS_DROP,
+  CLS_DROP_BOX,
+  CLS_DROP_LINE,
+  CLS_DROP_PARENT,
+  CLS_GAP_DRAG,
+  SEL,
+} from "../explorer/selectors";
 import { gapLayout, type GapRow } from "./gapLayout";
 import type { DropIndicatorStyle } from "../types";
 
@@ -137,7 +145,9 @@ export class DragOrdering {
    * that skips the write leaves the row above drawn on top of the first
    * newcomer.
    */
-  private held: { row: HTMLElement; edge: DropEdge } | null = null;
+  private held: { row: HTMLElement; edge: DropEdge; parent: string } | null = null;
+  /** The folder row currently marked as the destination, if any. */
+  private parentMark: HTMLElement | null = null;
   /**
    * Watches for rows arriving while a gap is open, for the length of a drag.
    *
@@ -193,6 +203,7 @@ export class DragOrdering {
     // `clearShifts` needs it to take the gap class off, and a plugin disabled
     // mid-drag must not leave the pane displaced.
     this.clearShifts();
+    this.markDestination("");
     this.geo.clear();
     this.stopWatchingArrivals();
     // The body is not ours and must not keep a class of ours after unload.
@@ -488,6 +499,7 @@ export class DragOrdering {
         // answer underneath ours, and a frame that holds the gap skips the
         // code further down that would otherwise set this.
         this.setClaimingDrop(true);
+        this.markDestination(this.held.parent);
         // REDRAWN with the same answer rather than skipped. `syncGeometry`
         // ran at the top of this handler, so a row that arrived since the
         // last frame is now measurable and this is what gives it the same
@@ -558,7 +570,8 @@ export class DragOrdering {
       // with spaces's listeners detached entirely, a dragover over the tree
       // still comes back `defaultPrevented`. So the drop is permitted without us
       // touching the event, and the tint and its label survive.
-      this.held = { row: row.el, edge: intent.edge };
+      this.held = { row: row.el, edge: intent.edge, parent: info.parent };
+      this.markDestination(info.parent);
       this.watchForArrivals();
       this.showIndicator(row.el, intent.edge);
     });
@@ -1015,6 +1028,26 @@ export class DragOrdering {
    * by itself.
    */
   /**
+   * Light up the folder a drop is going to land inside.
+   *
+   * The vault root is not a folder anyone can see, so an empty parent marks
+   * nothing. Re-marking the row that is already marked is a no-op, which
+   * matters because this runs on every frame of a held gap.
+   */
+  private markDestination(parent: string): void {
+    const c = this.container;
+    if (!c) return;
+    const strip = parent
+      ? c.querySelector(`${SEL.titleWithPath}[data-path="${CSS.escape(parent)}"]`)
+      : null;
+    const next = strip instanceof HTMLElement ? strip : null;
+    if (next === this.parentMark) return;
+    this.parentMark?.classList.remove(CLS_DROP_PARENT);
+    next?.classList.add(CLS_DROP_PARENT);
+    this.parentMark = next;
+  }
+
+  /**
    * Redraw the held answer when the tree gains or loses rows.
    *
    * Only while a gap is open, and disconnected the moment it closes. The
@@ -1090,6 +1123,7 @@ export class DragOrdering {
     this.openAt = null;
     this.openHeight = 0;
     this.held = null;
+    this.markDestination("");
     this.stopWatchingArrivals();
     // Obsidian's feedback is correct again the moment spaces stops claiming.
     this.setClaimingDrop(false);
