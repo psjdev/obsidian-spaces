@@ -7,8 +7,23 @@ import {
   CLS_GAP_DRAG,
   SEL,
 } from "../explorer/selectors";
-import { gapLayout, type GapRow } from "./gapLayout";
+import { gapLayout, isLaidOut, type GapRow } from "./gapLayout";
 import type { DropIndicatorStyle } from "../types";
+
+/**
+ * A row as the snapshot remembers it: what `gapLayout` needs, plus where the
+ * row sits.
+ *
+ * `gapLayout` deliberately has no `top`, because it derives position from the
+ * boundary it is given and the order of the list. The snapshot does need one,
+ * since hit testing a pointer against an undisplaced row is the whole reason
+ * it exists. Keeping them apart is what stops a field nobody reads travelling
+ * into the pure module.
+ */
+interface RowSnapshot extends GapRow {
+  /** Top of the row's strip in CONTAINER coordinates, so scrolling is moot. */
+  top: number;
+}
 
 /** The part of a rect the drop rules read. Undisplaced, in viewport space. */
 interface StripRect {
@@ -131,7 +146,7 @@ export class DragOrdering {
    * An entry is only ever recorded from a strip carrying no shift, which is
    * what keeps the stored value honest.
    */
-  private geo = new Map<HTMLElement, GapRow>();
+  private geo = new Map<HTMLElement, RowSnapshot>();
   /** Where the box currently sits, so its fade replays only when it moves. */
   private openAt: number | null = null;
   /** Its height, so the pointer can be tested against the open gap. */
@@ -150,6 +165,15 @@ export class DragOrdering {
     | null = null;
   /** The folder row currently marked as the destination, if any. */
   private parentMark: HTMLElement | null = null;
+  /**
+   * Pending removal of the row transition after a gap slides shut.
+   *
+   * Held so a drag starting inside the closing animation can cancel it. The
+   * timer's only job is to take the transition off once the rows have
+   * arrived, and doing that to a gap that has since reopened would make the
+   * next one jump.
+   */
+  private closing: ReturnType<typeof setTimeout> | null = null;
   /**
    * Watches for rows arriving while a gap is open, for the length of a drag.
    *
@@ -204,10 +228,12 @@ export class DragOrdering {
     // Before anything else, and before `this.container` is dropped below:
     // `clearShifts` needs it to take the gap class off, and a plugin disabled
     // mid-drag must not leave the pane displaced.
+    this.cancelClosing();
     this.clearShifts();
     this.markDestination("");
     this.geo.clear();
     this.stopWatchingArrivals();
+    this.cancelClosing();
     // The body is not ours and must not keep a class of ours after unload.
     this.setClaimingDrop(false);
     c.removeEventListener("dragstart", this.onDragStart, true);
@@ -626,7 +652,10 @@ export class DragOrdering {
 
   private readonly onDragEnd = (): void =>
     this.guard(() => {
-      this.clearIndicator();
+      // The one path that animates. A drop re-renders the tree into its new
+      // arrangement immediately, so closing a gap against that would animate
+      // rows out of positions they no longer hold.
+      this.clearIndicator(true);
       this.dragged = [];
       this.draggedTruncated = false;
       // Taken off explicitly as well as by `once`: this handler is reached
@@ -887,7 +916,12 @@ export class DragOrdering {
       const wRect = wrapper.getBoundingClientRect();
       this.geo.set(strip, {
         top: sRect.top - cRect.top + c.scrollTop,
-        height: sRect.height,
+        // Rounded like the other three. A real row is not a whole number of
+        // pixels tall, and the box takes both its height and every row's
+        // shift from this, so leaving it fractional put the box's bottom edge
+        // and every displaced row on a subpixel while its top sat on a whole
+        // one. Rounding keeps the box and the gap exactly the same size.
+        height: Math.round(sRect.height),
         left: Math.round(wRect.left - cRect.left + c.scrollLeft),
         width: Math.round(wRect.width),
       });
@@ -914,10 +948,8 @@ export class DragOrdering {
       if (!strip.instanceOf(HTMLElement)) continue;
       const row = this.geo.get(strip);
       if (!row) continue;
-      // A row that is not laid out measures zero: collapsed, detached, or
-      // mid-teardown. It contributes no height, takes no transform, and is
-      // not a drop target.
-      if (!(row.height > 0)) continue;
+      // `gapLayout` owns the rule; this only applies it.
+      if (!isLaidOut(row)) continue;
       out.push({ el: strip, row });
     }
     return out;
@@ -999,6 +1031,7 @@ export class DragOrdering {
     // the move instant: with no transition in effect the rows are simply
     // already there when the box arrives.
     const opening = this.openAt === null;
+    this.cancelClosing();
     c.classList.toggle(CLS_GAP_DRAG, opening);
 
     // Written in full every time, not as a diff against the last frame. A row
@@ -1091,6 +1124,13 @@ export class DragOrdering {
     this.arrivals = null;
   }
 
+  /** Abandons a pending close, so a new gap is not stripped of its transition. */
+  private cancelClosing(): void {
+    if (this.closing === null) return;
+    clearTimeout(this.closing);
+    this.closing = null;
+  }
+
   /**
    * Is the pointer inside the gap that is already open?
    *
@@ -1119,10 +1159,31 @@ export class DragOrdering {
    * corrects. A transform left behind is a tree sitting permanently out of
    * position, which survives the drag and reads as corruption.
    */
-  private clearShifts(): void {
+  private clearShifts(animate = false): void {
     // Every strip the drag ever touched, not merely the ones visible now. A
     // row displaced on one frame and gone from the render window on the next
     // still has to be put back, or it returns from a scroll still translated.
+    // Instant unless asked otherwise, and the ORDER is what decides it:
+    // taking the transition off before the transforms means the rows are
+    // already home by the time anything could animate.
+    const c = this.container;
+    // Nothing displaced, nothing to slide. A drop tears down instantly and
+    // then asks Obsidian to end its own drag, which comes back here as a
+    // `dragend`; without this that second pass would switch the transition
+    // back on for an animation of no rows.
+    const worthAnimating = animate && this.shiftOf.size > 0;
+    if (worthAnimating && c) {
+      // Put BACK, not assumed to be there. The transition is taken off the
+      // moment the gap stops opening and starts moving, so by the time any
+      // real drag ends it is long gone and a close would jump.
+      c.classList.add(CLS_GAP_DRAG);
+      // Reading a layout property here is what makes the browser treat the
+      // transforms below as a change FROM the current positions rather than
+      // collapsing both into one state and skipping the animation.
+      void c.offsetWidth;
+    } else {
+      c?.classList.remove(CLS_GAP_DRAG);
+    }
     for (const el of this.shiftOf.keys()) el.style.removeProperty("transform");
     this.shiftOf.clear();
     // The SNAPSHOT SURVIVES. `clearIndicator` runs on every frame that draws
@@ -1130,11 +1191,19 @@ export class DragOrdering {
     // the geometry here left the drop with nothing to resolve against and it
     // silently declined every time. The snapshot belongs to the drag; it is
     // emptied when one starts and when one ends.
-    this.container?.classList.remove(CLS_GAP_DRAG);
+    if (worthAnimating && c) {
+      // The rows are travelling back. The transition comes off when they
+      // arrive, a little after the 100ms the stylesheet asks for.
+      this.cancelClosing();
+      this.closing = setTimeout(() => {
+        this.closing = null;
+        this.container?.classList.remove(CLS_GAP_DRAG);
+      }, 140);
+    }
   }
 
   /** Hides, never removes: removal during a drag is what caused the flicker. */
-  private clearIndicator(): void {
+  private clearIndicator(animate = false): void {
     if (this.indicator) {
       this.indicator.hidden = true;
       this.indicator.classList.remove(CLS_BOX_OPEN);
@@ -1146,6 +1215,6 @@ export class DragOrdering {
     this.stopWatchingArrivals();
     // Obsidian's feedback is correct again the moment spaces stops claiming.
     this.setClaimingDrop(false);
-    this.clearShifts();
+    this.clearShifts(animate);
   }
 }

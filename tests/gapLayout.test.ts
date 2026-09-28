@@ -6,14 +6,34 @@
  * subject, next to `dropIntent.ts` which owns the other half of the rules.
  */
 import { describe, expect, it } from "vitest";
-import { gapLayout, type GapRow } from "../src/order/gapLayout";
+import { gapLayout, isLaidOut, type GapRow } from "../src/order/gapLayout";
 
-/** Three rows of 24px, stacked with a 2px gap, indented like a tree. */
+/** Three rows of 24px, indented like a tree. Position comes from the order
+ * they are in and the boundary the caller supplies, so no row carries a top. */
 const ROWS: GapRow[] = [
-  { top: 100, height: 24, left: 12, width: 300 },
-  { top: 126, height: 24, left: 29, width: 283 },
-  { top: 152, height: 24, left: 29, width: 283 },
+  { height: 24, left: 12, width: 300 },
+  { height: 24, left: 29, width: 283 },
+  { height: 24, left: 29, width: 283 },
 ];
+
+describe("which rows count as rows", () => {
+  it("counts a row with height", () => {
+    expect(isLaidOut({ height: 24, left: 12, width: 300 })).toBe(true);
+  });
+
+  it("does not count one that measured zero", () => {
+    // Collapsed, detached, or caught mid-render. Letting it through puts a
+    // zero-height row in the list, and every row after it takes its shift
+    // from the wrong neighbour.
+    expect(isLaidOut({ height: 0, left: 12, width: 300 })).toBe(false);
+  });
+
+  it("does not count a negative height", () => {
+    // Not reachable from a real rect, and cheap to refuse rather than reason
+    // about what a negative shift would do to the rows below.
+    expect(isLaidOut({ height: -1, left: 12, width: 300 })).toBe(false);
+  });
+});
 
 describe("opening a gap for the drop", () => {
   it("moves the target row and everything after it, for a drop before it", () => {
@@ -56,8 +76,8 @@ describe("opening a gap for the drop", () => {
     // Rows are not guaranteed to be a uniform height, and a global constant
     // would misplace the box and every row under it.
     const mixed: GapRow[] = [
-      { top: 0, height: 40, left: 0, width: 100 },
-      { top: 42, height: 24, left: 0, width: 100 },
+      { height: 40, left: 0, width: 100 },
+      { height: 24, left: 0, width: 100 },
     ];
     expect(gapLayout({ rows: mixed, targetIndex: 0, edge: "before", boundaryTop: 0 })?.shift)
       .toEqual([40, 40]);
@@ -85,7 +105,7 @@ describe("opening a gap for the drop", () => {
     // A collapsed or detached row measures zero. Shifting by zero would draw a
     // zero-height box and move nothing, which looks like a broken drag rather
     // than an absent one.
-    const flat: GapRow[] = [{ top: 0, height: 0, left: 0, width: 100 }];
+    const flat: GapRow[] = [{ height: 0, left: 0, width: 100 }];
     expect(gapLayout({ rows: flat, targetIndex: 0, edge: "before", boundaryTop: 0 })).toBeNull();
   });
 });

@@ -411,6 +411,97 @@ describe("what a drag draws", () => {
     });
   });
 
+  describe("the box lands on whole pixels", () => {
+    /**
+     * A real row is not a whole number of pixels tall: measured in a running
+     * vault, 24.9. `top`, `left` and `width` were rounded and `height` was
+     * not, so the box's top edge sat on a pixel and its bottom edge did not,
+     * and every displaced row moved by a fraction.
+     *
+     * Rounding the height as well keeps the box and the gap the same size as
+     * each other, which is what stops a sliver of a row showing through the
+     * space it is supposed to have vacated.
+     */
+    it("rounds the height, and shifts the rows by the same rounded amount", () => {
+      const strip = tree.rows["F/a.md"].querySelector<HTMLElement>("[data-path]");
+      if (!strip) throw new Error("fixture has no strip on a");
+      const base = strip.getBoundingClientRect.bind(strip);
+      // A fractional height, the way a real row measures.
+      strip.getBoundingClientRect = () => {
+        const r = base();
+        return { ...r, height: 22.4, bottom: r.top + 22.4, toJSON: r.toJSON } as DOMRect;
+      };
+
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+
+      expect(indicator()?.style.height).toBe("22px");
+      expect(transforms().filter(Boolean)[0]).toBe("translateY(22px)");
+      d.unbind();
+    });
+  });
+
+  describe("closing the gap", () => {
+    /**
+     * The rows slide apart over 100ms and used to snap shut instantly, so
+     * every drag ended with a jolt.
+     *
+     * A drop is the exception and stays instant: the tree re-renders into its
+     * new arrangement straight away, and animating a close against that would
+     * be animating rows out of positions they no longer hold.
+     */
+    it("slides shut when the drag is abandoned", () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      // A SECOND frame, because one is not what a real drag delivers. The
+      // transition is taken off once the gap stops opening and starts
+      // moving, so a test that ends after the opening frame finds it still
+      // there and proves nothing about a close.
+      fire(tree.rows["F/a.md"], "dragover", 3);
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      // Transforms gone, but the transition still in force so the rows travel
+      // back rather than jumping.
+      expect(transforms()).toEqual(["", "", ""]);
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(true);
+      d.unbind();
+    });
+
+    it("shuts instantly on a drop", () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      fire(tree.rows["F/a.md"], "drop", 2);
+      expect(transforms()).toEqual(["", "", ""]);
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+      d.unbind();
+    });
+
+    it("takes the transition off once the rows have arrived", async () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+
+      await new Promise((r) => setTimeout(r, 200));
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+      d.unbind();
+    });
+
+    it("does not leave the transition on a container it no longer owns", () => {
+      // A plugin disabled mid-drag, or an explorer torn down. The class must
+      // not outlive the binding that put it there.
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      d.unbind();
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+    });
+  });
+
   describe("the line style", () => {
     beforeEach(() => {
       style = "line";
@@ -439,7 +530,10 @@ describe("what a drag draws", () => {
       dragBBeforeA();
       document.dispatchEvent(new Event("dragend", { bubbles: true }));
       expect(transforms()).toEqual(["", "", ""]);
-      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+      // The transition deliberately outlives the transforms here, so the rows
+      // travel back rather than jumping. "closing the gap" covers when it
+      // comes off.
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(true);
     });
 
     it("clears every transform on drop", () => {
@@ -647,7 +741,9 @@ describe("what a drag draws", () => {
       strip.dispatchEvent(new MouseEvent("dragend", { bubbles: true, cancelable: true }));
 
       expect(transforms()).toEqual(["", ""]);
-      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+      // Same as any other abandoned drag: the rows slide back, so the
+      // transition is still in force at this point.
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(true);
       d.unbind();
     });
 
@@ -680,10 +776,14 @@ describe("what a drag draws", () => {
   });
 
   describe("rows that are not laid out", () => {
-    it("gives a hidden row no transform", () => {
-      // `ExplorerAdapter` hides filtered rows. A zero-height row must take no
-      // transform and contribute no height, or the gap opens in the wrong
-      // place in a filtered space.
+    it("gives a row that is not laid out no transform", () => {
+      // A row that is not laid out measures zero: collapsed, detached, or
+      // caught mid-render. It must take no transform and contribute no
+      // height, or the gap opens in the wrong place.
+      //
+      // Filtered rows are NOT this case. Spaces stopped rendering rows it
+      // means to hide in September 2026 (see `visibility/visibleItems.ts`),
+      // so there are no hidden-but-present rows left to guard against.
       const strip = tree.rows["F/b.md"].querySelector<HTMLElement>("[data-path]");
       if (!strip) throw new Error("fixture has no strip on b");
       strip.getBoundingClientRect = () =>

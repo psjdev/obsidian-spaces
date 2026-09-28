@@ -21,9 +21,14 @@ import type { DropEdge } from "./dropIntent";
  * `showIndicator` already split their measurements the same way.
  */
 export interface GapRow {
-  /** Top of the row's own strip, in the caller's coordinate space. */
-  top: number;
-  /** Height of that strip. Zero means not laid out, never flat. */
+  /**
+   * Height of the row's own strip. Zero means not laid out, never flat.
+   *
+   * There is deliberately no `top`. This function is told where the boundary
+   * is and derives everything else from the target's height and the order of
+   * the list, so a top would be a field nobody reads, measured once per row
+   * per frame, that a later change could wrongly come to trust.
+   */
   height: number;
   /** Left of the WRAPPER, which is what carries the indent. */
   left: number;
@@ -53,6 +58,21 @@ export interface GapLayoutResult {
   box: GapRect;
   /** How far each row moves down, indexed like `rows`. Zero means it stays. */
   shift: number[];
+}
+
+/**
+ * Is this row one the gap should account for?
+ *
+ * A row measures zero when it is collapsed, detached, or caught mid-render.
+ * Letting one into the list puts a row of no height between two real ones,
+ * and every row after it takes its shift from the wrong neighbour.
+ *
+ * Here rather than in the caller because it is a rule, and the caller's job
+ * is to measure and write. It cannot filter on its own behalf without owning
+ * a decision, and it cannot be tested there without a DOM.
+ */
+export function isLaidOut(row: GapRow): boolean {
+  return row.height > 0;
 }
 
 /**
