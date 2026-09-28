@@ -356,6 +356,24 @@ export class SpacesSettingTab extends PluginSettingTab {
           },
         },
       },
+      {
+        name: "Drag indicator",
+        desc:
+          "How the file pane shows where a dragged item will land. Box opens " +
+          "a gap between the rows and fills it. Line draws a thin rule at the " +
+          "boundary and moves nothing.",
+        control: {
+          type: "dropdown",
+          key: "dropIndicatorStyle",
+          options: {
+            box: "Box",
+            // One short word each, close to the same length. A native select
+            // sizes to its selected option, so uneven labels make the settings
+            // row jump on every change.
+            line: "Line",
+          },
+        },
+      },
     ];
   }
 

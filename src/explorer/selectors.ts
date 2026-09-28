@@ -43,6 +43,7 @@ export const SEL = {
    * fallback is the correct single-row drag.
    */
   selectedRow: ".is-selected",
+
   /**
    * The sort button specifically, among the buttons above. Unlike the
    * creation-intent arming above, this one must discriminate — matching
@@ -144,6 +145,60 @@ export const CLS_SWITCHING = "spaces-switching";
  * element of our own.
  */
 export const CLS_DROP_LINE = "spaces-drop-line";
+
+/**
+ * The other drop indicator: a tinted box in a gap the rows open, which is what
+ * Obsidian's ribbon draws when you reorder an icon. The same ELEMENT as
+ * `CLS_DROP_LINE` wears this instead, because the indicator is created once at
+ * `bind` and swapping a class is not a DOM mutation the drag can notice.
+ */
+export const CLS_DROP_BOX = "spaces-drop-box";
+
+/**
+ * On the container while a gap is open. Carries the transition for the rows,
+ * so a transition is not written inline onto every row on every frame.
+ */
+export const CLS_GAP_DRAG = "spaces-gap-drag";
+
+/**
+ * On the box once it should be visible. The fade it drives is what keeps the
+ * box from being drawn at full strength on a row that has not finished moving
+ * out of its way.
+ */
+export const CLS_BOX_OPEN = "is-open";
+
+/**
+ * On `document.body` for as long as spaces is claiming the current drag
+ * frame as a reorder.
+ *
+ * `intentFor` carves the top and bottom quarter of a folder row out as
+ * "between, in the parent". Obsidian draws no such bands: it tints the whole
+ * row and captions the drag "Move into <folder>". Measured at 2px into a 25px
+ * folder row, both were on screen at once, and since its tint is 10% accent
+ * under our 22% box the overlap also read as a second, denser box.
+ *
+ * A CLASS, not a strip of Obsidian's own class. Removing
+ * `is-being-dragged-over` does suppress the tint, and was tried: Obsidian
+ * sets it only on a transition, so taking it off behind its back means the
+ * legitimate highlight never returns when the pointer moves back into the
+ * folder's middle. Measured: into gave 1, our band gave 0, back to into gave
+ * 0. Leaving its state alone and neutralising the paint costs nothing and
+ * reverses cleanly.
+ */
+export const CLS_CLAIMS_DROP = "spaces-claims-drop";
+
+/**
+ * On the row of the folder a drop is going to land inside.
+ *
+ * The space below a folder's last child is also the space above the next row
+ * at root level, and those are different parents. Measured in a running
+ * vault: the two indicators are drawn 2px apart and differ only by a 17px
+ * indent, so the same gesture approached from above lands inside the folder
+ * and from below lands beside it, with almost nothing on screen to say which.
+ *
+ * The indent stays, and this says the rest.
+ */
+export const CLS_DROP_PARENT = "spaces-drop-parent";
 
 /**
  * The insertion line for reordering SPACES, vertical, drawn inside

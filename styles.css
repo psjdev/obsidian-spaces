@@ -498,6 +498,99 @@ body.spaces-switching
   z-index: 1;
 }
 
+/* The other indicator: a slot the rows have opened, rather than a rule drawn
+   between them. The SAME element as the line above wears this instead, because
+   the indicator is created once at `bind` and never inserted or removed during
+   a drag.
+
+   The fill is the theme's accent mixed down to a wash, so a theme that
+   restyles `--interactive-accent` restyles this too. The flat declaration
+   comes first as the fallback for a renderer without `color-mix`, which would
+   otherwise drop the rule and draw an invisible box.
+
+   No `margin-top`: the line above pulls itself up by half its 2px so it
+   straddles the boundary, and a box sits below the boundary rather than
+   across it. */
+.spaces-drop-box {
+  position: absolute;
+  background-color: var(--background-modifier-hover);
+  background-color: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+  border-radius: var(--radius-s);
+  pointer-events: none;
+  z-index: 1;
+  /* Arrives as the space does. The rows take 100ms to slide apart, and a box
+     drawn at full strength on the first frame spends that 100ms sitting on top
+     of a row that has not moved yet, which reads as the indicator landing ON
+     an item instead of between two. Measured: sweeping the pointer across the
+     pane, 40 of 45 positions had the box overlapping a painted row while the
+     slide ran, and 0 of 45 with the slide disabled. Fading in over the same
+     duration means it reaches full strength exactly as the gap finishes
+     opening. */
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.spaces-drop-box.is-open {
+  opacity: 1;
+}
+
+/* On the container only while a gap is open, so rows are not carrying a
+   transition for the rest of their life. The transform itself is written
+   inline per row, which is also how Obsidian animates its own ribbon reorder:
+   no selector in `app.css` carries a transform for it. */
+.nav-files-container.spaces-gap-drag [data-path] {
+  transition: transform 100ms ease;
+}
+
+/* While spaces owns the drop, Obsidian's own answer to the same pointer is
+   wrong and has to stop being shown.
+
+   `intentFor` treats the top and bottom quarter of a folder row as "between,
+   in the parent". Obsidian has no bands and reads the whole row as "into this
+   folder", so in those pixels it tints the row and captions the drag "Move
+   into <folder>" while spaces draws an insertion point above or below it. The
+   drop goes to spaces and reorders, so the caption was describing something
+   that would not happen, and its 10% accent tint under our 22% box also read
+   as a second, denser box.
+
+   Neutralised rather than removed. Obsidian sets `is-being-dragged-over` only
+   on a transition, so stripping the class means the real highlight never
+   comes back when the pointer returns to the folder's middle. Leaving its
+   state alone and hiding the paint reverses the moment the body class goes.
+
+   The class sits on the WRAPPER and Obsidian colours a child of it
+   (`.nav-folder.is-being-dragged-over > .nav-folder-title`), so a rule aimed
+   only at the element carrying the class left the folder name highlighted.
+   That read as a second, almost identical folder state: name lit up for a
+   drop going to the root, name lit up AND a box for one going inside.
+
+   The destination mark is excluded. Hiding Obsidian's answer and drawing our
+   own are different jobs, and without the exclusion the first one out-
+   specified the second and erased the only signal saying which folder the row
+   was going into. */
+body.spaces-claims-drop .nav-files-container .is-being-dragged-over:not(.spaces-drop-parent),
+body.spaces-claims-drop
+  .nav-files-container
+  .is-being-dragged-over
+  > .nav-folder-title:not(.spaces-drop-parent),
+body.spaces-claims-drop .nav-files-container .is-being-dragged-over .collapse-icon {
+  background: transparent;
+  color: inherit;
+}
+body.spaces-claims-drop .drag-ghost-action {
+  display: none;
+}
+
+/* The folder a drop is going to land inside.
+   Deliberately the same wash Obsidian uses for its own drop-into-folder
+   highlight, because it means the same thing to the person dragging. The
+   difference is when it appears: Obsidian shows it whenever the pointer is
+   over the folder's row, and this shows it whenever the ROW WILL LAND IN
+   THAT FOLDER, including when the pointer is well below the folder among its
+   children. */
+.nav-files-container .spaces-drop-parent {
+  background: color-mix(in oklch, var(--interactive-accent) 10%, transparent);
+}
+
 /* §9.7: the icon picker. A small popover anchored above the switcher strip,
    NOT a centred modal — see IconPickerPopover's header for why. On body with
    position:fixed, because the sidebar clips its own overflow and a popover

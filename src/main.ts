@@ -2469,6 +2469,7 @@ export default class SpacesPlugin extends Plugin {
           : undefined;
       },
       writeOrder: (folderPath, order) => this.writeOrderFor(folderPath, order),
+      indicatorStyle: () => this.defs.get().settings.dropIndicatorStyle,
       // `DragOrdering` declines the drop on its own — this hook only
       // voices it. Without it the user sees Obsidian complete the move (which
       // is the right outcome: the whole selection travels) while the ordering
