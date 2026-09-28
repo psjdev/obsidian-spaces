@@ -1,17 +1,20 @@
 # Changelog
 
-## 0.7.0 — 2026-09-27
+## 0.7.0 — 2026-09-28
 
-Dragging a note or folder in the file pane looks different. The rows now open
-a gap where the item will land and a tinted box fills it, instead of a thin
-line appearing at the boundary. The gap shows you the shape of the result
-before you let go.
+Dragging a note or folder in the file pane looks different. The rows open a
+gap where the item will land and a tinted box fills it, instead of a thin line
+appearing at the boundary.
 
-If you preferred the line, it is still there. Settings → Appearance → **Drag
-indicator** → **Line**.
+The box sits at the indent of the place it will land, and the folder it will
+land in lights up. Below a folder's last child is also above the next item
+outside the folder, and those go to different places, so the box and the
+folder together tell you which one you are about to get.
 
-The box takes its tint from your theme's accent color, so a theme that
-restyles that restyles this.
+If you preferred the line, it is still there. Settings → Appearance →
+**Drag indicator** → **Line**.
+
+The box takes its tint from your theme's accent color.
 
 ## 0.6.0 — 2026-09-24
 
