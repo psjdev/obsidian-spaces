@@ -145,7 +145,9 @@ export class DragOrdering {
    * that skips the write leaves the row above drawn on top of the first
    * newcomer.
    */
-  private held: { row: HTMLElement; edge: DropEdge; parent: string } | null = null;
+  private held:
+    | { row: HTMLElement; path: string; edge: DropEdge; parent: string }
+    | null = null;
   /** The folder row currently marked as the destination, if any. */
   private parentMark: HTMLElement | null = null;
   /**
@@ -570,7 +572,7 @@ export class DragOrdering {
       // with spaces's listeners detached entirely, a dragover over the tree
       // still comes back `defaultPrevented`. So the drop is permitted without us
       // touching the event, and the tint and its label survive.
-      this.held = { row: row.el, edge: intent.edge, parent: info.parent };
+      this.held = { row: row.el, path: row.path, edge: intent.edge, parent: info.parent };
       this.markDestination(info.parent);
       this.watchForArrivals();
       this.showIndicator(row.el, intent.edge);
@@ -646,23 +648,40 @@ export class DragOrdering {
       this.draggedTruncated = false;
       if (dragged.length === 0) return;
       const clientY = (e as MouseEvent).clientY ?? 0;
+      // What the indicator was pointing at when the button came up, captured
+      // before `clearIndicator` discards it.
+      //
+      // The drop has to honour this rather than resolve the pointer again.
+      // Holding the gap freezes the display on an answer the pointer would no
+      // longer produce, and re-deciding here made the indicator a lie: proven
+      // in a running vault, where it read `left=29px destination=Travel`
+      // while the file landed at the vault root.
+      const shown = this.held?.row.isConnected ? this.held : null;
       this.clearIndicator();
       // A document-wide listener must not touch a drop anywhere but the tree.
       if (!this.pointerInside((e as MouseEvent).clientX ?? 0, clientY)) return;
       // Nor one that landed on a surface stacked over the tree, whose
       // own drop handler the `stopPropagation` below would otherwise cut.
       if (!this.targetIsOurs(e.target)) return;
-      const row = this.rowAt(e.target, clientY);
+      const row = shown ? { el: shown.row, path: shown.path } : this.rowAt(e.target, clientY);
       if (!row) return;
 
       const info = this.deps.describeRow(row.path);
       if (!info) return;
-      const rect = this.rowBox(row.el);
-      const intent = intentFor({
-        offsetY: clientY - rect.top,
-        height: rect.height,
-        isFolder: info.isFolder,
-      });
+      // A shown answer was already decided to be a "between" when it was
+      // drawn, so asking again would only reintroduce the disagreement. The
+      // pointer is consulted only when nothing was on screen to honour.
+      let intent: ReturnType<typeof intentFor>;
+      if (shown) {
+        intent = { kind: "between", edge: shown.edge };
+      } else {
+        const rect = this.rowBox(row.el);
+        intent = intentFor({
+          offsetY: clientY - rect.top,
+          height: rect.height,
+          isFolder: info.isFolder,
+        });
+      }
       // Not our drop: Obsidian's own handler moves the file into the folder.
       if (intent.kind !== "between") return;
 

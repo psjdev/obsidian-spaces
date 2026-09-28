@@ -101,8 +101,12 @@ describe("what a drag draws", () => {
   let deps: DragOrderingDeps;
   let style: DropIndicatorStyle;
   let tree: ReturnType<typeof makeTree>;
+  let writeOrder: ReturnType<typeof vi.fn>;
+  let moveInto: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    writeOrder = vi.fn().mockResolvedValue(undefined);
+    moveInto = vi.fn().mockResolvedValue(undefined);
     style = "box";
     tree = makeTree();
     tree.addRow("F/a.md", false);
@@ -116,8 +120,8 @@ describe("what a drag draws", () => {
       },
       displayedOrder: () => ["F/a.md", "F/b.md"],
       storedOrder: () => undefined,
-      writeOrder: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["writeOrder"],
-      moveInto: vi.fn().mockResolvedValue(undefined) as unknown as DragOrderingDeps["moveInto"],
+      writeOrder: writeOrder as unknown as DragOrderingDeps["writeOrder"],
+      moveInto: moveInto as unknown as DragOrderingDeps["moveInto"],
       enabled: () => true,
       indicatorStyle: () => style,
     };
@@ -371,6 +375,38 @@ describe("what a drag draws", () => {
       fire(tree.rows["F/a.md"], "dragover", 2);
       document.dispatchEvent(new Event("dragend", { bubbles: true }));
       expect(folderStrip.classList.contains(CLS_DROP_PARENT)).toBe(false);
+      d.unbind();
+    });
+  });
+
+  describe("where the drop actually goes", () => {
+    /**
+     * The indicator is a promise. Whatever it is pointing at when the button
+     * comes up is where the row has to land, or the feature is worse than
+     * having no indicator at all.
+     *
+     * Holding the gap broke that. The display froze on the held answer while
+     * the drop went on resolving the pointer from scratch, so the two
+     * disagreed for as long as the pointer sat inside the box. Proven in a
+     * running vault: the indicator read  and
+     * the file landed at the vault root.
+     */
+    it("drops where the indicator says, not where the pointer recomputes", async () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      // Before a: the order becomes b, a.
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      expect(indicator()).not.toBeNull();
+
+      // Still inside the box, but past a's original midpoint. Resolved fresh
+      // this is "after a", which is the order it already has and therefore no
+      // move at all.
+      fire(tree.rows["F/a.md"], "dragover", 15);
+      fire(tree.rows["F/a.md"], "drop", 15);
+      await Promise.resolve();
+
+      expect(writeOrder).toHaveBeenCalledTimes(1);
+      expect(writeOrder.mock.calls[0][1]).toEqual(["F/b.md", "F/a.md"]);
       d.unbind();
     });
   });
