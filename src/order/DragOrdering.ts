@@ -775,7 +775,17 @@ export class DragOrdering {
   private endNativeDrag(): void {
     const el = this.sourceEl;
     this.sourceEl = null;
-    if (!el || !el.isConnected) return;
+    // The DOCUMENT when the source row has gone, rather than nothing at all.
+    //
+    // Moving a row re-renders the tree and replaces the row that was dragged,
+    // which nesting folders in each other does every time. Skipping the send
+    // left Obsidian in a drag that never ended: the folder stayed
+    // highlighted, its floating chip stayed on screen, and the cursor stayed
+    // a grabbing hand. An event dispatched at a detached node reaches no
+    // listener on the document, so it has to be sent somewhere still
+    // attached.
+    const target: EventTarget | null = el?.isConnected ? el : this.doc;
+    if (!target) return;
     // Constructed from the document's own window, and feature-detected: jsdom
     // has `Event` but not always `DragEvent`, and Obsidian's teardown does not
     // read the dataTransfer, so a plain Event is enough where it is missing.
@@ -784,7 +794,7 @@ export class DragOrdering {
       | undefined;
     const Ctor = view?.DragEvent ?? view?.Event;
     if (!Ctor) return;
-    el.dispatchEvent(new Ctor("dragend", { bubbles: true }));
+    target.dispatchEvent(new Ctor("dragend", { bubbles: true }));
   }
 
   /**

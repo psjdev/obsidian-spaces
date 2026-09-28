@@ -502,6 +502,38 @@ describe("what a drag draws", () => {
     });
   });
 
+  describe("telling Obsidian the drag is over", () => {
+    /**
+     * Claiming a drop means Obsidian's own drop handler never runs, and that
+     * handler is what tears its drag down. Spaces has to send the `dragend`
+     * itself, and it was sending it to the source row.
+     *
+     * Moving a row re-renders the tree, which replaces that row. Nesting
+     * folders in each other does it every time. The send was skipped for a
+     * source that had gone, so Obsidian stayed in a drag that never ended:
+     * the folder stayed highlighted, the floating chip stayed on screen, and
+     * the cursor stayed a grabbing hand until something else cleared it.
+     */
+    it("still says so when the source row is gone by the time of the drop", () => {
+      let ended = 0;
+      const count = (): void => {
+        ended += 1;
+      };
+      document.addEventListener("dragend", count, true);
+
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      // What a move does to the row it moved.
+      tree.rows["F/b.md"].remove();
+      fire(tree.rows["F/a.md"], "drop", 2);
+
+      document.removeEventListener("dragend", count, true);
+      expect(ended).toBeGreaterThan(0);
+      d.unbind();
+    });
+  });
+
   describe("the line style", () => {
     beforeEach(() => {
       style = "line";
