@@ -286,6 +286,26 @@ describe("what a drag draws", () => {
       d.unbind();
     });
 
+    it("moves the gap without animating, once one is already open", () => {
+      // Opening the gap animates: the rows slide apart and the box fades in
+      // over them. MOVING it cannot, because the row on the far side of the
+      // new boundary has to travel back through the space the box is about to
+      // occupy, and an animated swap always has a frame where both are in the
+      // same place. Reported as the box appearing on top of a row, and only
+      // reachable after a gap was already open.
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(true);
+
+      // 68 is inside G's trailing band, so this is another "between" at a
+      // different boundary rather than a drop into the folder.
+      fire(tree.rows["G"], "dragover", 68);
+      expect(indicator()).not.toBeNull();
+      expect(tree.container.classList.contains(CLS_GAP_DRAG)).toBe(false);
+      d.unbind();
+    });
+
     it("lets go once the pointer leaves the box", () => {
       // Stickiness must not become a trap: past the gap, the answer moves.
       const d = boundDrag();

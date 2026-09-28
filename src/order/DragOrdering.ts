@@ -917,11 +917,27 @@ export class DragOrdering {
       return;
     }
 
+    // The slide is for OPENING the gap, never for moving it.
+    //
+    // Opening it, the rows part and the box fades in over them, which is the
+    // motion this feature is for. Moving it is a swap: the row on the far
+    // side of the new boundary travels back through the space the box is
+    // about to occupy, and no animation of a swap avoids a frame where both
+    // are in the same place. That frame is what was reported as the box
+    // appearing on top of a row, and it is only reachable once a gap is
+    // already open, which is why dragging over a folder first was needed to
+    // provoke it.
+    //
+    // Taking the class off BEFORE the transforms are written is what makes
+    // the move instant: with no transition in effect the rows are simply
+    // already there when the box arrives.
+    const opening = this.openAt === null;
+    c.classList.toggle(CLS_GAP_DRAG, opening);
+
     // Written in full every time, not as a diff against the last frame. A row
     // that `infinityScroll` rendered into view a moment ago carries no
     // transform, and rewriting the whole set is what puts one on it.
     // Idempotent beats clever when the DOM is not ours.
-    c.classList.add(CLS_GAP_DRAG);
     for (let i = 0; i < rows.length; i++) {
       const shift = layout.shift[i];
       const el = rows[i].el;
@@ -933,20 +949,19 @@ export class DragOrdering {
       this.shiftOf.set(el, shift);
     }
 
-    // Restarted only when the gap actually moves. The fade has to replay for
-    // a new position, and forcing a reflow on every frame of a held pointer
-    // would be work for an animation nobody asked to see again.
-    const moved = this.openAt !== layout.box.top;
+    // The fade covers the rows sliding apart, so it belongs to opening the gap
+    // and not to moving it. A move lands in space the rows have already left,
+    // so the box simply appears there at full strength.
     this.openAt = layout.box.top;
     this.openHeight = layout.box.height;
-    if (moved) el.classList.remove(CLS_BOX_OPEN);
+    if (opening) el.classList.remove(CLS_BOX_OPEN);
     el.className = CLS_DROP_BOX;
     el.style.top = layout.box.top + "px";
     el.style.left = layout.box.left + "px";
     el.style.width = layout.box.width + "px";
     el.style.height = layout.box.height + "px";
     el.hidden = false;
-    if (moved) {
+    if (opening) {
       // Reading a layout property between the two writes is what makes the
       // browser treat them as separate states rather than collapsing them and
       // skipping the transition entirely.
