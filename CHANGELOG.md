@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 — 2026-09-28
+
+Closing a drag now slides the gap shut instead of snapping it.
+
+The drop box lands on whole pixels, so it is exactly the size of the space the
+rows opened for it.
+
 ## 0.7.0 — 2026-09-28
 
 Dragging a note or folder in the file pane looks different. The rows open a
