@@ -128,6 +128,30 @@ export class DragOrdering {
   private openAt: number | null = null;
   /** Its height, so the pointer can be tested against the open gap. */
   private openHeight = 0;
+  /**
+   * The answer the open gap is holding, so a held frame can redraw it.
+   *
+   * Holding the gap has to freeze the DECISION, not the drawing. Rows appear
+   * mid-drag whenever Obsidian expands a folder under the pointer, and they
+   * arrive with no transform while their neighbours are displaced; a frame
+   * that skips the write leaves the row above drawn on top of the first
+   * newcomer.
+   */
+  private held: { row: HTMLElement; edge: DropEdge } | null = null;
+  /**
+   * Watches for rows arriving while a gap is open, for the length of a drag.
+   *
+   * Obsidian expands a folder the pointer rests on, so the tree can gain rows
+   * with no drag frame following. The newcomers have no transform while their
+   * neighbours are displaced, and the row above is drawn on top of the first
+   * of them. Redrawing on the next frame fixes it only if the pointer moves
+   * again, and the whole point of an auto-expand is that it happens while you
+   * hold still.
+   *
+   * Attributes are not observed, so the transforms this redraw writes cannot
+   * feed it back into itself.
+   */
+  private arrivals: MutationObserver | null = null;
   private dragged: string[] = [];
   /**
    * Whether `dragged` may be only part of the user's selection, because
@@ -170,6 +194,7 @@ export class DragOrdering {
     // mid-drag must not leave the pane displaced.
     this.clearShifts();
     this.geo.clear();
+    this.stopWatchingArrivals();
     // The body is not ours and must not keep a class of ours after unload.
     this.setClaimingDrop(false);
     c.removeEventListener("dragstart", this.onDragStart, true);
@@ -457,12 +482,20 @@ export class DragOrdering {
       //
       // Leaving the gap is what changes the answer, which is also what the
       // eye expects of a hole it is pointing into.
-      if (this.pointerInOpenGap(clientY)) {
+      if (this.pointerInOpenGap(clientY) && this.held?.row.isConnected) {
         // Re-asserted, not assumed. The box being on screen while spaces is
         // not claiming the drop is the state where Obsidian paints its own
         // answer underneath ours, and a frame that holds the gap skips the
         // code further down that would otherwise set this.
         this.setClaimingDrop(true);
+        // REDRAWN with the same answer rather than skipped. `syncGeometry`
+        // ran at the top of this handler, so a row that arrived since the
+        // last frame is now measurable and this is what gives it the same
+        // displacement as its neighbours. Measured in a running vault with a
+        // folder expanded under a held gap: without this the folder's title
+        // stayed 24.9px lower than its first child and overlapped it by 23px,
+        // and the next frame did not clear it either.
+        this.showIndicator(this.held.row, this.held.edge);
         return;
       }
       const row = this.rowAt(e.target, clientY);
@@ -525,6 +558,8 @@ export class DragOrdering {
       // with spaces's listeners detached entirely, a dragover over the tree
       // still comes back `defaultPrevented`. So the drop is permitted without us
       // touching the event, and the tint and its label survive.
+      this.held = { row: row.el, edge: intent.edge };
+      this.watchForArrivals();
       this.showIndicator(row.el, intent.edge);
     });
 
@@ -980,6 +1015,31 @@ export class DragOrdering {
    * by itself.
    */
   /**
+   * Redraw the held answer when the tree gains or loses rows.
+   *
+   * Only while a gap is open, and disconnected the moment it closes. The
+   * redraw writes the same answer, so a pointer that has not moved sees no
+   * change beyond the newcomers falling into line.
+   */
+  private watchForArrivals(): void {
+    const c = this.container;
+    if (!c || this.arrivals) return;
+    this.arrivals = new MutationObserver(() => {
+      if (!this.held?.row.isConnected) return;
+      this.guard(() => {
+        this.syncGeometry();
+        if (this.held) this.showIndicator(this.held.row, this.held.edge);
+      });
+    });
+    this.arrivals.observe(c, { childList: true, subtree: true });
+  }
+
+  private stopWatchingArrivals(): void {
+    this.arrivals?.disconnect();
+    this.arrivals = null;
+  }
+
+  /**
    * Is the pointer inside the gap that is already open?
    *
    * Box style only. The line opens no gap, so there is nothing to be inside
@@ -1029,6 +1089,8 @@ export class DragOrdering {
     }
     this.openAt = null;
     this.openHeight = 0;
+    this.held = null;
+    this.stopWatchingArrivals();
     // Obsidian's feedback is correct again the moment spaces stops claiming.
     this.setClaimingDrop(false);
     this.clearShifts();

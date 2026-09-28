@@ -443,6 +443,89 @@ describe("what a drag draws", () => {
     });
   });
 
+  describe("rows that arrive while the gap is held", () => {
+    /**
+     * Obsidian expands a folder you hover during a drag, so rows appear
+     * mid-gesture. They arrive with no transform while everything around them
+     * is displaced, and the row above ends up drawn on top of the first new
+     * one: reported as a folder title squashed into one of its children.
+     *
+     * Reproduced in a running vault, gap held open above the first row and a
+     * folder below it expanded:
+     *   Travel[translateY(24.9px)] x Travel/Lisbon.md[none] overlapping 23px
+     * and it survived the following frame, because holding the gap skipped
+     * the write that would have caught the newcomers. Holding the ANSWER is
+     * the point; holding the drawing was an accident.
+     */
+    it("gives a row that appears mid-drag the same displacement as its neighbours", () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+      const displaced = transforms().filter((t) => t !== "").length;
+      expect(displaced).toBeGreaterThan(0);
+
+      const late = tree.addRow("F/late.md", false);
+      const strip = late.querySelector<HTMLElement>("[data-path]");
+      if (!strip) throw new Error("fixture built no strip");
+      expect(strip.style.transform).toBe("");
+
+      // A frame with the pointer still inside the gap, which is the held path.
+      fire(tree.rows["F/a.md"], "dragover", 3);
+      expect(strip.style.transform).not.toBe("");
+      d.unbind();
+    });
+
+    it("catches them without waiting for the pointer to move", async () => {
+      // A folder expands under a pointer that is holding still, so no further
+      // drag frame arrives to repair the display. Waiting for the next frame
+      // means the overlap sits there for as long as the user keeps still.
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+
+      const late = tree.addRow("F/quiet.md", false);
+      const strip = late.querySelector<HTMLElement>("[data-path]");
+      if (!strip) throw new Error("fixture built no strip");
+
+      // No dragover. Only the DOM changing.
+      await new Promise((r) => setTimeout(r, 0));
+      expect(strip.style.transform).not.toBe("");
+      d.unbind();
+    });
+  });
+
+  describe("a row that drops out of the visible set", () => {
+    /**
+     * Each frame writes transforms for the rows it can currently measure. A
+     * row that carried one and then stopped being measurable is not in that
+     * list, so nothing rewrites it and it keeps a displacement everything
+     * around it has moved on from. Its neighbours sit at their real places
+     * and it sits one row lower, which is two rows drawn on top of each
+     * other: reported as a folder's title squashed into one of its children,
+     * while dragging fast.
+     *
+     * A row measures zero while the explorer is mid-render, which is exactly
+     * what a fast drag produces more of.
+     */
+    it("is put back, not left displaced", () => {
+      const d = boundDrag();
+      fire(tree.rows["F/b.md"], "dragstart", 25);
+      fire(tree.rows["F/a.md"], "dragover", 2);
+
+      const stray = tree.rows["G"].querySelector<HTMLElement>("[data-path]");
+      if (!stray) throw new Error("fixture has no strip on G");
+      expect(stray.style.transform).not.toBe("");
+
+      // It stops being measurable, the way a row mid-render does.
+      stray.getBoundingClientRect = () =>
+        ({ top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0, x: 0, y: 0 }) as DOMRect;
+
+      fire(tree.rows["F/a.md"], "dragover", 40);
+      expect(stray.style.transform).toBe("");
+      d.unbind();
+    });
+  });
+
   describe("a source row the explorer recycled mid-drag", () => {
     /**
      * The explorer renders its rows in blocks and drops them as the pane
