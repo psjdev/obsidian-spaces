@@ -555,8 +555,24 @@ body.spaces-switching
    Neutralised rather than removed. Obsidian sets `is-being-dragged-over` only
    on a transition, so stripping the class means the real highlight never
    comes back when the pointer returns to the folder's middle. Leaving its
-   state alone and hiding the paint reverses the moment the body class goes. */
-body.spaces-claims-drop .nav-files-container .is-being-dragged-over {
+   state alone and hiding the paint reverses the moment the body class goes.
+
+   The class sits on the WRAPPER and Obsidian colours a child of it
+   (`.nav-folder.is-being-dragged-over > .nav-folder-title`), so a rule aimed
+   only at the element carrying the class left the folder name highlighted.
+   That read as a second, almost identical folder state: name lit up for a
+   drop going to the root, name lit up AND a box for one going inside.
+
+   The destination mark is excluded. Hiding Obsidian's answer and drawing our
+   own are different jobs, and without the exclusion the first one out-
+   specified the second and erased the only signal saying which folder the row
+   was going into. */
+body.spaces-claims-drop .nav-files-container .is-being-dragged-over:not(.spaces-drop-parent),
+body.spaces-claims-drop
+  .nav-files-container
+  .is-being-dragged-over
+  > .nav-folder-title:not(.spaces-drop-parent),
+body.spaces-claims-drop .nav-files-container .is-being-dragged-over .collapse-icon {
   background: transparent;
   color: inherit;
 }
