@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2 — 2026-09-28
+
+Fixes a drag that could get stuck. Dropping a folder into another folder
+sometimes left the folder highlighted and the cursor as a grabbing hand, with
+Obsidian still thinking a drag was in progress. Most likely while nesting
+several folders one after another.
+
 ## 0.7.1 — 2026-09-28
 
 Closing a drag now slides the gap shut instead of snapping it.
