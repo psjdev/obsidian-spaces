@@ -10,6 +10,7 @@ import {
   type DropIndicatorStyle,
 } from "../types";
 import { normalizeTag } from "../visibility/tagMatch";
+import { canonicalPath } from "../visibility/glob";
 
 export type ValidationResult =
   | { ok: true; value: SpacesDefinitions }
@@ -205,6 +206,22 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
   if (typeof r.root === "string" && (r.root === "" || r.root === "/" || isSafeVaultPath(r.root))) {
     root = r.root;
   }
+  // Shape only, entry by entry, exactly like `root` above: a bad string is
+  // unusable, not incoherent, and dropping the whole space over one would
+  // cost the user its name, icon, color and members.
+  let exclude: string[] | undefined;
+  if (Array.isArray(r.exclude)) {
+    const seen = new Set<string>();
+    const kept: string[] = [];
+    for (const e of r.exclude) {
+      if (!isSafeVaultPath(e)) continue;
+      const folded = canonicalPath(e);
+      if (seen.has(folded)) continue;
+      seen.add(folded);
+      kept.push(e);
+    }
+    if (kept.length > 0) exclude = kept;
+  }
   const members = validateMembers(r.members);
   if (!members) return null;
   return {
@@ -213,6 +230,7 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
     icon: r.icon,
     color: r.color,
     ...(root === undefined ? {} : { root }),
+    ...(exclude === undefined ? {} : { exclude }),
     members,
   };
 }

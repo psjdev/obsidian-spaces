@@ -50,6 +50,19 @@ export interface SpaceDefinition {
    * folder itself is hidden.
    */
   root?: string;
+  /**
+   * Vault paths this space leaves out, whatever pulled them in.
+   *
+   * Literal paths, never glob patterns. `escapeSeg` in `glob.ts` turns `*`
+   * into `[^/]*` and the grammar has no escape, so a file name containing `*`
+   * (legal on macOS and Linux, illegal on Windows) could not be written as a
+   * pattern that means only itself. Patterns have a home already in
+   * `globalIgnore`.
+   *
+   * Absent rather than empty when the space excludes nothing, so a document
+   * written before this field existed round-trips unchanged.
+   */
+  exclude?: string[];
   members: MemberEntry[];
 }
 
