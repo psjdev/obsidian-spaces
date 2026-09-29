@@ -504,16 +504,13 @@ body.spaces-switching
    a drag.
 
    The fill is the theme's accent mixed down to a wash, so a theme that
-   restyles `--interactive-accent` restyles this too. The flat declaration
-   comes first as the fallback for a renderer without `color-mix`, which would
-   otherwise drop the rule and draw an invisible box.
+   restyles `--interactive-accent` restyles this too.
 
    No `margin-top`: the line above pulls itself up by half its 2px so it
    straddles the boundary, and a box sits below the boundary rather than
    across it. */
 .spaces-drop-box {
   position: absolute;
-  background-color: var(--background-modifier-hover);
   background-color: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
   border-radius: var(--radius-s);
   pointer-events: none;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.3 — 2026-09-28
+
+No change to how the plugin behaves. Clears three warnings from Obsidian's
+plugin review scan: two timers in the drag code now go through `window` so they
+behave in popout windows, and a duplicated CSS property is gone.
+
 ## 0.7.2 — 2026-09-28
 
 Fixes a drag that could get stuck. Dropping a folder into another folder
