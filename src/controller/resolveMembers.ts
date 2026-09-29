@@ -24,7 +24,9 @@ export function resolveMembers(
 ): PathMember[] {
   const excluded = new Set((space.exclude ?? []).map(canonicalPath));
   const out: PathMember[] = [];
-  // Namespaced nothing here: every entry is a path member by this point.
+  // Keyed on the bare canonical path, not kind-plus-path: by this point
+  // every entry is a path member, and only one vault object can occupy a
+  // given path, so the path alone already identifies it uniquely.
   const seen = new Set<string>();
 
   const add = (m: PathMember): void => {
