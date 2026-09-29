@@ -24,7 +24,6 @@
 
 import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
-import { pathMembers } from "../definitions/membership";
 
 /**
  * Drops `paths` from `spaceId`'s member list.
@@ -56,19 +55,36 @@ export async function removeMembers(
     const target = d.spaces.find((s) => s.id === spaceId);
     if (!target) return;
     const drop = new Set<string>();
-    // Tags have no path, so they are never candidates here.
-    const candidates = pathMembers(target);
+    const exclude = new Set(target.exclude ?? []);
     for (const wanted of paths) {
-      const exact = candidates.find((m) => m.path === wanted);
-      if (exact) {
+      const exact = target.members.find(
+        (m) => m.kind !== "tag" && m.path === wanted
+      );
+      if (exact && exact.kind !== "tag") {
         drop.add(exact.path);
         continue;
       }
       const folded = canonicalPath(wanted);
-      for (const m of candidates) {
-        if (canonicalPath(m.path) === folded) drop.add(m.path);
+      let matched = false;
+      for (const m of target.members) {
+        if (m.kind === "tag") continue;
+        if (canonicalPath(m.path) === folded) {
+          drop.add(m.path);
+          matched = true;
+        }
+      }
+      // Nothing stored names this path, so it is in the space because a rule
+      // put it there, or because a member folder covers it. Either way the
+      // only way to take it out is to say so.
+      if (!matched) {
+        const already = [...exclude].some((e) => canonicalPath(e) === folded);
+        if (!already) exclude.add(wanted);
       }
     }
-    target.members = target.members.filter((m) => m.kind === "tag" || !drop.has(m.path));
+    target.members = target.members.filter(
+      (m) => m.kind === "tag" || !drop.has(m.path)
+    );
+    // Absent rather than empty, matching what the schema stores.
+    if (exclude.size > 0) target.exclude = [...exclude];
   });
 }
