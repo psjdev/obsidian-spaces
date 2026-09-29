@@ -3,7 +3,7 @@ import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { VaultIndex } from "../visibility/VaultIndex";
 import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
 import { buildVisibilitySnapshot } from "../visibility/VisibilityEngine";
-import { compileIgnore } from "../visibility/glob";
+import { compileIgnore, canonicalPath } from "../visibility/glob";
 import { RevealedSet } from "../visibility/RevealedSet";
 import { sameSelection } from "../order/sortOverride";
 import { hasRoot, rootOf } from "../visibility/folderSpace";
@@ -327,7 +327,8 @@ export class SpaceController {
       this.vault,
       { ...space, members: [...this.membersForSnapshot(space)] },
       visitors,
-      ignore
+      ignore,
+      new Set((space.exclude ?? []).map(canonicalPath))
     );
     // The first exit condition: a path that has BECOME a member of the active
     // space leaves the revealed set. Nothing changes on screen — what changes

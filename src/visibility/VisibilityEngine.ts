@@ -51,7 +51,20 @@ export function buildVisibilitySnapshot(
   vault: VaultIndex,
   space: SpaceDefinition,
   visitorPaths: Set<string>,
-  ignore: IgnoreMatcher
+  ignore: IgnoreMatcher,
+  /**
+   * Paths this space leaves out, already passed through `canonicalPath`.
+   *
+   * Consulted in exactly one place, beside the `ignore` test when expanding
+   * folder seeds. That one line gives the whole precedence table, because the
+   * other two cases are decided before this function runs: a tag-matched note
+   * was dropped during expansion, and a hand-added note is a seed, and seeds
+   * bypass this step entirely.
+   *
+   * A set of literal paths rather than more ignore patterns. `escapeSeg`
+   * cannot express a path containing `*` as a pattern meaning only itself.
+   */
+  excluded: ReadonlySet<string>
 ): VisibilitySnapshot {
   // Every set below is keyed by the LIVE path, so `decisionFor` — which is
   // called with paths straight out of the explorer — stays an exact lookup.
@@ -78,7 +91,9 @@ export function buildVisibilitySnapshot(
   for (const seed of seeds) {
     if (vault.kindOf(seed) !== "folder") continue;
     for (const d of vault.descendantsOf(seed)) {
-      if (!ignore.matches(d)) inherited.add(d);
+      if (ignore.matches(d)) continue;
+      if (excluded.has(canonicalPath(d))) continue;
+      inherited.add(d);
     }
   }
 

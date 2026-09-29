@@ -111,7 +111,8 @@ async function makeCtx(): Promise<{
   const controller = {
     activeSpace: () => space,
     currentSnapshot: () =>
-      buildVisibilitySnapshot(vault, space, new Set<string>(), compileIgnore([])),
+      buildVisibilitySnapshot(vault, space, new Set<string>(), compileIgnore([]),
+      new Set()),
     dismissRevealed: () => undefined,
   } as unknown as SpaceController;
   return { defs, ctx: { defs, controller } };
@@ -196,7 +197,8 @@ describe("removal matches the way visibility matches", () => {
       controller: {
         activeSpace: () => space2,
         currentSnapshot: () =>
-          buildVisibilitySnapshot(bothVault, space2, new Set<string>(), compileIgnore([])),
+          buildVisibilitySnapshot(bothVault, space2, new Set<string>(), compileIgnore([]),
+      new Set()),
         dismissRevealed: () => undefined,
       } as unknown as SpaceController,
     };

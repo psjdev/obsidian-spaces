@@ -127,7 +127,8 @@ describe("SpacesPlugin.filterAndOrderFolder", () => {
     // The test cannot disagree with the precedence rules.
     useSnapshot(
       plugin,
-      buildVisibilitySnapshot(vault, RESEARCH, new Set(), compileIgnore([]))
+      buildVisibilitySnapshot(vault, RESEARCH, new Set(), compileIgnore([]),
+      new Set())
     );
   });
 
@@ -204,9 +205,11 @@ describe("SpacesPlugin.filterAndOrderFolder", () => {
     await plugin["defs"].mutate((d) => {
       d.spaces = [both];
     });
-    useSnapshot(plugin, buildVisibilitySnapshot(vault, both, new Set(), compileIgnore([])));
+    useSnapshot(plugin, buildVisibilitySnapshot(vault, both, new Set(), compileIgnore([]),
+      new Set()));
     plugin["adapter"].apply(
-      buildVisibilitySnapshot(vault, both, new Set(), compileIgnore([]))
+      buildVisibilitySnapshot(vault, both, new Set(), compileIgnore([]),
+      new Set())
     );
     await storeOrder("Papers", ["Papers/Notes.md", "Papers/Attention.md"]);
 
@@ -234,7 +237,8 @@ describe("SpacesPlugin.filterAndOrderFolder", () => {
     // layout-change landing mid-rebuild — while the space is still active and
     // the controller's snapshot is still the truth. Reading the DOM layer's
     // copy here made a domain decision fail open for the duration.
-    const snap = buildVisibilitySnapshot(vault, RESEARCH, new Set(), compileIgnore([]));
+    const snap = buildVisibilitySnapshot(vault, RESEARCH, new Set(), compileIgnore([]),
+      new Set());
     plugin["controller"] = { currentSnapshot: () => snap } as unknown as SpaceController;
     plugin["adapter"].apply(null);
     plugin["runtime"].setSelection({ kind: "all" });
@@ -250,7 +254,8 @@ describe("SpacesPlugin.filterAndOrderFolder", () => {
     // The other direction, so the test cannot pass by reading either field.
     plugin["controller"] = { currentSnapshot: () => null } as unknown as SpaceController;
     plugin["adapter"].apply(
-      buildVisibilitySnapshot(vault, RESEARCH, new Set(), compileIgnore([]))
+      buildVisibilitySnapshot(vault, RESEARCH, new Set(), compileIgnore([]),
+      new Set())
     );
     const out = transform("Papers", [
       item("Papers/Attention.md"),
@@ -269,7 +274,8 @@ describe("SpacesPlugin.filterAndOrderFolder", () => {
     });
     useSnapshot(
       plugin,
-      buildVisibilitySnapshot(rootVault, RESEARCH, new Set(["Recipes.md"]), compileIgnore([]))
+      buildVisibilitySnapshot(rootVault, RESEARCH, new Set(["Recipes.md"]), compileIgnore([]),
+      new Set())
     );
     const out = transform("/", [item("Papers"), item("Recipes.md"), item("Private.md")]);
     expect(pathsOf(out)).toEqual(["Recipes.md", "Papers"]);
@@ -434,7 +440,8 @@ function makeCuratedPlugin(): SpacesPlugin {
   plugin["runtime"].setSelection({ kind: "space", id: "papers" });
   plugin["controller"] = {
     currentSnapshot: () =>
-      buildVisibilitySnapshot(curatedVault, papers, new Set(), compileIgnore([])),
+      buildVisibilitySnapshot(curatedVault, papers, new Set(), compileIgnore([]),
+      new Set()),
   } as unknown as SpaceController;
   return plugin;
 }
@@ -515,7 +522,8 @@ describe("folder spaces — hoisting", () => {
         members: [{ path: "Projects/Work/Overview.md", kind: "file" }],
       },
       new Set(),
-      compileIgnore([])
+      compileIgnore([]),
+      new Set()
     );
     const plugin = makeFolderSpacePlugin("Projects/Work", { snapshot });
     const out = transformOf(plugin)("/", [item("Archive"), item("Projects")]);

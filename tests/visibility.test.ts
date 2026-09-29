@@ -42,7 +42,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Reference/API Docs.md", kind: "file" }] }),
       new Set(),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     expect(s.decisionFor("Reference/API Docs.md").reason).toBe("exact-member");
     expect(s.decisionFor("Reference").reason).toBe("scaffold");
@@ -54,7 +55,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     expect(s.decisionFor("Papers").reason).toBe("exact-member");
     expect(s.decisionFor("Papers/Drafts/Intro.md").reason).toBe("inherited-member");
@@ -65,7 +67,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     expect(s.decisionFor("Papers-old/Legacy.md").visible).toBe(false);
   });
@@ -77,7 +80,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Archive/Old/Note.md", kind: "file" }] }),
       new Set(),
-      compileIgnore(["Archive/**"])
+      compileIgnore(["Archive/**"]),
+      new Set()
     );
     expect(s.decisionFor("Archive/Old/Note.md").visible).toBe(true);
     expect(s.decisionFor("Archive/Old").visible).toBe(true);
@@ -90,7 +94,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Archive/Old/Note.md", kind: "file" }] }),
       new Set(),
-      compileIgnore(["Archive/**"])
+      compileIgnore(["Archive/**"]),
+      new Set()
     );
     expect(s.decisionFor("Archive/Old/Note.md").overridesIgnore).toBe(true);
   });
@@ -100,7 +105,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(),
-      compileIgnore(["**/attachments/**"])
+      compileIgnore(["**/attachments/**"]),
+      new Set()
     );
     expect(s.decisionFor("Papers/attachments/img.png").visible).toBe(false);
     expect(s.decisionFor("Papers/Attention.md").visible).toBe(true);
@@ -112,7 +118,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(),
-      compileIgnore(["**/attachments/**"])
+      compileIgnore(["**/attachments/**"]),
+      new Set()
     );
     expect(s.decisionFor("Papers/attachments").visible).toBe(false);
   });
@@ -122,7 +129,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(),
-      compileIgnore(["**/attachments/**"])
+      compileIgnore(["**/attachments/**"]),
+      new Set()
     );
     const d = s.decisionFor("Papers/attachments");
     expect(d.visible).toBe(false);
@@ -134,7 +142,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Empty", kind: "folder" }] }),
       new Set(),
-      compileIgnore(["**/attachments/**"])
+      compileIgnore(["**/attachments/**"]),
+      new Set()
     );
     expect(s.decisionFor("Empty").visible).toBe(true);
   });
@@ -144,7 +153,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [] }),
       new Set(["Archive/Old/Note.md"]),
-      compileIgnore(["Archive/**"])
+      compileIgnore(["Archive/**"]),
+      new Set()
     );
     expect(s.decisionFor("Archive/Old/Note.md").reason).toBe("visitor");
     expect(s.decisionFor("Archive/Old").visible).toBe(true);
@@ -160,7 +170,8 @@ describe("buildVisibilitySnapshot", () => {
         ],
       }),
       new Set(["Papers/Attention.md"]),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     const d = s.decisionFor("Papers/Attention.md");
     expect(d.reason).toBe("exact-member");
@@ -179,7 +190,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(["Papers/Drafts/Intro.md"]),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     const d = s.decisionFor("Papers/Drafts/Intro.md");
     expect(d.reason).toBe("inherited-member");
@@ -187,7 +199,8 @@ describe("buildVisibilitySnapshot", () => {
   });
 
   it("hides a non-member with reason hidden-nonmember", () => {
-    const s = buildVisibilitySnapshot(vault, space(), new Set(), noIgnore);
+    const s = buildVisibilitySnapshot(vault, space(), new Set(), noIgnore,
+      new Set());
     const d = s.decisionFor("Recipes.md");
     expect(d.visible).toBe(false);
     expect(d.reason).toBe("hidden-nonmember");
@@ -199,7 +212,8 @@ describe("buildVisibilitySnapshot", () => {
       vault,
       space({ members: [{ path: "Gone/Missing.md", kind: "file" }] }),
       new Set(),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     expect(s.decisionFor("Gone/Missing.md").visible).toBe(false);
   });
@@ -228,7 +242,8 @@ describe("path comparison is case-insensitive", () => {
       caseVault,
       space({ members: [{ path: "Notes/Archive", kind: "folder" }] }),
       new Set(),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     const d = s.decisionFor("Notes/ARCHIVE");
     expect(d.visible).toBe(true);
@@ -244,7 +259,8 @@ describe("path comparison is case-insensitive", () => {
       caseVault,
       space({ members: [{ path: "Notes/Archive", kind: "folder" }] }),
       new Set(),
-      compileIgnore(["Notes/**"])
+      compileIgnore(["Notes/**"]),
+      new Set()
     );
     const d = s.decisionFor("Notes/ARCHIVE");
     expect(d.visible).toBe(true);
@@ -257,7 +273,8 @@ describe("path comparison is case-insensitive", () => {
       caseVault,
       space(),
       new Set(["notes/inbox.MD"]),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     expect(s.decisionFor("Notes/Inbox.md").reason).toBe("visitor");
   });
@@ -274,7 +291,8 @@ describe("path comparison is case-insensitive", () => {
       bothVault,
       space({ members: [{ path: "Notes/Note.md", kind: "file" }] }),
       new Set(),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     expect(s.decisionFor("Notes/Note.md").reason).toBe("exact-member");
     expect(s.decisionFor("Notes/note.md").visible).toBe(false);
@@ -285,7 +303,8 @@ describe("path comparison is case-insensitive", () => {
       caseVault,
       space({ members: [{ path: "Notes/Nowhere.md", kind: "file" }] }),
       new Set(),
-      noIgnore
+      noIgnore,
+      new Set()
     );
     expect(s.decisionFor("Notes/Nowhere.md").visible).toBe(false);
   });
@@ -306,7 +325,8 @@ describe("a folder space's root, presented as its sole member (membersForSnapsho
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(),
-      compileIgnore(["Papers/attachments/**"])
+      compileIgnore(["Papers/attachments/**"]),
+      new Set()
     );
     expect(s.decisionFor("Papers/attachments/img.png").visible).toBe(false);
   });
@@ -316,7 +336,8 @@ describe("a folder space's root, presented as its sole member (membersForSnapsho
       vault,
       space({ members: [{ path: "Papers", kind: "folder" }] }),
       new Set(),
-      compileIgnore(["Papers/attachments/**"])
+      compileIgnore(["Papers/attachments/**"]),
+      new Set()
     );
     expect(s.decisionFor("Papers/Drafts/Intro.md").visible).toBe(true);
   });
