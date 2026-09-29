@@ -26,13 +26,17 @@ import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 
 /**
- * Drops `paths` from `spaceId`'s member list.
+ * Takes `paths` out of `spaceId`, one way or the other: a path a stored
+ * member names is removed as a member; a path no stored member names (it is
+ * in the space because a tag member matched it, or because a member folder
+ * covers it) becomes an entry in that space's `exclude` list instead.
  *
- * Exact paths only. The inheritance means a folder member confers
- * membership on everything under it WITHOUT storing an entry per descendant,
- * so there is nothing under a removed folder to sweep — and a prefix sweep
- * would delete exact members the user added separately, which is the mistake
- * `repairOnDelete` was removed for (see `lifecycle/pathRepair.ts`).
+ * Exact paths only, in the member case. The inheritance means a folder
+ * member confers membership on everything under it WITHOUT storing an entry
+ * per descendant, so there is nothing under a removed folder to sweep — and
+ * a prefix sweep would delete exact members the user added separately, which
+ * is the mistake `repairOnDelete` was removed for (see
+ * `lifecycle/pathRepair.ts`).
  *
  * A space id that does not resolve is a no-op rather than an error: the two
  * callers both read the id from state that a concurrent `data.json` change can

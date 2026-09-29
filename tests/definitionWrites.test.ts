@@ -107,12 +107,17 @@ describe("removeMembers", () => {
     expect(defs.get().spaces[0].members).toEqual([{ kind: "tag", tag: "project" }]);
   });
 
-  it("is a no-op for a path that is not a member", async () => {
+  it("excludes rather than touching members, for a path that is not a member", async () => {
+    // Since Task 8, a path nothing stored names is not a no-op: it becomes
+    // an exclusion (see `tests/removeWritesExclusion.test.ts` for the full
+    // behaviour). This is still the right file for "members are untouched",
+    // it just cannot also claim nothing happened.
     const defs = await storeWith((d) => {
       d.spaces = [{ ...RESEARCH, members: [{ path: "Papers/A.md", kind: "file" }] }];
     });
     await removeMembers(defs, "research", ["Papers/Ghost.md"]);
     expect(membersOf(defs, "research")).toEqual(["Papers/A.md"]);
+    expect(defs.get().spaces[0].exclude).toEqual(["Papers/Ghost.md"]);
   });
 
   it("is a no-op for a space id that does not exist", async () => {
