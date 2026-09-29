@@ -7,7 +7,9 @@ import { compileIgnore, canonicalPath } from "../visibility/glob";
 import { RevealedSet } from "../visibility/RevealedSet";
 import { sameSelection } from "../order/sortOverride";
 import { hasRoot, rootOf } from "../visibility/folderSpace";
-import type { ActiveSelection, MemberEntry, SpaceDefinition, SwitchOutcome } from "../types";
+import { resolveMembers } from "./resolveMembers";
+import type { TagIndex } from "../visibility/TagIndex";
+import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from "../types";
 
 interface ControllerHost {
   apply(snapshot: VisibilitySnapshot | null): void;
@@ -73,6 +75,7 @@ export class SpaceController {
     private runtime: RuntimeStateStore,
     private vault: VaultIndex,
     private host: ControllerHost,
+    private tags: TagIndex,
     private layout?: LayoutHooks
   ) {}
 
@@ -82,6 +85,14 @@ export class SpaceController {
    */
   setVaultIndex(index: VaultIndex): void {
     this.vault = index;
+  }
+
+  /**
+   * The tag index is a snapshot, like the vault index, and is replaced
+   * wholesale when a note's metadata changes.
+   */
+  setTagIndex(index: TagIndex): void {
+    this.tags = index;
   }
 
   activeSpace(): SpaceDefinition | null {
@@ -288,8 +299,8 @@ export class SpaceController {
    *
    * Storage is left alone — only what is handed to the engine changes.
    */
-  private membersForSnapshot(space: SpaceDefinition): readonly MemberEntry[] {
-    if (!hasRoot(space)) return space.members;
+  private membersForSnapshot(space: SpaceDefinition): readonly PathMember[] {
+    if (!hasRoot(space)) return resolveMembers(space, this.tags);
     const root = rootOf(space);
     return root === null ? [] : [{ path: root, kind: "folder" }];
   }

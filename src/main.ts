@@ -22,6 +22,7 @@ import { knownIconIds } from "./ui/knownIcons";
 import { CreateSpacePanel } from "./ui/CreateSpacePanel";
 import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
+import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
 import { repairOnRename, repairRenameIn } from "./lifecycle/pathRepair";
 import {
   correlate,
@@ -561,6 +562,7 @@ export default class SpacesPlugin extends Plugin {
         apply: (snap) => this.onSnapshotApplied(snap),
         livePaths: () => this.liveLeafPaths(),
       },
+      createObsidianTagIndex(this.app),
       {
         transition: (from, to) =>
           this.runMaskedTransition(from, to),
@@ -1241,6 +1243,9 @@ export default class SpacesPlugin extends Plugin {
       // controller reference stays valid. Built at flush time, so it is the
       // burst's end state rather than any intermediate one.
       this.controller.setVaultIndex(createObsidianVaultIndex(this.app.vault));
+      // Rebuilt in the same breath. A recompute reading a fresh vault against
+      // a stale tag index would show a note the vault has and the tags do not.
+      this.controller.setTagIndex(createObsidianTagIndex(this.app));
       this.controller.refresh();
     },
   });

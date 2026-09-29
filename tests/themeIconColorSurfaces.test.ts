@@ -20,6 +20,7 @@ import { appendSpaceIcon } from "../src/ui/spaceRow";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { buildFakeVault } from "./helpers/fakeVault";
 import { DEFAULT_DEFINITIONS, type SpaceDefinition } from "../src/types";
 
@@ -44,10 +45,16 @@ async function harness(useThemeIconColor: boolean) {
   const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
   runtime.load();
   runtime.setSelection({ kind: "space", id: "a" });
-  const controller = new SpaceController(defs, runtime, buildFakeVault({}), {
-    apply: vi.fn(),
-    livePaths: () => new Set<string>(),
-  });
+  const controller = new SpaceController(
+    defs,
+    runtime,
+    buildFakeVault({}),
+    {
+      apply: vi.fn(),
+      livePaths: () => new Set<string>(),
+    },
+    createMapTagIndex(new Map())
+  );
   return { defs, runtime, controller };
 }
 

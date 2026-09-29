@@ -25,6 +25,7 @@ import { SwitcherView } from "../src/ui/SwitcherView";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { buildFakeVault } from "./helpers/fakeVault";
 import { DEFAULT_DEFINITIONS, type SpaceDefinition } from "../src/types";
 
@@ -94,10 +95,16 @@ async function build(withHeader = true) {
   await defs.load();
   const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
   runtime.load();
-  const controller = new SpaceController(defs, runtime, buildFakeVault({}), {
-    apply: vi.fn(),
-    livePaths: () => new Set<string>(),
-  });
+  const controller = new SpaceController(
+    defs,
+    runtime,
+    buildFakeVault({}),
+    {
+      apply: vi.fn(),
+      livePaths: () => new Set<string>(),
+    },
+    createMapTagIndex(new Map())
+  );
   const switcher = new SwitcherView(
     defs,
     runtime,
