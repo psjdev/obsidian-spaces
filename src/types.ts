@@ -242,7 +242,15 @@ export type SwitchOutcome =
   /** Neither the target nor the rollback produced a usable workspace. */
   | { kind: "failed-open"; reason: string };
 
-export const SCHEMA_VERSION = 1;
+/**
+ * The highest document version this build understands.
+ *
+ * NOT what every write stamps. See `schemaVersionFor`: a document is marked 2
+ * only once it uses something a version 1 build cannot represent, so someone
+ * who never adds a tag member or an exclusion keeps a document an older
+ * install can still open.
+ */
+export const SCHEMA_VERSION = 2;
 
 export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
   schemaVersion: SCHEMA_VERSION,

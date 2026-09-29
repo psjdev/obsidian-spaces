@@ -235,6 +235,25 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
   };
 }
 
+/**
+ * The version to stamp on a document about to be written.
+ *
+ * Version 2 added tag members and per-space exclusions. A build that only
+ * understands version 1 rejects the whole document rather than dropping what
+ * it does not recognise, which is the safe behaviour, but it is also a
+ * plugin that refuses to work. So a document earns version 2 by using
+ * something version 1 cannot hold, and nothing else.
+ *
+ * This matters for someone running two devices through Sync who upgrades one
+ * of them first.
+ */
+export function schemaVersionFor(spaces: readonly SpaceDefinition[]): number {
+  const usesV2 = spaces.some(
+    (s) => s.members.some((m) => m.kind === "tag") || (s.exclude?.length ?? 0) > 0
+  );
+  return usesV2 ? 2 : 1;
+}
+
 export function validateDefinitions(raw: unknown): ValidationResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return fail("definitions must be an object");
@@ -275,7 +294,7 @@ export function validateDefinitions(raw: unknown): ValidationResult {
   return {
     ok: true,
     value: {
-      schemaVersion: SCHEMA_VERSION,
+      schemaVersion: schemaVersionFor(spaces),
       settings: {
         globalIgnore,
         // Defaults to FALSE, matching `DEFAULT_DEFINITIONS`. A *missing*
