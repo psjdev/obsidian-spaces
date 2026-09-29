@@ -6,8 +6,8 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "lint": "eslint src",
-    "build": "eslint src && tsc --noEmit && node esbuild.config.mjs production",
+    "lint": "eslint src --max-warnings 0",
+    "build": "eslint src --max-warnings 0 && tsc --noEmit && node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
     "test:watch": "vitest",

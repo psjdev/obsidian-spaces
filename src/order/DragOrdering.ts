@@ -173,7 +173,7 @@ export class DragOrdering {
    * arrived, and doing that to a gap that has since reopened would make the
    * next one jump.
    */
-  private closing: ReturnType<typeof setTimeout> | null = null;
+  private closing: number | null = null;
   /**
    * Watches for rows arriving while a gap is open, for the length of a drag.
    *
@@ -1137,7 +1137,7 @@ export class DragOrdering {
   /** Abandons a pending close, so a new gap is not stripped of its transition. */
   private cancelClosing(): void {
     if (this.closing === null) return;
-    clearTimeout(this.closing);
+    window.clearTimeout(this.closing);
     this.closing = null;
   }
 
@@ -1205,7 +1205,7 @@ export class DragOrdering {
       // The rows are travelling back. The transition comes off when they
       // arrive, a little after the 100ms the stylesheet asks for.
       this.cancelClosing();
-      this.closing = setTimeout(() => {
+      this.closing = window.setTimeout(() => {
         this.closing = null;
         this.container?.classList.remove(CLS_GAP_DRAG);
       }, 140);
