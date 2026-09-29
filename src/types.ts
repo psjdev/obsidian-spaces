@@ -253,7 +253,16 @@ export type SwitchOutcome =
 export const SCHEMA_VERSION = 2;
 
 export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
-  schemaVersion: SCHEMA_VERSION,
+  // Literal 1, not `SCHEMA_VERSION`. An empty document holds no spaces, so
+  // no tag member and no exclusion — nothing a version 1 build cannot
+  // represent — and `schemaVersionFor` (schema.ts) would compute 1 for it.
+  // `SCHEMA_VERSION` answers a different question, the highest version this
+  // build can READ, not what an empty document should be WRITTEN as. If a
+  // later change ever persists these defaults directly, stamping them
+  // `SCHEMA_VERSION` would mark an empty vault version 2 for holding
+  // nothing that needs it, and an older install would then refuse it
+  // outright — exactly the failure `schemaVersionFor` exists to prevent.
+  schemaVersion: 1,
   settings: {
     globalIgnore: [],
     // Off by default. Restoring tabs on every switch rearranges the workspace

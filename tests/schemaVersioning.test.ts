@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateDefinitions } from "../src/definitions/schema";
+import { DEFAULT_DEFINITIONS } from "../src/types";
 
 function doc(space: Record<string, unknown>, schemaVersion = 1): unknown {
   return {
@@ -39,5 +40,16 @@ describe("schemaVersion on the way out", () => {
   it("refuses a document from a future version", () => {
     const r = validateDefinitions(doc({}, 3));
     expect(r.ok).toBe(false);
+  });
+
+  it("DEFAULT_DEFINITIONS is version 1, not SCHEMA_VERSION", () => {
+    expect(DEFAULT_DEFINITIONS.schemaVersion).toBe(1);
+  });
+
+  it("validating the defaults comes back as version 1 too", () => {
+    const r = validateDefinitions(DEFAULT_DEFINITIONS);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.schemaVersion).toBe(1);
   });
 });
