@@ -18,6 +18,7 @@
 import type { PathMember, SpaceDefinition } from "../types";
 import { canonicalPath } from "../visibility/glob";
 import { ancestorsOf } from "../visibility/VaultIndex";
+import { hasRoot } from "../visibility/folderSpace";
 
 /**
  * The innermost ancestor folder that is itself an exact member -- the folder
@@ -55,4 +56,23 @@ export function inheritedFromFolder(space: SpaceDefinition, path: string): strin
  */
 export function pathMembers(space: SpaceDefinition): PathMember[] {
   return space.members.filter((m): m is PathMember => m.kind !== "tag");
+}
+
+/**
+ * Whether this space's contents depend on what is inside a note.
+ *
+ * The gate on the metadata listener. A space of files and folders cannot
+ * change because someone typed in a note, so the common case costs one scan
+ * of a short array instead of a snapshot rebuild per keystroke-triggered
+ * save.
+ *
+ * False for a folder space even when it stores tag members. A space
+ * declaring a root renders from that root and its member list is never
+ * consulted, so watching metadata for it would be work with no possible
+ * effect.
+ */
+export function watchesMetadata(space: SpaceDefinition | null): boolean {
+  if (space === null) return false;
+  if (hasRoot(space)) return false;
+  return space.members.some((m) => m.kind === "tag");
 }

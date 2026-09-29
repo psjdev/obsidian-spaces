@@ -48,7 +48,7 @@ import { installNativeCreateRedirect } from "./actions/nativeNewFileParent";
 import { armIntent, matchIntent, type CreationIntent } from "./actions/creationIntent";
 import { canOfferCreateSpaceFromFolder } from "./actions/createSpaceMenu";
 import { inheritedFromFolder } from "./actions/membershipMenu";
-import { pathMembers } from "./definitions/membership";
+import { pathMembers, watchesMetadata } from "./definitions/membership";
 import { canonicalPath } from "./visibility/glob";
 import { PublicApi } from "./api/PublicApi";
 import { MissingRootNotice } from "./ui/MissingRootNotice";
@@ -719,6 +719,27 @@ export default class SpacesPlugin extends Plugin {
         });
       })
     );
+    // A note's tags are not vault structure, so no vault event reports them.
+    // Gated: a space of files and folders cannot change because someone typed,
+    // and this fires on every save.
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        if (!watchesMetadata(this.controller.activeSpace())) return;
+        // No membership work to run first, only the coalesced tail. Submitting
+        // an empty unit of work is how this reuses the existing window and
+        // burst ceiling rather than adding a second timer.
+        void this.onVaultChange(async () => undefined);
+      })
+    );
+    // The cache is not populated at load. Without this a tag space renders
+    // empty until it finishes, which reads as the space having lost its notes.
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        if (!watchesMetadata(this.controller.activeSpace())) return;
+        void this.onVaultChange(async () => undefined);
+      })
+    );
+
     // The coalescing window is a live timer, so it must not outlive the
     // plugin. `register` runs this on unload with the rest of the teardown.
     this.register(() => this.vaultChanges.cancel());
