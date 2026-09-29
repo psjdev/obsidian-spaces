@@ -1,4 +1,4 @@
-import { getAllTags, TFile, type App } from "obsidian";
+import { getAllTags, type App } from "obsidian";
 import { normalizeTag } from "./tagMatch";
 import { createMapTagIndex, type TagIndex } from "./TagIndex";
 
@@ -16,7 +16,6 @@ import { createMapTagIndex, type TagIndex } from "./TagIndex";
 export function createObsidianTagIndex(app: App): TagIndex {
   const byPath = new Map<string, string[]>();
   for (const file of app.vault.getMarkdownFiles()) {
-    if (!(file instanceof TFile)) continue;
     const cache = app.metadataCache.getFileCache(file);
     const tags = cache === null ? null : getAllTags(cache);
     byPath.set(file.path, (tags ?? []).map(normalizeTag));

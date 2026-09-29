@@ -7,6 +7,9 @@ const index = createMapTagIndex(
     ["b.md", ["project/atlas"]],
     ["c.md", ["person"]],
     ["d.md", []],
+    // A tag that shares a prefix with "project" but does not nest under it on a
+    // "/" boundary. This ensures the test catches a naive prefix match bug.
+    ["e.md", ["projector"]],
   ])
 );
 
@@ -17,6 +20,7 @@ describe("createMapTagIndex", () => {
 
   it("finds notes carrying a nested tag under it", () => {
     expect(index.pathsMatching("project").sort()).toEqual(["a.md", "b.md"]);
+    expect(index.pathsMatching("project")).not.toContain("e.md");
   });
 
   it("returns nothing for a tag nobody uses", () => {
