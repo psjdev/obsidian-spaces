@@ -6,6 +6,7 @@ import type {
 import { canonicalPath, type IgnoreMatcher } from "./glob";
 import type { VaultIndex } from "./VaultIndex";
 import { ancestorsOf } from "./VaultIndex";
+import { pathMembers } from "../definitions/membership";
 
 export interface VisibilitySnapshot {
   decisionFor(path: string): VisibilityDecision;
@@ -56,7 +57,9 @@ export function buildVisibilitySnapshot(
   // called with paths straight out of the explorer — stays an exact lookup.
   // Only the stored side is folded.
   const exact = new Set<string>();
-  for (const m of space.members) {
+  // Tag members resolve to notes only once tag expansion exists (Task 5+);
+  // until then they contribute no seeds.
+  for (const m of pathMembers(space)) {
     const live = resolveLivePath(vault, m.path);
     if (live !== null) exact.add(live);
   }

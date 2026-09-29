@@ -1,4 +1,5 @@
 import { inheritedFromFolder } from "../actions/membershipMenu";
+import { pathMembers } from "../definitions/membership";
 import { canonicalPath } from "../visibility/glob";
 import type {
   ActiveSelection,
@@ -120,16 +121,16 @@ export class PublicApi {
     isMember: (path, spaceId) => {
       const space = spaceId === undefined ? this.activeSpace() : this.spaceById(spaceId);
       if (!space) return false;
-      if (space.members.some((m) => canonicalPath(m.path) === canonicalPath(path))) return true;
+      if (pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(path))) return true;
       // Membership is not ownership. A path under a member FOLDER is a member
       // without a stored entry of its own, and answering from `members` alone
       // would call it a non-member.
       return inheritedFromFolder(space, path) !== null;
     },
-    memberPaths: (spaceId) =>
-      (spaceId === undefined ? this.activeSpace() : this.spaceById(spaceId))?.members.map(
-        (m) => m.path
-      ) ?? [],
+    memberPaths: (spaceId) => {
+      const space = spaceId === undefined ? this.activeSpace() : this.spaceById(spaceId);
+      return space ? pathMembers(space).map((m) => m.path) : [];
+    },
     onSpaceChange: (listener) => {
       this.listeners.add(listener);
       let subscribed = true;

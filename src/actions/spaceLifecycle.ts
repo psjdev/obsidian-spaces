@@ -133,7 +133,9 @@ export async function createSpace(
       // isSafeVaultPath() in schema.ts validates format without
       // canonicalising, so an un-normalized member written here would
       // silently never match a real vault path.
-      members: (opts?.members ?? []).map((m) => ({ path: normalizeMemberPath(m.path), kind: m.kind })),
+      members: (opts?.members ?? []).map((m) =>
+        m.kind === "tag" ? m : { ...m, path: normalizeMemberPath(m.path) }
+      ),
       // Same normalization as members, same reason — a root
       // is a vault path too. Omitted entirely rather than written as `""`
       // when absent, so a curated space's stored shape is unchanged from

@@ -123,7 +123,9 @@ export class SpaceContentsModal extends Modal {
               await this.defs.mutate((d) => {
                 const target = d.spaces.find((x) => x.id === this.spaceId);
                 if (target) {
-                  target.members = target.members.filter((m) => m.path !== row.path);
+                  target.members = target.members.filter(
+                    (m) => m.kind === "tag" || m.path !== row.path
+                  );
                 }
               });
             } catch (e) {

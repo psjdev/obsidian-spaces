@@ -13,8 +13,9 @@ function dedupe(members: MemberEntry[]): MemberEntry[] {
   const seen = new Set<string>();
   const out: MemberEntry[] = [];
   for (const m of members) {
-    if (seen.has(m.path)) continue;
-    seen.add(m.path);
+    const key = m.kind === "tag" ? "t:" + m.tag : "p:" + m.path;
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(m);
   }
   return out;
@@ -100,10 +101,9 @@ export function repairOnRename(
         ? {}
         : { root: rewritePrefix(s.root, oldPath, newPath) }),
       members: dedupe(
-        s.members.map((m) => ({
-          ...m,
-          path: rewritePrefix(m.path, oldPath, newPath),
-        }))
+        s.members.map((m) =>
+          m.kind === "tag" ? m : { ...m, path: rewritePrefix(m.path, oldPath, newPath) }
+        )
       ),
     })),
   };

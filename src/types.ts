@@ -2,12 +2,31 @@ import type { OrderMap } from "./order/orderModel";
 
 export type { OrderMap };
 
+/**
+ * What a vault object is. Deliberately NOT widened to include `"tag"`:
+ * `VaultIndex.kindOf` returns this, and a tag is not something the vault
+ * holds.
+ */
 export type MemberKind = "file" | "folder";
 
-export interface MemberEntry {
-  path: string;
-  kind: MemberKind;
-}
+/**
+ * One entry in a space's member list.
+ *
+ * A discriminated union rather than `{ path, kind }` with an optional `tag`
+ * beside it. `path` exists only on the kinds where it means something, so
+ * reading `m.path` on a tag member is a compile error rather than
+ * `undefined` reaching a vault lookup at runtime.
+ *
+ * Members were always selectors: a `folder` member expands to everything
+ * inside it on every render. `tag` is the same idea with a different source.
+ */
+export type MemberEntry =
+  | { kind: "file"; path: string }
+  | { kind: "folder"; path: string }
+  | { kind: "tag"; tag: string };
+
+/** The members that name a vault path. See `pathMembers`. */
+export type PathMember = Extract<MemberEntry, { path: string }>;
 
 export interface SpaceDefinition {
   id: string;

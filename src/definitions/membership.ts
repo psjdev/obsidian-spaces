@@ -15,7 +15,7 @@
  * `"obsidian"` import.
  */
 
-import type { SpaceDefinition } from "../types";
+import type { PathMember, SpaceDefinition } from "../types";
 import { canonicalPath } from "../visibility/glob";
 import { ancestorsOf } from "../visibility/VaultIndex";
 
@@ -43,4 +43,16 @@ export function inheritedFromFolder(space: SpaceDefinition, path: string): strin
     if (memberFolders.has(canonicalPath(ancestors[i]))) return ancestors[i];
   }
   return null;
+}
+
+/**
+ * The members that name a vault path.
+ *
+ * Most callers ask "is this path a member" or "which paths did the user
+ * pick", and neither question has an answer for a tag. Narrowing here keeps
+ * that narrowing in one place instead of a `m.kind !== "tag"` guard at each
+ * of the eighteen call sites.
+ */
+export function pathMembers(space: SpaceDefinition): PathMember[] {
+  return space.members.filter((m): m is PathMember => m.kind !== "tag");
 }

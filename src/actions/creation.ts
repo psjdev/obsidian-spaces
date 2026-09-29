@@ -3,6 +3,7 @@ import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceController } from "../controller/SpaceController";
 import { isFolderSpace } from "../visibility/folderSpace";
+import { pathMembers } from "../definitions/membership";
 
 interface CreationContext {
   defs: DefinitionStore;
@@ -66,7 +67,7 @@ async function ensureMember(
     // The same one case policy as `membership.ts`. Reached only
     // when the snapshot above did NOT already report the path visible, so this
     // is the second line of the same guard rather than a separate defect.
-    if (s && !s.members.some((m) => canonicalPath(m.path) === canonicalPath(path))) {
+    if (s && !pathMembers(s).some((m) => canonicalPath(m.path) === canonicalPath(path))) {
       s.members.push({ path, kind });
     }
   });

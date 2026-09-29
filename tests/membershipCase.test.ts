@@ -153,14 +153,14 @@ describe("removal matches the way visibility matches", () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.map((m) => m.path)).toEqual(["Inbox"]);
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Inbox"]);
   });
 
   it("removes a case-mismatched FOLDER member too", async () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("inbox")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.map((m) => m.path)).toEqual(["Notes/A.md"]);
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Notes/A.md"]);
   });
 
   it("prefers the exact stored entry when the vault holds both casings", async () => {
@@ -203,14 +203,14 @@ describe("removal matches the way visibility matches", () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx2, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs2.get().spaces[0].members.map((m) => m.path)).toEqual(["Notes/A.md"]);
+    expect(defs2.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Notes/A.md"]);
   });
 
   it("does not remove an unrelated member", async () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.map((m) => m.path)).toContain("Inbox");
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toContain("Inbox");
   });
 });
 
@@ -225,7 +225,7 @@ describe("adding does not duplicate a case-mismatched member", () => {
     // second entry for the same file.
     decorate(menu, ctx, [file("notes/a.md"), file("inbox/today.md")]);
     await clickRow(rows, "Add ");
-    const paths = defs.get().spaces[0].members.map((m) => m.path);
+    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
     expect(paths.filter((p) => p.toLowerCase() === "notes/a.md")).toHaveLength(1);
     expect(paths).toContain("inbox/today.md");
   });

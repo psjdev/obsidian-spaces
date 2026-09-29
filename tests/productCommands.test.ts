@@ -188,7 +188,9 @@ describe("add-active-file-to-space", () => {
     // Written as a file, not a folder: the kind decides whether descendants
     // inherit membership.
     const stored = h.plugin["defs"].get().spaces[0].members;
-    expect(stored.find((m) => m.path === "Papers/Draft.md")?.kind).toBe("file");
+    expect(stored.find((m) => m.kind !== "tag" && m.path === "Papers/Draft.md")?.kind).toBe(
+      "file"
+    );
   });
 });
 

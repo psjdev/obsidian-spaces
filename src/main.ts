@@ -47,6 +47,7 @@ import { installNativeCreateRedirect } from "./actions/nativeNewFileParent";
 import { armIntent, matchIntent, type CreationIntent } from "./actions/creationIntent";
 import { canOfferCreateSpaceFromFolder } from "./actions/createSpaceMenu";
 import { inheritedFromFolder } from "./actions/membershipMenu";
+import { pathMembers } from "./definitions/membership";
 import { canonicalPath } from "./visibility/glob";
 import { PublicApi } from "./api/PublicApi";
 import { MissingRootNotice } from "./ui/MissingRootNotice";
@@ -195,7 +196,7 @@ export function renameTouchesDefs(
 
   for (const space of defs.spaces) {
     if (space.root !== undefined && hit(space.root)) return true;
-    for (const m of space.members) if (hit(m.path)) return true;
+    for (const m of pathMembers(space)) if (hit(m.path)) return true;
   }
 
   const maps: OrderMap[] = [];
@@ -1041,7 +1042,7 @@ export default class SpacesPlugin extends Plugin {
     if (!file) return null;
     // The same fold the membership writes use, so a file the
     // space already stores in another casing is not offered again.
-    if (space.members.some((m) => canonicalPath(m.path) === canonicalPath(file.path))) {
+    if (pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(file.path))) {
       return null;
     }
     // Already covered by a member folder, so an exact entry would be a second
@@ -1065,7 +1066,7 @@ export default class SpacesPlugin extends Plugin {
         const space = d.spaces.find((s) => s.id === target.spaceId);
         if (
           space &&
-          !space.members.some((m) => canonicalPath(m.path) === canonicalPath(target.path))
+          !pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(target.path))
         ) {
           // "file": the active file is a file. The kind decides whether
           // descendants inherit membership, so it is not cosmetic.
@@ -1149,7 +1150,7 @@ export default class SpacesPlugin extends Plugin {
       await this.defs.mutate((d) => {
         const s = d.spaces.find((x) => x.id === match.spaceId);
         // For consistency with the membership writes.
-        if (s && !s.members.some((m) => canonicalPath(m.path) === canonicalPath(match.path))) {
+        if (s && !pathMembers(s).some((m) => canonicalPath(m.path) === canonicalPath(match.path))) {
           s.members.push({ path: match.path, kind: match.kind });
         }
       });

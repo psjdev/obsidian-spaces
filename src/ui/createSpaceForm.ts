@@ -218,8 +218,20 @@ export function canCreate(s: CreateFormState): boolean {
   return validateForm(s) === null;
 }
 
+/**
+ * Whether two member entries name the same thing. A tag member has no path,
+ * so the two kinds are only ever identical to their own kind; this picker
+ * builds only file and folder chips today (Task 10 adds tag chips).
+ */
+function sameEntry(a: MemberEntry, b: MemberEntry): boolean {
+  if (a.kind === "tag" || b.kind === "tag") {
+    return a.kind === "tag" && b.kind === "tag" && a.tag === b.tag;
+  }
+  return a.path === b.path;
+}
+
 export function toggleItem(s: CreateFormState, entry: MemberEntry): CreateFormState {
-  const without = s.items.filter((i) => i.path !== entry.path);
+  const without = s.items.filter((i) => !sameEntry(i, entry));
   if (without.length !== s.items.length) return { ...s, items: without };
   return { ...s, items: [...s.items, entry] };
 }

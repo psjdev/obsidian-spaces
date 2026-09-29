@@ -409,7 +409,10 @@ describe("picking items for a curated space", () => {
 
   it("keeps the order things were picked in", () => {
     const s = toggleItem(toggleItem(empty(), note), dir);
-    expect(s.items.map((i) => i.path)).toEqual(["Archive/Bravo.md", "Papers"]);
+    expect(s.items.flatMap((i) => (i.kind === "tag" ? [] : [i.path]))).toEqual([
+      "Archive/Bravo.md",
+      "Papers",
+    ]);
   });
 
   it("removes on a second click of the same path", () => {

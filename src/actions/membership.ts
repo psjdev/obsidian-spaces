@@ -5,6 +5,7 @@ import type { SpaceController } from "../controller/SpaceController";
 import type { MemberEntry, SpaceDefinition } from "../types";
 import { decorate as decorateMenu } from "./membershipMenu";
 import { removeMembers } from "./definitionWrites";
+import { pathMembers } from "../definitions/membership";
 
 interface MembershipContext {
   defs: DefinitionStore;
@@ -36,7 +37,7 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
       const target = d.spaces.find((s) => s.id === space.id);
       if (!target) return;
       for (const f of files) {
-        if (!target.members.some((m) => samePath(m.path, f.path))) {
+        if (!pathMembers(target).some((m) => samePath(m.path, f.path))) {
           target.members.push(entryFor(f));
         }
       }
@@ -66,7 +67,7 @@ async function addToSpace(
       const target = d.spaces.find((s) => s.id === spaceId);
       if (!target) return;
       for (const f of files) {
-        if (!target.members.some((m) => samePath(m.path, f.path))) {
+        if (!pathMembers(target).some((m) => samePath(m.path, f.path))) {
           target.members.push(entryFor(f));
         }
       }

@@ -12,6 +12,7 @@
  */
 
 import { inheritedFromFolder } from "../actions/membershipMenu";
+import { pathMembers } from "../definitions/membership";
 import { isVaultRoot } from "../visibility/folderSpace";
 import type { MemberKind, SpaceDefinition } from "../types";
 
@@ -44,7 +45,7 @@ export function memberRows(
   space: SpaceDefinition,
   exists: (path: string) => boolean
 ): MemberRow[] {
-  return space.members.map((m) => {
+  return pathMembers(space).map((m) => {
     // Missing wins over redundant. A file that is gone AND sat under a member
     // folder is still gone, and reporting it as merely redundant would hide
     // the only fact worth acting on.

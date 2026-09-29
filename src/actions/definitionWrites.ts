@@ -24,6 +24,7 @@
 
 import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
+import { pathMembers } from "../definitions/membership";
 
 /**
  * Drops `paths` from `spaceId`'s member list.
@@ -55,17 +56,19 @@ export async function removeMembers(
     const target = d.spaces.find((s) => s.id === spaceId);
     if (!target) return;
     const drop = new Set<string>();
+    // Tags have no path, so they are never candidates here.
+    const candidates = pathMembers(target);
     for (const wanted of paths) {
-      const exact = target.members.find((m) => m.path === wanted);
+      const exact = candidates.find((m) => m.path === wanted);
       if (exact) {
         drop.add(exact.path);
         continue;
       }
       const folded = canonicalPath(wanted);
-      for (const m of target.members) {
+      for (const m of candidates) {
         if (canonicalPath(m.path) === folded) drop.add(m.path);
       }
     }
-    target.members = target.members.filter((m) => !drop.has(m.path));
+    target.members = target.members.filter((m) => m.kind === "tag" || !drop.has(m.path));
   });
 }

@@ -9,6 +9,7 @@ import {
   type ActiveSpaceStyle,
   type DropIndicatorStyle,
 } from "../types";
+import { normalizeTag } from "../visibility/tagMatch";
 
 export type ValidationResult =
   | { ok: true; value: SpacesDefinitions }
@@ -72,12 +73,32 @@ function validateMembers(raw: unknown): MemberEntry[] | null {
   const out: MemberEntry[] = [];
   for (const m of raw) {
     if (!m || typeof m !== "object") return null;
-    const { path, kind } = m as Record<string, unknown>;
-    if (!isSafeVaultPath(path)) return null;
-    if (kind !== "file" && kind !== "folder") return null;
-    if (seen.has(path)) continue;
-    seen.add(path);
-    out.push({ path, kind });
+    const { kind } = m as Record<string, unknown>;
+    if (kind === "file" || kind === "folder") {
+      const { path } = m as Record<string, unknown>;
+      if (!isSafeVaultPath(path)) return null;
+      // Namespaced so a tag can never collide with a path in this set.
+      const key = "p:" + path;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind, path });
+      continue;
+    }
+    if (kind === "tag") {
+      const { tag } = m as Record<string, unknown>;
+      if (typeof tag !== "string") return null;
+      const normalized = normalizeTag(tag);
+      if (normalized.length === 0) return null;
+      const key = "t:" + normalized;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: "tag", tag: normalized });
+      continue;
+    }
+    // An unrecognised kind is still fatal, which rejects the whole document
+    // rather than silently dropping a member an older build would then write
+    // back without. See the forward compatibility section of the spec.
+    return null;
   }
   return out;
 }

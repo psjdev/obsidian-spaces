@@ -717,7 +717,9 @@ describe("SpaceController", () => {
     expect(controller.currentSnapshot()!.decisionFor("Recipes.md").reason).toBe("exact-member");
 
     await store.mutate((d) => {
-      d.spaces[0].members = d.spaces[0].members.filter((m) => m.path !== "Recipes.md");
+      d.spaces[0].members = d.spaces[0].members.filter(
+        (m) => m.kind === "tag" || m.path !== "Recipes.md"
+      );
     });
     controller.refresh();
     // "Remove from space" must actually remove the row: no leaf backs it.
@@ -917,7 +919,9 @@ describe("SpaceController", () => {
     });
     controller.refresh();
     await store.mutate((d) => {
-      d.spaces[0].members = d.spaces[0].members.filter((m) => m.path !== "Recipes.md");
+      d.spaces[0].members = d.spaces[0].members.filter(
+        (m) => m.kind === "tag" || m.path !== "Recipes.md"
+      );
     });
     controller.refresh();
 

@@ -45,7 +45,9 @@ const RESEARCH = {
 };
 
 function membersOf(defs: DefinitionStore, id: string): string[] {
-  return (defs.get().spaces.find((s) => s.id === id)?.members ?? []).map((m) => m.path);
+  return (defs.get().spaces.find((s) => s.id === id)?.members ?? []).flatMap((m) =>
+    m.kind === "tag" ? [] : [m.path]
+  );
 }
 
 describe("removeMembers", () => {

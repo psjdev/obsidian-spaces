@@ -27,21 +27,21 @@ function defs(): SpacesDefinitions {
 describe("repairOnRename", () => {
   it("rewrites an exact match", () => {
     const out = repairOnRename(defs(), "Papers/Attention.md", "Papers/Focus.md");
-    const paths = out.spaces[0].members.map((m) => m.path);
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
     expect(paths).toContain("Papers/Focus.md");
     expect(paths).not.toContain("Papers/Attention.md");
   });
 
   it("rewrites descendant prefixes when a folder moves", () => {
     const out = repairOnRename(defs(), "Papers", "Research Papers");
-    const paths = out.spaces[0].members.map((m) => m.path);
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
     expect(paths).toContain("Research Papers");
     expect(paths).toContain("Research Papers/Attention.md");
   });
 
   it("does not rewrite a sibling that shares a string prefix", () => {
     const out = repairOnRename(defs(), "Papers", "Research Papers");
-    const paths = out.spaces[0].members.map((m) => m.path);
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
     expect(paths).toContain("Papers-old/Legacy.md");
   });
 
@@ -54,7 +54,7 @@ describe("repairOnRename", () => {
     const d = defs();
     d.spaces[0].members.push({ path: "Papers/Focus.md", kind: "file" });
     const out = repairOnRename(d, "Papers/Attention.md", "Papers/Focus.md");
-    const focus = out.spaces[0].members.filter((m) => m.path === "Papers/Focus.md");
+    const focus = out.spaces[0].members.filter((m) => m.kind !== "tag" && m.path === "Papers/Focus.md");
     expect(focus).toHaveLength(1);
   });
 
@@ -262,7 +262,7 @@ describe("repairRenameIn — repairs computed from the DRAFT, not from a snapsho
   };
 
   const membersOf = (store: DefinitionStore) =>
-    store.get().spaces[0].members.map((m) => m.path);
+    store.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
 
   it("keeps BOTH repairs when two renames overlap", async () => {
     // The exact case the review reproduced: repairing a.md and b.md at the

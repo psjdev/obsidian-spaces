@@ -11,7 +11,7 @@
 
 import { canonicalPath } from "../visibility/glob";
 import type { SpaceDefinition } from "../types";
-import { inheritedFromFolder } from "../definitions/membership";
+import { inheritedFromFolder, pathMembers } from "../definitions/membership";
 import { isFolderSpace } from "../visibility/folderSpace";
 
 interface SpaceAddTarget {
@@ -32,7 +32,7 @@ function heldBy(space: SpaceDefinition, path: string): { held: boolean; viaFolde
   // Canonical, matching what the add dedupes with. An exact compare offers a
   // differently-cased path as addable, then the add drops it as a duplicate and
   // still reports it added.
-  if (space.members.some((m) => canonicalPath(m.path) === canonicalPath(path))) {
+  if (pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(path))) {
     return { held: true, viaFolder: null };
   }
   const folder = inheritedFromFolder(space, path);
