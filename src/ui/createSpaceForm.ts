@@ -221,7 +221,7 @@ export function canCreate(s: CreateFormState): boolean {
 /**
  * Whether two member entries name the same thing. A tag member has no path,
  * so the two kinds are only ever identical to their own kind; this picker
- * builds only file and folder chips today (Task 10 adds tag chips).
+ * builds only file and folder chips, not tag chips.
  */
 function sameEntry(a: MemberEntry, b: MemberEntry): boolean {
   if (a.kind === "tag" || b.kind === "tag") {

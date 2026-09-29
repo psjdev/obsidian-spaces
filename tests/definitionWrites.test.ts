@@ -91,6 +91,22 @@ describe("removeMembers", () => {
     expect(membersOf(defs, "research")).toEqual(["Papers/Pinned.md"]);
   });
 
+  it("leaves tag members untouched", async () => {
+    const defs = await storeWith((d) => {
+      d.spaces = [
+        {
+          ...RESEARCH,
+          members: [
+            { path: "Papers/A.md", kind: "file" },
+            { kind: "tag", tag: "project" },
+          ],
+        },
+      ];
+    });
+    await removeMembers(defs, "research", ["Papers/A.md"]);
+    expect(defs.get().spaces[0].members).toEqual([{ kind: "tag", tag: "project" }]);
+  });
+
   it("is a no-op for a path that is not a member", async () => {
     const defs = await storeWith((d) => {
       d.spaces = [{ ...RESEARCH, members: [{ path: "Papers/A.md", kind: "file" }] }];

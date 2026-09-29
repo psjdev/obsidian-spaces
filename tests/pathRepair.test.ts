@@ -58,6 +58,25 @@ describe("repairOnRename", () => {
     expect(focus).toHaveLength(1);
   });
 
+  it("passes a tag member through untouched", () => {
+    // A tag member has no path to rewrite, and must not be dropped either.
+    const d = defs();
+    d.spaces[0].members.push({ kind: "tag", tag: "project" });
+    const out = repairOnRename(d, "Papers/Attention.md", "Papers/Focus.md");
+    expect(out.spaces[0].members).toContainEqual({ kind: "tag", tag: "project" });
+  });
+
+  it("does not let a tag collide with a path of the same spelling when deduplicating", () => {
+    // `dedupe`'s key is namespaced by kind (p:/t:) specifically so this
+    // cannot happen: a tag and a path that happen to read identically must
+    // both survive.
+    const d = defs();
+    d.spaces[0].members.push({ kind: "tag", tag: "Papers/Focus.md" });
+    const out = repairOnRename(d, "Papers/Attention.md", "Papers/Focus.md");
+    expect(out.spaces[0].members).toContainEqual({ kind: "tag", tag: "Papers/Focus.md" });
+    expect(out.spaces[0].members).toContainEqual({ path: "Papers/Focus.md", kind: "file" });
+  });
+
   it("follows a renamed folder-space root", () => {
     // The whole of a folder space's persisted state is this one string, so a
     // rename that does not reach it silently empties the space.

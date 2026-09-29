@@ -57,8 +57,8 @@ export function buildVisibilitySnapshot(
   // called with paths straight out of the explorer — stays an exact lookup.
   // Only the stored side is folded.
   const exact = new Set<string>();
-  // Tag members resolve to notes only once tag expansion exists (Task 5+);
-  // until then they contribute no seeds.
+  // Tag members carry no path and are filtered out here because this loop
+  // resolves stored paths to live ones; they contribute no seeds this way.
   for (const m of pathMembers(space)) {
     const live = resolveLivePath(vault, m.path);
     if (live !== null) exact.add(live);

@@ -1,5 +1,5 @@
 import { Modal, Notice, Setting, type App } from "obsidian";
-import { memberRows, type MemberRow } from "./memberList";
+import { memberRows, withoutMember, type MemberRow } from "./memberList";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceDefinition } from "../types";
 
@@ -123,9 +123,7 @@ export class SpaceContentsModal extends Modal {
               await this.defs.mutate((d) => {
                 const target = d.spaces.find((x) => x.id === this.spaceId);
                 if (target) {
-                  target.members = target.members.filter(
-                    (m) => m.kind === "tag" || m.path !== row.path
-                  );
+                  target.members = withoutMember(target.members, row.path);
                 }
               });
             } catch (e) {

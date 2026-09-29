@@ -11,7 +11,7 @@ import {
   startingSpaceColor,
 } from "../src/actions/spaceLifecycle";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
-import { SCHEMA_VERSION } from "../src/types";
+import { SCHEMA_VERSION, type SpacesDefinitions } from "../src/types";
 
 function store(): DefinitionStore {
   let stored: unknown = {
@@ -193,6 +193,34 @@ describe("createSpace", () => {
     const first = stored[0];
     if (first.kind === "tag") throw new Error("expected a path member");
     expect(first.path).toBe("Papers");
+  });
+
+  it("copies a tag member rather than adopting the caller's object", async () => {
+    // Going through a real DefinitionStore would not catch this: `mutate()`
+    // always re-validates through `validateDefinitions`, and `validateMembers`
+    // rebuilds every entry into a brand new object regardless of what
+    // `createSpace` did first (see the identical warning on the test above).
+    // So this captures the draft `createSpace` builds directly, before any
+    // validation can mask the aliasing.
+    let captured: SpacesDefinitions | undefined;
+    const fakeDefs = {
+      mutate: async (fn: (draft: SpacesDefinitions) => void) => {
+        const draft: SpacesDefinitions = {
+          schemaVersion: SCHEMA_VERSION,
+          settings: {} as SpacesDefinitions["settings"],
+          spaces: [],
+        };
+        fn(draft);
+        captured = draft;
+      },
+    } as unknown as DefinitionStore;
+
+    const tagEntry = { kind: "tag" as const, tag: "project" };
+    await createSpace(fakeDefs, "Research", { members: [tagEntry] });
+
+    const stored = captured!.spaces[0].members[0];
+    expect(stored).toEqual(tagEntry);
+    expect(stored).not.toBe(tagEntry);
   });
 });
 

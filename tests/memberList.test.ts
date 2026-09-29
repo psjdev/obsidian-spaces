@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { memberRows, memberSummary, missingCount, spaceRowSummary } from "../src/ui/memberList";
+import {
+  memberRows,
+  memberSummary,
+  missingCount,
+  spaceRowSummary,
+  withoutMember,
+} from "../src/ui/memberList";
 import type { SpaceDefinition } from "../src/types";
 
 const space = (members: SpaceDefinition["members"]): SpaceDefinition => ({
@@ -121,6 +127,37 @@ describe("missingCount", () => {
 
   it("is zero when everything resolves", () => {
     expect(missingCount(memberRows(space([{ path: "a.md", kind: "file" }]), exists))).toBe(0);
+  });
+});
+
+describe("withoutMember", () => {
+  // The contents modal's Remove button (`SpaceContentsModal.ts`) is built out
+  // of `Setting`, which the obsidian stub deliberately does not model — so
+  // this is the only layer this decision can be tested at.
+  it("drops the named path", () => {
+    const out = withoutMember(
+      [
+        { path: "a.md", kind: "file" },
+        { path: "b.md", kind: "file" },
+      ],
+      "a.md"
+    );
+    expect(out).toEqual([{ path: "b.md", kind: "file" }]);
+  });
+
+  it("leaves tag members untouched, including one that shares the removed spelling", () => {
+    const out = withoutMember(
+      [
+        { path: "a.md", kind: "file" },
+        { kind: "tag", tag: "project" },
+        { kind: "tag", tag: "a.md" },
+      ],
+      "a.md"
+    );
+    expect(out).toEqual([
+      { kind: "tag", tag: "project" },
+      { kind: "tag", tag: "a.md" },
+    ]);
   });
 });
 

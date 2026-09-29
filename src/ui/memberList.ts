@@ -14,7 +14,7 @@
 import { inheritedFromFolder } from "../actions/membershipMenu";
 import { pathMembers } from "../definitions/membership";
 import { isVaultRoot } from "../visibility/folderSpace";
-import type { MemberKind, SpaceDefinition } from "../types";
+import type { MemberEntry, MemberKind, SpaceDefinition } from "../types";
 
 type MemberStatus =
   /** Resolves to a real vault object and is the reason it is in the space. */
@@ -70,6 +70,21 @@ export function memberRows(
  */
 export function missingCount(rows: readonly MemberRow[]): number {
   return rows.filter((r) => r.status === "missing").length;
+}
+
+/**
+ * The members that remain after removing the stored entry at `path`.
+ *
+ * Tag members carry no path and are never the target of a path-based
+ * removal, so they always survive this untouched. Pulled out here rather
+ * than left inline in the contents modal's Remove handler
+ * (`SpaceContentsModal.ts`) so the decision is pure and testable in plain
+ * node: `Setting`, which that handler is built from, is deliberately not
+ * modelled under Vitest, so logic left inside it cannot be exercised at
+ * this layer.
+ */
+export function withoutMember(members: readonly MemberEntry[], path: string): MemberEntry[] {
+  return members.filter((m) => m.kind === "tag" || m.path !== path);
 }
 
 /**
