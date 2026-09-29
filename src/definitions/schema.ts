@@ -246,6 +246,12 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
  *
  * This matters for someone running two devices through Sync who upgrades one
  * of them first.
+ *
+ * Recomputed from current content every call, deliberately, rather than
+ * remembering the version a document arrived with: removing the last tag
+ * member or exclusion returns a document to version 1, so an older install
+ * can open it again. That is why the incoming version is never consulted
+ * here — considering it would quietly remove that recovery path.
  */
 export function schemaVersionFor(spaces: readonly SpaceDefinition[]): number {
   const usesV2 = spaces.some(

@@ -52,4 +52,54 @@ describe("schemaVersion on the way out", () => {
     if (!r.ok) return;
     expect(r.value.schemaVersion).toBe(1);
   });
+
+  it("drops back to 1 once the last exclusion is removed, even though the document arrived marked 2", () => {
+    const withExclusion = validateDefinitions(doc({ exclude: ["a.md"] }, 2));
+    expect(withExclusion.ok).toBe(true);
+    if (!withExclusion.ok) return;
+    expect(withExclusion.value.schemaVersion).toBe(2);
+
+    // Same incoming schemaVersion, exclusion gone: the version is recomputed
+    // from content, not remembered, so this must come back as 1 rather than
+    // staying 2. That recomputation is what lets a user who deletes their
+    // last tag or exclusion get a document an older install can read again.
+    const withoutExclusion = validateDefinitions(doc({}, 2));
+    expect(withoutExclusion.ok).toBe(true);
+    if (!withoutExclusion.ok) return;
+    expect(withoutExclusion.value.schemaVersion).toBe(1);
+  });
+
+  it("becomes 2 when only one of several spaces needs it", () => {
+    const r = validateDefinitions({
+      schemaVersion: 1,
+      settings: {},
+      spaces: [
+        { id: "a", name: "A", icon: "box", color: "#808080", members: [] },
+        {
+          id: "b",
+          name: "B",
+          icon: "box",
+          color: "#808080",
+          members: [{ kind: "tag", tag: "project" }],
+        },
+        { id: "c", name: "C", icon: "box", color: "#808080", members: [] },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.schemaVersion).toBe(2);
+  });
+
+  it("stays 1 when a space's exclude is an empty array", () => {
+    // validateSpace collapses `exclude: []` to absent before schemaVersionFor
+    // ever sees the space, so this is asserted end to end through
+    // validateDefinitions rather than by calling schemaVersionFor directly
+    // with a hand-built SpaceDefinition — a directly-built one could carry
+    // `exclude: []` in a shape validateSpace would never actually produce,
+    // which would not pin the real boundary.
+    const r = validateDefinitions(doc({ exclude: [] }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.schemaVersion).toBe(1);
+  });
 });
