@@ -9,6 +9,8 @@ const vault = createTreeVaultIndex(
     ["Projects", "folder"],
     ["Projects/a.md", "file"],
     ["Projects/b.md", "file"],
+    ["Projects/sub", "folder"],
+    ["Projects/sub/c.md", "file"],
     ["Loose.md", "file"],
   ])
 );
@@ -47,14 +49,40 @@ describe("exclusions", () => {
     expect(s.visiblePaths().has("Projects/b.md")).toBe(false);
   });
 
-  it("prunes a member folder left empty by exclusions", () => {
+  // This does not exercise the 3b pruning fixpoint: `Projects` is the seed,
+  // and 3b spares seeds unconditionally (`if (seeds.has(p)) continue;`), so
+  // it never becomes a pruning candidate regardless of what step 3b does.
+  // The children never entering `included` is enough on its own to explain
+  // both assertions. Kept because "a seed survives total exclusion of its
+  // children" is still a real, distinct thing worth pinning; renamed so it
+  // no longer claims to cover pruning.
+  it("spares the seed folder even when every child is excluded", () => {
     const s = snap(
       [{ kind: "folder", path: "Projects" }],
       ["Projects/a.md", "Projects/b.md"]
     );
-    // The folder is a seed, so it survives as the space's own root.
+    expect(s.visiblePaths().has("Projects")).toBe(true);
     expect(s.visiblePaths().has("Projects/a.md")).toBe(false);
     expect(s.visiblePaths().has("Projects/b.md")).toBe(false);
+  });
+
+  // The case the test above cannot cover: a NON-seed folder emptied by
+  // exclusions. `Projects/sub` is only reached by inheriting from the
+  // `Projects` seed, so once its lone note is excluded it holds no visible
+  // descendant and step 3b's fixpoint prunes it, exactly as it already does
+  // for a folder emptied by an ignore rule. `Projects` itself is exempt from
+  // that fixpoint only because it IS the seed (3b skips seeds unconditionally,
+  // `if (seeds.has(p)) continue;`) — not because of anything about
+  // exclusions — which is why the seed-survival assertion above needs its
+  // own test rather than riding on this one.
+  it("prunes a subfolder emptied by exclusions, and spares the seed", () => {
+    const s = snap(
+      [{ kind: "folder", path: "Projects" }],
+      ["Projects/sub/c.md"]
+    );
+    expect(s.visiblePaths().has("Projects/sub")).toBe(false);
+    expect(s.visiblePaths().has("Projects")).toBe(true);
+    expect(s.visiblePaths().has("Projects/a.md")).toBe(true);
   });
 
   it("changes nothing when there are no exclusions", () => {
