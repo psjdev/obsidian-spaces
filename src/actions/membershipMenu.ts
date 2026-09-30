@@ -1,4 +1,5 @@
 import type { SpaceDefinition } from "../types";
+import type { TagIndex } from "../visibility/TagIndex";
 import { inheritedFromFolder } from "../definitions/membership";
 import { spaceAddTargets } from "./spaceAddTargets";
 import { submenuFor, type SubmenuLike } from "./nativeMenuSubmenu";
@@ -57,9 +58,16 @@ export interface DecorateContext {
   /**
    * Every space, for *All*'s "Add to space" entry. In *All* there is
    * no active space and so no per-space snapshot, so membership is read from
-   * the definitions directly (see `spaceAddTargets`).
+   * the definitions plus the tag index (see `spaceAddTargets`).
    */
   spaces(): readonly SpaceDefinition[];
+  /**
+   * The tag index the tree was last drawn from, for expanding those spaces'
+   * tag members. Required rather than optional: an absent one silently makes
+   * every tag member match nothing, which is exactly the bug this closes —
+   * "Add to space" offered for a note the space already holds through a tag.
+   */
+  tags(): TagIndex;
 }
 
 interface DecorateHandlers<T extends FileLike> {
@@ -183,7 +191,8 @@ function addToSpaceEntries<T extends FileLike>(
   const byPath = new Map(files.map((f) => [f.path, f]));
   const targets = spaceAddTargets(
     spaces,
-    files.map((f) => f.path)
+    files.map((f) => f.path),
+    ctx.tags()
   );
   // No targets AFTER filtering means no entry, rather than one that opens onto
   // nothing. Checking `spaces.length` alone is not enough: `spaceAddTargets`

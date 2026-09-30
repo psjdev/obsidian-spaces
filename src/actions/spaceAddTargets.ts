@@ -3,15 +3,23 @@
  * no `"obsidian"` import.
  *
  * In *All* there is no active space and therefore no visibility snapshot to
- * consult, so membership is decided from the space definitions alone: a path
- * is already held if it is an exact member, or if a member FOLDER covers it.
- * `inheritedFromFolder` answers the second question and is pure for exactly
+ * consult, so membership is decided from the space definitions plus the tag
+ * index: a path is already held if `resolveMembers` resolves to it, or if a
+ * member FOLDER covers it. `resolveMembers` is the same expansion the engine
+ * is handed, so "already held" here cannot drift from what the space shows;
+ * `inheritedFromFolder` answers the folder question and is pure for exactly
  * this reason.
+ *
+ * The tag index is passed in rather than built here. It is a snapshot the
+ * controller already owns, and taking a second one would let this menu
+ * disagree with the tree it was opened from.
  */
 
 import { canonicalPath } from "../visibility/glob";
 import type { SpaceDefinition } from "../types";
-import { inheritedFromFolder, pathMembers } from "../definitions/membership";
+import { inheritedFromFolder } from "../definitions/membership";
+import { resolveMembers } from "../controller/resolveMembers";
+import type { TagIndex } from "../visibility/TagIndex";
 import { isFolderSpace } from "../visibility/folderSpace";
 
 interface SpaceAddTarget {
@@ -27,14 +35,34 @@ interface SpaceAddTarget {
   addablePaths: string[];
 }
 
-/** Already held by this space, whether named directly or covered by a folder. */
-function heldBy(space: SpaceDefinition, path: string): { held: boolean; viaFolder: string | null } {
-  // Canonical, matching what the add dedupes with. An exact compare offers a
-  // differently-cased path as addable, then the add drops it as a duplicate and
-  // still reports it added.
-  if (pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(path))) {
-    return { held: true, viaFolder: null };
-  }
+/**
+ * Every path this space RESOLVES to, canonical.
+ *
+ * `resolveMembers`, not `pathMembers`: a note the space holds through a tag
+ * member is already in it, and offering "Add to space" for it wrote a second,
+ * redundant claim on a path the space had anyway. This is the same expansion
+ * the visibility engine is handed, so the menu and the tree agree by
+ * construction rather than by two implementations staying in step.
+ *
+ * Canonical, matching what the add dedupes with. An exact compare offers a
+ * differently-cased path as addable, then the add drops it as a duplicate and
+ * still reports it added.
+ *
+ * Built ONCE per space and closed over, never once per selected path: a tag
+ * member costs a pass over the vault's notes to expand, and a selection of
+ * fifty files would otherwise pay for fifty of them.
+ */
+function resolvedPaths(space: SpaceDefinition, tags: TagIndex): Set<string> {
+  return new Set(resolveMembers(space, tags).map((m) => canonicalPath(m.path)));
+}
+
+/** Already held by this space, whether resolved directly or covered by a folder. */
+function heldBy(
+  space: SpaceDefinition,
+  resolved: Set<string>,
+  path: string
+): { held: boolean; viaFolder: string | null } {
+  if (resolved.has(canonicalPath(path))) return { held: true, viaFolder: null };
   const folder = inheritedFromFolder(space, path);
   return { held: folder !== null, viaFolder: folder };
 }
@@ -50,16 +78,18 @@ function heldBy(space: SpaceDefinition, path: string): { held: boolean; viaFolde
  */
 export function spaceAddTargets(
   spaces: readonly SpaceDefinition[],
-  paths: readonly string[]
+  paths: readonly string[],
+  tags: TagIndex
 ): SpaceAddTarget[] {
   // Folder spaces are not targets: adding a path from elsewhere would mean
   // moving the file, and a space operation must never mutate the vault. A
   // control that cannot be honoured is worse than an absent one.
   return spaces.filter((s) => !isFolderSpace(s)).map((space) => {
+    const resolved = resolvedPaths(space, tags);
     const addablePaths: string[] = [];
     let sharedFolder: string | null = null;
     for (const path of paths) {
-      const { held, viaFolder } = heldBy(space, path);
+      const { held, viaFolder } = heldBy(space, resolved, path);
       if (!held) addablePaths.push(path);
       else if (viaFolder && sharedFolder === null) sharedFolder = viaFolder;
     }

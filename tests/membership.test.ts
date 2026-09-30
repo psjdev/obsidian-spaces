@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import {
   decorate,
   type DecorateContext,
@@ -8,6 +9,9 @@ import {
   type VisibilityDecisionLike,
 } from "../src/actions/membershipMenu";
 import type { SpaceDefinition } from "../src/types";
+
+/** No note in this fake vault carries a tag; these cases are all about paths. */
+const noTags = createMapTagIndex(new Map());
 
 /**
  * Obsidian's own Shift+click range selection walks its
@@ -102,8 +106,9 @@ function ctxWith(
       activeSpace: () => s,
       currentSnapshot: () => ({ decisionFor }),
     },
-    // Only *All* reads this; the active-space branches ignore it.
+    // Only *All* reads these two; the active-space branches ignore them.
     spaces: () => (s ? [s] : []),
+    tags: () => noTags,
   };
 }
 
@@ -280,6 +285,7 @@ function allCtx(spaces: SpaceDefinition[]) {
       currentSnapshot: () => ({ decisionFor: () => ({ visible: true, reason: "exact-member", canRemoveMembership: true }) }),
     },
     spaces: () => spaces,
+    tags: () => noTags,
   };
 }
 

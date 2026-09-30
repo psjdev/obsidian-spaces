@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { spaceAddTargets } from "../src/actions/spaceAddTargets";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import type { SpaceDefinition } from "../src/types";
+
+/**
+ * A vault where no note carries a tag. Most of these cases are about paths,
+ * and a tag index that matches nothing keeps them reading as they did before
+ * tag members existed; the tag cases below pass a populated one.
+ */
+const noTags = createMapTagIndex(new Map());
+
+/** `spaceAddTargets` with the tag-free vault, so each case says only what it is about. */
+const targets = (
+  spaces: readonly SpaceDefinition[],
+  paths: readonly string[]
+): ReturnType<typeof spaceAddTargets> => spaceAddTargets(spaces, paths, noTags);
 
 const space = (over: Partial<SpaceDefinition>): SpaceDefinition => ({
   id: "s",
@@ -17,64 +31,64 @@ const EMPTY = space({ id: "empty", name: "Empty" });
 
 describe("spaceAddTargets", () => {
   it("lists every space in definition order", () => {
-    const out = spaceAddTargets([WORK, LAB, EMPTY], ["Loose.md"]);
+    const out = targets([WORK, LAB, EMPTY], ["Loose.md"]);
     expect(out.map((t) => t.id)).toEqual(["work", "lab", "empty"]);
   });
 
   it("returns nothing when there are no spaces", () => {
     // The caller adds no menu entry at all rather than an empty submenu.
-    expect(spaceAddTargets([], ["Loose.md"])).toEqual([]);
+    expect(targets([], ["Loose.md"])).toEqual([]);
   });
 
   it("enables a space that does not already hold the path", () => {
-    const out = spaceAddTargets([EMPTY], ["Loose.md"]);
+    const out = targets([EMPTY], ["Loose.md"]);
     expect(out[0]).toMatchObject({ name: "Empty", disabled: false, label: "Empty" });
   });
 
   it("disables a space where the path is an EXACT member", () => {
-    const out = spaceAddTargets([LAB], ["Notes/A.md"]);
+    const out = targets([LAB], ["Notes/A.md"]);
     expect(out[0]).toMatchObject({ disabled: true, label: "Lab (already added)" });
   });
 
   it("disables a space where the path is INHERITED from a member folder", () => {
     // Adding an exact entry for something a folder member already covers
     // would be a second claim on the same path.
-    const out = spaceAddTargets([WORK], ["Projects/Deep/Note.md"]);
+    const out = targets([WORK], ["Projects/Deep/Note.md"]);
     expect(out[0]).toMatchObject({ disabled: true, label: "Work (already in Projects)" });
   });
 
   it("disables only when EVERY selected path is already a member", () => {
     // A mixed selection still has something to add, so the entry must work.
-    const out = spaceAddTargets([WORK], ["Projects/In.md", "Loose.md"]);
+    const out = targets([WORK], ["Projects/In.md", "Loose.md"]);
     expect(out[0].disabled).toBe(false);
   });
 
   it("counts the paths it would actually add, not the whole selection", () => {
-    const out = spaceAddTargets([WORK], ["Projects/In.md", "Loose.md", "Other.md"]);
+    const out = targets([WORK], ["Projects/In.md", "Loose.md", "Other.md"]);
     expect(out[0]).toMatchObject({ addablePaths: ["Loose.md", "Other.md"], label: "Work (2)" });
   });
 
   it("carries icon and color so the submenu can look like the switcher", () => {
-    const out = spaceAddTargets([WORK], ["Loose.md"]);
+    const out = targets([WORK], ["Loose.md"]);
     expect(out[0]).toMatchObject({ icon: "box", color: "#5b5bff" });
   });
 
   it("treats a folder member as covering the folder itself", () => {
     // Right-clicking `Projects` while Work already has it must not offer to
     // add it again.
-    const out = spaceAddTargets([WORK], ["Projects"]);
+    const out = targets([WORK], ["Projects"]);
     expect(out[0].disabled).toBe(true);
   });
 
   it("does not treat a sibling with a shared prefix as inherited", () => {
     // `Projects2` is not under `Projects`; a prefix check without the
     // separator would wrongly call it a member.
-    const out = spaceAddTargets([WORK], ["Projects2/Note.md"]);
+    const out = targets([WORK], ["Projects2/Note.md"]);
     expect(out[0].disabled).toBe(false);
   });
 
   it("returns an empty selection as nothing addable, and disables", () => {
-    const out = spaceAddTargets([EMPTY], []);
+    const out = targets([EMPTY], []);
     expect(out[0]).toMatchObject({ disabled: true, addablePaths: [] });
   });
 
@@ -89,6 +103,71 @@ describe("spaceAddTargets", () => {
         root: "Projects/Work", members: [] },
     ] as SpaceDefinition[];
 
-    expect(spaceAddTargets(spaces, ["Inbox/Note.md"]).map((t) => t.id)).toEqual(["research"]);
+    expect(targets(spaces, ["Inbox/Note.md"]).map((t) => t.id)).toEqual(["research"]);
+  });
+});
+
+/**
+ * *All*'s "Add to space" decided "already held" from the stored path members
+ * plus `inheritedFromFolder`, which is blind to tag members: the entry was
+ * offered for a note the space already contains, and taking it wrote a
+ * second, redundant claim on a path the space had anyway.
+ */
+describe("spaceAddTargets and tag members", () => {
+  const TAGGED = space({
+    id: "tagged",
+    name: "Tagged",
+    members: [{ kind: "tag", tag: "project" }],
+  });
+  const index = createMapTagIndex(
+    new Map([
+      ["Anywhere/Tagged.md", ["project"]],
+      ["Anywhere/Nested.md", ["project/atlas"]],
+      ["Anywhere/Plain.md", []],
+    ])
+  );
+
+  it("does not offer a note the space already holds through a tag", () => {
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Tagged.md"], index);
+    expect(out[0]).toMatchObject({ disabled: true, addablePaths: [] });
+    expect(out[0].label).toBe("Tagged (already added)");
+  });
+
+  it("counts a nested tag as held too, matching the engine", () => {
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Nested.md"], index);
+    expect(out[0].disabled).toBe(true);
+  });
+
+  it("still offers a note the tag does not reach", () => {
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Plain.md"], index);
+    expect(out[0]).toMatchObject({ disabled: false, addablePaths: ["Anywhere/Plain.md"] });
+  });
+
+  it("offers a tag-matched note the space EXCLUDES", () => {
+    // `resolveMembers` drops an excluded tag match, so the space does not
+    // show it — and adding it by hand is the one gesture that brings it
+    // back, because an exact member is a seed.
+    const excluding = space({
+      id: "tagged",
+      name: "Tagged",
+      exclude: ["Anywhere/Tagged.md"],
+      members: [{ kind: "tag", tag: "project" }],
+    });
+    const out = spaceAddTargets([excluding], ["Anywhere/Tagged.md"], index);
+    expect(out[0]).toMatchObject({ disabled: false, addablePaths: ["Anywhere/Tagged.md"] });
+  });
+
+  it("expands each space's tag members once, not once per selected path", () => {
+    // A tag member costs a pass over every note in the vault to expand, and a
+    // fifty-file selection must not pay for fifty of them.
+    let lookups = 0;
+    const counting = {
+      pathsMatching: (tag: string): string[] => {
+        lookups++;
+        return index.pathsMatching(tag);
+      },
+    };
+    spaceAddTargets([TAGGED], ["a.md", "b.md", "c.md", "d.md"], counting);
+    expect(lookups).toBe(1);
   });
 });

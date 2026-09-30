@@ -1072,6 +1072,24 @@ export default class SpacesPlugin extends Plugin {
     if (!space) return null;
     const file = this.app.workspace.getActiveFile();
     if (!file) return null;
+    // The resolved membership, which is the only answer that accounts for tag
+    // members and exclusions — the two definition-only tests below cannot see
+    // either, so without this the command was offered for a note the space
+    // already holds through a tag, and taking it wrote a redundant exact
+    // member. Same pattern as `ensureMember` in `actions/creation.ts`.
+    //
+    // `reason`, NOT `visible`: the file in question is the OPEN one, so in any
+    // space that does not hold it it is a visitor, and visitors are visible.
+    // Testing `visible` would grey the command out for exactly the files it
+    // exists to offer.
+    const controller = this.controller as SpaceController | undefined;
+    const reason = controller?.currentSnapshot()?.decisionFor(file.path).reason;
+    if (reason === "exact-member" || reason === "inherited-member") return null;
+    // Kept behind the snapshot rather than replaced by it. There is no
+    // snapshot before the first recompute, and one taken before a write is a
+    // tick behind the document; both checks only ever grey the command out
+    // further, so a disagreement costs a redundant offer at worst.
+    //
     // The same fold the membership writes use, so a file the
     // space already stores in another casing is not offered again.
     if (pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(file.path))) {

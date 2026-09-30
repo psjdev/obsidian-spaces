@@ -3,6 +3,7 @@ import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceController } from "../controller/SpaceController";
 import type { MemberEntry, SpaceDefinition } from "../types";
+import type { TagIndex } from "../visibility/TagIndex";
 import { decorate as decorateMenu } from "./membershipMenu";
 import { removeMembers } from "./definitionWrites";
 import { pathMembers } from "../definitions/membership";
@@ -103,6 +104,11 @@ export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFil
   const decorateCtx = {
     controller: ctx.controller,
     spaces: (): readonly SpaceDefinition[] => ctx.defs.get().spaces,
+    // The controller's own snapshot, so *All*'s "Add to space" answers from
+    // the same picture the tree was drawn from. Lazy behind
+    // `createLazyTagIndex`, so a vault whose spaces hold no tag member pays
+    // nothing for opening a context menu.
+    tags: (): TagIndex => ctx.controller.tagIndex(),
   };
   decorateMenu(menu, decorateCtx, files, {
     addAll: (fs) => void addAll(ctx, fs),

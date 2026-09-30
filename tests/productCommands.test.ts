@@ -44,6 +44,12 @@ interface Harness {
   plugin: SpacesPlugin;
   /** What `app.workspace.getActiveFile()` answers. */
   setActiveFile(path: string | null): void;
+  /**
+   * Stands a minimal controller in front of the plugin, answering this one
+   * reason for this one path. `start()` never runs here, so there is no real
+   * controller; the commands that consult the snapshot need one that answers.
+   */
+  setSnapshotReason(path: string, reason: string): void;
   /** How many times `ensureOrderingPatched` looked for the explorer leaf. */
   leafLookups(): number;
 }
@@ -84,6 +90,16 @@ function makeHarness(): Harness {
       const file = new TFile();
       file.path = path;
       active = file;
+    },
+    setSnapshotReason(path, reason) {
+      plugin["controller"] = {
+        currentSnapshot: () => ({
+          decisionFor: (p: string) =>
+            p === path
+              ? { visible: true, reason, canRemoveMembership: reason === "exact-member" }
+              : { visible: false, reason: "hidden-nonmember", canRemoveMembership: false },
+        }),
+      } as unknown as SpacesPlugin["controller"];
     },
     leafLookups: () => lookups,
   };
@@ -175,6 +191,30 @@ describe("add-active-file-to-space", () => {
     h.plugin["runtime"].setSelection({ kind: "space", id: "research" });
     h.setActiveFile("Inbox/Today.md");
     expect(invoke(h.plugin, ID, true)).toBe(false);
+  });
+
+  it("is unavailable for a file the space holds through a TAG member", () => {
+    // The command decided "already held" from the stored path members plus
+    // `inheritedFromFolder`, neither of which knows what a tag is, so it was
+    // offered for a note the space already contains and taking it wrote a
+    // redundant exact member. The snapshot is the resolved membership, tag
+    // expansion included, and it is what the tree was drawn from.
+    h.plugin["runtime"].setSelection({ kind: "space", id: "research" });
+    h.setActiveFile("Anywhere/Tagged.md");
+    expect(invoke(h.plugin, ID, true)).toBe(true);
+    h.setSnapshotReason("Anywhere/Tagged.md", "exact-member");
+    expect(invoke(h.plugin, ID, true)).toBe(false);
+  });
+
+  it("is still offered for a file the snapshot only shows as a VISITOR", () => {
+    // The file in question is the OPEN one, so in any space that does not
+    // hold it it is a visitor — and visitors are VISIBLE. A check on
+    // `visible` rather than on the reason would grey this command out for
+    // exactly the files it exists to offer.
+    h.plugin["runtime"].setSelection({ kind: "space", id: "research" });
+    h.setActiveFile("Papers/Draft.md");
+    h.setSnapshotReason("Papers/Draft.md", "visitor");
+    expect(invoke(h.plugin, ID, true)).toBe(true);
   });
 
   it("adds the active file to the active space", async () => {
