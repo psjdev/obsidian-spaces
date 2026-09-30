@@ -18,6 +18,8 @@ import {
   type SkipReason,
 } from "../visibility/glob";
 import { isFolderSpace } from "../visibility/folderSpace";
+import { createObsidianTagIndex } from "../visibility/ObsidianTagIndex";
+import type { TagIndex } from "../visibility/TagIndex";
 import { ConfirmModal } from "./ConfirmModal";
 import { SpaceContentsModal } from "./SpaceContentsModal";
 import {
@@ -569,12 +571,26 @@ export class SpacesSettingTab extends PluginSettingTab {
 
     const exists = (path: string): boolean => this.app.vault.getAbstractFileByPath(path) !== null;
 
+    // One index for the whole page, built at most once and only if some space
+    // actually holds a tag member. `createObsidianTagIndex` walks every
+    // markdown file in the vault and this method runs on every settings
+    // render, so building it per space, or eagerly for the usual vault whose
+    // spaces are paths only, would be a vault walk nothing reads.
+    let tags: TagIndex | null = null;
+    const matchCount = (tag: string): number => {
+      tags ??= createObsidianTagIndex(this.app);
+      return tags.pathsMatching(tag).length;
+    };
+
     return spaces.map((space) => {
-      const rows = memberRows(space, exists);
+      // One row per stored member, tags included, so `memberCount` below
+      // counts a tag as one entry the way a folder counts as one rather than
+      // as its contents. `missing` is unaffected: a tag row is never missing.
+      const rows = memberRows(space, exists, matchCount);
       const missing = missingCount(rows);
       return {
         name: space.name,
-        desc: spaceRowSummary(space, exists),
+        desc: spaceRowSummary(space, exists, matchCount),
         render: (setting: Setting) => {
           setting.addText((t) => {
             t.setValue(space.name);
