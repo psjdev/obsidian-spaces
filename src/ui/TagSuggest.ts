@@ -23,7 +23,11 @@ import { tagCandidates, type TagSource } from "./tagCandidates";
  * only a construction-time throw. `getSuggestions` runs on every keystroke,
  * long after construction succeeded, and a throw there must not leave the
  * field silently dead — it reports outward so the caller can flip the field to
- * its plain-input fallback.
+ * its plain-input fallback. A source that RETURNS "I cannot say" goes through
+ * the same channel: that is what a missing `getTags` looks like, and it is
+ * the likelier of the two, so it must not be the quieter one. The caller is
+ * responsible for telling the user once per field rather than once per
+ * keystroke.
  *
  * Tags are stored without a leading `#` and shown with one, which is why
  * `renderSuggestion` adds it back and `onPick` does not.
@@ -66,7 +70,19 @@ export class TagSuggest extends AbstractInputSuggest<string> {
 
   protected override getSuggestions(query: string): string[] {
     try {
-      return tagCandidates(this.tags, query);
+      const offered = tagCandidates(this.tags, query);
+      // Null is the source saying it cannot list the vault's tags at all,
+      // which is how `nativeKnownTags` reports a missing `getTags` — a return,
+      // not a throw, and the EXPECTED failure mode. Reported through the same
+      // channel as a throw, because it has the same consequence for the user
+      // and the same remedy: the dropdown is gone for good and the full tag
+      // has to be typed. Without this the one case the notice was written for
+      // was the one case that stayed silent.
+      if (offered === null) {
+        this.onError(new Error("the tag source could not list the vault's tags"));
+        return [];
+      }
+      return offered;
     } catch (e) {
       this.onError(e);
       return [];

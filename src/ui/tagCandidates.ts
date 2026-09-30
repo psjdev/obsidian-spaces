@@ -31,7 +31,17 @@ export interface TagSource {
 const DEFAULT_LIMIT = 50;
 
 /**
- * The tags offered for `query`, normalized to the stored form.
+ * The tags offered for `query`, normalized to the stored form, or `null` when
+ * the source could not say what the vault holds.
+ *
+ * `null` is propagated rather than flattened to `[]`. The two are the same
+ * dropdown to look at and completely different things to tell the user:
+ * an empty list means this vault has no matching tag, while `null` means
+ * `getTags` was not there to call and the suggester will never offer
+ * anything again. Flattening it here left the caller with no way to tell
+ * them apart, so the notice written for exactly that failure
+ * ("tag suggestions are unavailable") fired only on a throw, which is not
+ * how `nativeKnownTags` reports it — it returns null, by design.
  *
  * Normalized before matching, not after, so a user who types the `#` they see
  * everywhere else in Obsidian gets the same list as one who does not, and so
@@ -55,9 +65,9 @@ export function tagCandidates(
   src: TagSource,
   query: string,
   limit = DEFAULT_LIMIT
-): string[] {
+): string[] | null {
   const known = src.knownTags();
-  if (known === null) return [];
+  if (known === null) return null;
 
   const want = normalizeTag(query);
   // `""` survives normalization of a bare `#`, and would render as a nameless

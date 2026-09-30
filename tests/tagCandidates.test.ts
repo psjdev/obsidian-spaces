@@ -73,15 +73,19 @@ describe("tagCandidates", () => {
     expect(tagCandidates(from(["#a", "#b", "#c"]), "", 2)).toEqual(["a", "b"]);
   });
 
-  it("offers nothing when the source cannot say", () => {
+  it("reports null when the source cannot say, rather than an empty list", () => {
     // Null is `nativeKnownTags` reporting that the private method was not
-    // there to call. It must read as "no candidates", never as "this vault
-    // has no tags" — the difference matters because the field still accepts
-    // anything typed into it.
-    expect(tagCandidates({ knownTags: () => null }, "project")).toEqual([]);
+    // there to call. Flattened to `[]` it was indistinguishable from a vault
+    // with no matching tag, so the "tag suggestions are unavailable" notice
+    // fired only on a throw — and a missing `getTags` is a RETURN, not a
+    // throw. The caller needs the two apart to tell the user the dropdown is
+    // gone and the full tag has to be typed.
+    expect(tagCandidates({ knownTags: () => null }, "project")).toBeNull();
   });
 
-  it("offers nothing when the vault genuinely has no tags", () => {
+  it("offers an empty list when the vault genuinely has no tags", () => {
+    // The other half of the same distinction: nothing is wrong here, and
+    // nothing should be said to the user.
     expect(tagCandidates(from([]), "")).toEqual([]);
   });
 
