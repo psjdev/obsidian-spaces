@@ -338,11 +338,33 @@ export interface SpacesApi {
   /** Every defined space, in definition order — the order the strip uses. */
   listSpaces(): SpaceSummary[];
   /**
-   * Whether `path` is a member of `spaceId` (default: the active space).
+   * Whether `spaceId`'s stored PATH rules hold `path` (default: the active
+   * space).
    *
    * MEMBERSHIP, not visibility: a path inherited from a member folder is a
    * member, and a member that `globalIgnore` hides is still a member.
    * False for *All*, for an unknown id, and while there is no active space.
+   *
+   * **Narrow, deliberately, and it does not answer "is this note in the
+   * space".** Everything on this surface is a projection of `data.json` and
+   * `RuntimeStateV1` alone. Since tag members landed, that is strictly less
+   * than what the space shows, and the gap is stated here rather than
+   * papered over, because a consumer that assumed otherwise would be wrong
+   * in silence. Precisely:
+   *
+   * - An exact `file` or `folder` member naming `path` answers true.
+   * - A path under a member folder answers true, unless the space's
+   *   `exclude` names it, in which case it answers false — which is what
+   *   the space shows.
+   * - **A note the space holds only through a TAG member answers false**,
+   *   even though the space visibly contains it. Which notes a tag reaches
+   *   is computed against Obsidian's metadata cache, which this surface
+   *   does not read: answering would make a `data.json` projection depend
+   *   on live vault state, and a stale true is worse than a documented
+   *   false.
+   *
+   * A consumer that needs what the space currently SHOWS wants the
+   * visibility snapshot, not this.
    */
   isMember(path: string, spaceId?: string): boolean;
   /**
@@ -350,6 +372,11 @@ export interface SpacesApi {
    * `members` holds only exact entries — inherited ones are computed and
    * never stored — so a descendant of a member folder is a member without
    * appearing here. Empty for *All* and for an unknown id.
+   *
+   * TAG members are omitted entirely. A tag names no path, so it has nothing
+   * to contribute to a list of paths, and the notes it reaches are not
+   * stored anywhere to be listed. A space whose members are all tags returns
+   * an empty array, which is not the same as a space with no members.
    */
   memberPaths(spaceId?: string): string[];
   /**
