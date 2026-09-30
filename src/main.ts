@@ -762,23 +762,15 @@ export default class SpacesPlugin extends Plugin {
       })
     );
     // A note's tags are not vault structure, so no vault event reports them.
-    // Gated: a space of files and folders cannot change because someone typed,
-    // and this fires on every save.
-    this.registerEvent(
-      this.app.metadataCache.on("changed", () => {
-        if (!watchesMetadata(this.controller.activeSpace())) return;
-        // No membership work to run first, only the coalesced tail. Submitting
-        // an empty unit of work is how this reuses the existing window and
-        // burst ceiling rather than adding a second timer.
-        void this.onVaultChange(async () => undefined);
-      })
-    );
-    // The cache is not populated at load. Without this a tag space renders
-    // empty until it finishes, which reads as the space having lost its notes.
+    this.registerEvent(this.app.metadataCache.on("changed", () => this.onMetadataEvent()));
+    // The cache is not populated at load. Without this a tag space stays
+    // fallen open until something else happens to it.
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
-        if (!watchesMetadata(this.controller.activeSpace())) return;
-        void this.onVaultChange(async () => undefined);
+        // The one place readiness is ever granted. From here a tag space
+        // matching nothing means nothing matches, not that nobody has looked.
+        this.metadataResolved = true;
+        this.onMetadataEvent();
       })
     );
 
@@ -1340,6 +1332,44 @@ export default class SpacesPlugin extends Plugin {
 
   private async onVaultChange(fn: () => Promise<unknown>): Promise<void> {
     await this.vaultChanges.submit(fn);
+  }
+
+  /**
+   * A note's metadata changed, or the cache finished resolving.
+   *
+   * TWO decisions, which used to be one early return and were wrong for it.
+   *
+   * 1. INVALIDATE, unconditionally. The flush was the only other
+   *    `setTagIndex` caller, so gating this on the active space meant that
+   *    tagging a note while *All* or a folder space was active never replaced
+   *    the index: `pathsMatching` went on answering from a picture taken
+   *    before the tag existed, for the rest of the session, and the note came
+   *    back `hidden-nonmember` after switching into the tag space. That same
+   *    stale index feeds `spaceAddTargets`, so it also re-opened the bug
+   *    `910bc6b` closed — "Add to space" offering a note the tag already
+   *    held. `createLazyTagIndex` is what makes this free: a replacement is
+   *    one closure until something asks it a question.
+   *
+   *    The vault index is deliberately NOT replaced here. A note's tags are
+   *    not vault structure, so nothing about the tree has changed; and the
+   *    ordering hazard runs the other way — `TagIndex.ts` documents that a
+   *    FRESH vault read against a STALE tag index is what shows a note the
+   *    vault has and the tags do not. The reverse is benign, because
+   *    `resolveLivePath` simply finds nothing for a path the vault index has
+   *    not seen yet, and the create's own coalesced flush replaces both.
+   *
+   * 2. REQUEST A RECOMPUTE only when the active space's contents can actually
+   *    have changed, which is what `watchesMetadata` has always been for. A
+   *    space of files and folders cannot change because someone typed, and
+   *    this fires on every save.
+   */
+  private onMetadataEvent(): void {
+    this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
+    if (!watchesMetadata(this.controller.activeSpace())) return;
+    // No membership work to run first, only the coalesced tail. Submitting an
+    // empty unit of work is how this reuses the existing window and burst
+    // ceiling rather than adding a second timer.
+    void this.onVaultChange(async () => undefined);
   }
 
   private async cycle(delta: number): Promise<void> {
