@@ -220,8 +220,9 @@ export function canCreate(s: CreateFormState): boolean {
 
 /**
  * Whether two member entries name the same thing. A tag member has no path,
- * so the two kinds are only ever identical to their own kind; this picker
- * builds only file and folder chips, not tag chips.
+ * so a tag is only ever identical to another tag and a path only to another
+ * path — which is what lets a space hold a `project` tag and a `project`
+ * folder at once without the toggle treating them as one thing.
  */
 function sameEntry(a: MemberEntry, b: MemberEntry): boolean {
   if (a.kind === "tag" || b.kind === "tag") {
