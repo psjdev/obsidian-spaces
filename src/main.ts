@@ -176,12 +176,15 @@ const ATTR_SPACE = "data-spaces-space";
  * and not worth doing at any risk of a false `false`.
  *
  * Covers every string `repairOnRename` reads: `root`, each space's member
- * paths, and the KEYS as well as the entries of every order map (order lists
- * are keyed by folder path, so a folder rename rewrites keys too). `newPath`
- * counts as a hit because the move branch drops an entry already equal to the
- * destination, which is a change with no rewrite anywhere. Member
- * de-duplication needs no check: `validateMembers` de-duplicates on the way
- * in, so a document holding a member path twice cannot reach here.
+ * paths, each space's EXCLUSIONS, and the KEYS as well as the entries of
+ * every order map (order lists are keyed by folder path, so a folder rename
+ * rewrites keys too). `newPath` counts as a hit because the move branch drops
+ * an entry already equal to the destination, which is a change with no
+ * rewrite anywhere. Member de-duplication needs no check: `validateMembers`
+ * de-duplicates on the way in, so a document holding a member path twice
+ * cannot reach here. Exclusion de-duplication needs none either, for a
+ * different reason: a rename can manufacture a duplicate, but only by
+ * rewriting one of the two entries, which is already a hit.
  */
 export function renameTouchesDefs(
   defs: SpacesDefinitions,
@@ -198,6 +201,11 @@ export function renameTouchesDefs(
   for (const space of defs.spaces) {
     if (space.root !== undefined && hit(space.root)) return true;
     for (const m of pathMembers(space)) if (hit(m.path)) return true;
+    // Exclusions are literal vault paths and are rewritten by the repair, so
+    // a rename that ONLY an exclusion names must still reach it. Without
+    // this the repair is never invoked at all for that rename, which is the
+    // one shape of this bug that fails silently rather than half-way.
+    for (const p of space.exclude ?? []) if (hit(p)) return true;
   }
 
   const maps: OrderMap[] = [];

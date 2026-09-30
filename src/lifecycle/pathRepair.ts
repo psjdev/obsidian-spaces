@@ -1,4 +1,11 @@
-import type { MemberEntry, OrderMap, SpaceOrders, SpacesDefinitions } from "../types";
+import type {
+  MemberEntry,
+  OrderMap,
+  SpaceDefinition,
+  SpaceOrders,
+  SpacesDefinitions,
+} from "../types";
+import { canonicalPath } from "../visibility/glob";
 
 
 function rewritePrefix(path: string, oldBase: string, newBase: string): string {
@@ -21,6 +28,44 @@ function dedupe(members: MemberEntry[]): MemberEntry[] {
   return out;
 }
 
+
+/**
+ * A space's exclusions, followed through a rename.
+ *
+ * `exclude` holds LITERAL vault paths, so it is rewritten by the same
+ * `rewritePrefix` the member paths use — which is also what makes a renamed
+ * folder carry its excluded descendants with it. Left unrewritten, the
+ * excluded note reappears in the space the moment it moves, the dead entry
+ * accumulates under the contents dialog's "Left out" list, and whatever
+ * later occupies the old path is excluded in its place.
+ *
+ * De-duplicated on the CANONICAL path, matching how the engine and
+ * `resolveMembers` compare exclusions: a rename can make two entries name one
+ * note (`A/x.md` and `B/x.md`, renaming `A` to `B`), which would draw two
+ * identical rows only one of which "Put back" could clear. The member
+ * `dedupe` above needs no such care, because `validateMembers` cannot let a
+ * duplicate in; a rename is the one thing that can MANUFACTURE one here.
+ *
+ * Absent rather than empty, matching the schema: a space that leaves nothing
+ * out carries no `exclude` key at all.
+ */
+function repairExclude(
+  exclude: readonly string[] | undefined,
+  oldPath: string,
+  newPath: string
+): string[] | undefined {
+  if (exclude === undefined) return undefined;
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const p of exclude) {
+    const next = rewritePrefix(p, oldPath, newPath);
+    const folded = canonicalPath(next);
+    if (seen.has(folded)) continue;
+    seen.add(folded);
+    kept.push(next);
+  }
+  return kept.length > 0 ? kept : undefined;
+}
 
 /** "" for a root-level path, matching the order map's root key. */
 function dirnameOf(path: string): string {
@@ -95,17 +140,26 @@ export function repairOnRename(
   return {
     ...defs,
     ...(orders ? { orders } : {}),
-    spaces: defs.spaces.map((s) => ({
-      ...s,
-      ...(s.root === undefined
-        ? {}
-        : { root: rewritePrefix(s.root, oldPath, newPath) }),
-      members: dedupe(
-        s.members.map((m) =>
-          m.kind === "tag" ? m : { ...m, path: rewritePrefix(m.path, oldPath, newPath) }
-        )
-      ),
-    })),
+    spaces: defs.spaces.map((s) => {
+      const exclude = repairExclude(s.exclude, oldPath, newPath);
+      const repaired: SpaceDefinition = {
+        ...s,
+        ...(s.root === undefined
+          ? {}
+          : { root: rewritePrefix(s.root, oldPath, newPath) }),
+        members: dedupe(
+          s.members.map((m) =>
+            m.kind === "tag" ? m : { ...m, path: rewritePrefix(m.path, oldPath, newPath) }
+          )
+        ),
+      };
+      // Assigned or deleted rather than spread conditionally: `...s` above
+      // has already copied the old `exclude` across, so an omitted key here
+      // would leave the STALE list in place.
+      if (exclude) repaired.exclude = exclude;
+      else delete repaired.exclude;
+      return repaired;
+    }),
   };
 }
 
