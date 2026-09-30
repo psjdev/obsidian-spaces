@@ -171,3 +171,58 @@ describe("spaceAddTargets and tag members", () => {
     expect(lookups).toBe(1);
   });
 });
+
+/**
+ * The engine's precedence: an exclusion beats everything except an explicit
+ * path member, because seeds (exact members, and expanded tag matches) bypass
+ * the inherited-descendants step where exclusions are consulted. A folder
+ * member's coverage of a descendant is exactly that inherited step, so it
+ * must lose to an exclusion the same way the tree and `SpacesApi.isMember`
+ * already agree it does.
+ */
+describe("spaceAddTargets and exclusions", () => {
+  it("offers a note a member folder covers but the space excludes", () => {
+    // The tree does not show this note (the exclusion wins over the folder's
+    // inherited coverage) and `isMember` already answers false for it, so the
+    // "Add to space" menu must not call it already held either — that
+    // disagreement is the only way back into the note besides hand-editing
+    // data.json or removing the exclusion first.
+    const excluding = space({
+      id: "work",
+      name: "Work",
+      members: [{ path: "Projects", kind: "folder" }],
+      exclude: ["Projects/Deep/Note.md"],
+    });
+    const out = targets([excluding], ["Projects/Deep/Note.md"]);
+    expect(out[0]).toMatchObject({ disabled: false, addablePaths: ["Projects/Deep/Note.md"] });
+  });
+
+  it("still treats an explicit file member as held even when also excluded", () => {
+    // An exact member is a seed: it survives its own exclusion, and this
+    // state is only reachable by hand-editing data.json (removing a
+    // hand-added member removes the member, it does not write an exclusion).
+    // The menu must keep calling it held, matching `isMember`'s rule 1.
+    const excludedMember = space({
+      id: "lab",
+      name: "Lab",
+      members: [{ path: "Notes/A.md", kind: "file" }],
+      exclude: ["Notes/A.md"],
+    });
+    const out = targets([excludedMember], ["Notes/A.md"]);
+    expect(out[0]).toMatchObject({ disabled: true, label: "Lab (already added)" });
+  });
+
+  it("still treats an explicit folder member as held even when also excluded", () => {
+    // Same seed reasoning as the file case above, for a folder member
+    // selected as itself (the same case covered by "treats a folder member
+    // as covering the folder itself").
+    const excludedFolder = space({
+      id: "work",
+      name: "Work",
+      members: [{ path: "Projects", kind: "folder" }],
+      exclude: ["Projects"],
+    });
+    const out = targets([excludedFolder], ["Projects"]);
+    expect(out[0].disabled).toBe(true);
+  });
+});

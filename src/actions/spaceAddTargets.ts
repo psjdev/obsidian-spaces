@@ -64,7 +64,16 @@ function heldBy(
 ): { held: boolean; viaFolder: string | null } {
   if (resolved.has(canonicalPath(path))) return { held: true, viaFolder: null };
   const folder = inheritedFromFolder(space, path);
-  return { held: folder !== null, viaFolder: folder };
+  if (folder === null) return { held: false, viaFolder: null };
+  // Folder coverage is the engine's inherited-descendants step, not a seed,
+  // so an exclusion still beats it here — the same precedence
+  // `SpacesApi.isMember` applies. An explicit path member never reaches this
+  // branch: `resolved` (built from `resolveMembers`, which never drops a
+  // hand-picked member) already answered `held: true` for it above, exclusion
+  // included.
+  const excluded = (space.exclude ?? []).some((e) => canonicalPath(e) === canonicalPath(path));
+  if (excluded) return { held: false, viaFolder: null };
+  return { held: true, viaFolder: folder };
 }
 
 /**
