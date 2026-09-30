@@ -5,6 +5,7 @@ import {
   missingCount,
   spaceRowSummary,
   withoutMember,
+  withoutTagMember,
   type MemberRow,
   type PathMemberRow,
 } from "../src/ui/memberList";
@@ -184,6 +185,50 @@ describe("withoutMember", () => {
     expect(out).toEqual([
       { kind: "tag", tag: "project" },
       { kind: "tag", tag: "a.md" },
+    ]);
+  });
+});
+
+describe("withoutTagMember", () => {
+  // The mirror of `withoutMember`, extracted for the same reason: the contents
+  // modal's tag Remove button is a `Setting` control, which the stub does not
+  // model, so this is the only layer the decision can be tested at.
+  it("drops the named tag", () => {
+    const out = withoutTagMember(
+      [
+        { kind: "tag", tag: "project" },
+        { kind: "tag", tag: "archive" },
+      ],
+      "project"
+    );
+    expect(out).toEqual([{ kind: "tag", tag: "archive" }]);
+  });
+
+  it("leaves other tag members alone, including one nested under the removed tag", () => {
+    // Removing `#project` must not remove `#project/api`. It is a separate
+    // stored member, even though notes carrying it were reached through both.
+    const out = withoutTagMember(
+      [
+        { kind: "tag", tag: "project" },
+        { kind: "tag", tag: "project/api" },
+      ],
+      "project"
+    );
+    expect(out).toEqual([{ kind: "tag", tag: "project/api" }]);
+  });
+
+  it("leaves path members untouched, including one whose path matches the tag", () => {
+    const out = withoutTagMember(
+      [
+        { path: "project", kind: "folder" },
+        { path: "project.md", kind: "file" },
+        { kind: "tag", tag: "project" },
+      ],
+      "project"
+    );
+    expect(out).toEqual([
+      { path: "project", kind: "folder" },
+      { path: "project.md", kind: "file" },
     ]);
   });
 });

@@ -1,5 +1,6 @@
 import { Modal, Notice, Setting, type App } from "obsidian";
 import { TagSuggest } from "./TagSuggest";
+import { nativeKnownTags } from "./nativeTagCounts";
 import {
   memberRows,
   withoutMember,
@@ -181,6 +182,9 @@ export class SpaceContentsModal extends Modal {
           this.tagSuggest = new TagSuggest(
             this.app,
             t.inputEl,
+            // The private-API call stays behind its quarantine module; the
+            // suggester is handed a source the same way FolderSuggest is.
+            { knownTags: () => nativeKnownTags(this.app) },
             (tag) => {
               void this.addTag(tag);
             },
@@ -291,7 +295,7 @@ export class SpaceContentsModal extends Modal {
     const exclude = space.exclude ?? [];
     if (exclude.length === 0) return;
 
-    containerEl.createEl("h3", { text: "Left out" });
+    new Setting(containerEl).setName("Left out").setHeading();
     for (const path of exclude) {
       const setting = new Setting(containerEl).setName(path).addButton((b) =>
         b

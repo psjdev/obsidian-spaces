@@ -576,10 +576,23 @@ export class SpacesSettingTab extends PluginSettingTab {
     // markdown file in the vault and this method runs on every settings
     // render, so building it per space, or eagerly for the usual vault whose
     // spaces are paths only, would be a vault walk nothing reads.
+    //
+    // Memoized per tag as well, because every tag here is counted TWICE: once
+    // for `rows` below, and again inside `spaceRowSummary`, which re-runs
+    // `memberRows` over the same members to reach `memberSummary`. Each of
+    // those calls is a full scan of every note in
+    // `createMapTagIndex.pathsMatching`, so without this a space holding three
+    // tags scans the vault six times per render for three numbers that cannot
+    // have changed in between.
     let tags: TagIndex | null = null;
+    const counted = new Map<string, number>();
     const matchCount = (tag: string): number => {
+      const already = counted.get(tag);
+      if (already !== undefined) return already;
       tags ??= createObsidianTagIndex(this.app);
-      return tags.pathsMatching(tag).length;
+      const n = tags.pathsMatching(tag).length;
+      counted.set(tag, n);
+      return n;
     };
 
     return spaces.map((space) => {

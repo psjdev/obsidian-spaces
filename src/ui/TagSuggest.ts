@@ -1,45 +1,32 @@
 import { AbstractInputSuggest, type App } from "obsidian";
-import { normalizeTag } from "../visibility/tagMatch";
-
-/** How many candidates the popover offers at once. */
-const MAX_SUGGESTIONS = 50;
+import { tagCandidates, type TagSource } from "./tagCandidates";
 
 /**
- * `MetadataCache.getTags()`, which `obsidian.d.ts` 1.13.1 does not declare
- * even though Obsidian ships it. Declared as the one method this file calls
- * and nothing else, so the cast below stays narrow and checked rather than
- * becoming an `any`.
+ * Backs the add-a-tag field's autocomplete. All matching logic is
+ * `tagCandidates` (tagCandidates.ts) — this class only adapts Obsidian's
+ * popover to that pure function and reports a pick outward, the same division
+ * `FolderSuggest` keeps with `folderCandidates`.
  *
- * Not the private-API quarantine's business: nothing here is patched, no
- * `app` internal is reached through, and the call site is wrapped, so a build
- * of Obsidian without this method throws into `getSuggestions`'s own catch and
- * the field falls back to a plain input. It costs a suggestion list, never a
- * membership decision.
- */
-interface TagCounts {
-  getTags(): Record<string, number>;
-}
-
-/**
- * Backs the add-a-tag field's autocomplete.
+ * The tag source arrives through the constructor rather than being read off
+ * `app` here, for the same two reasons `FolderSuggest` takes a `VaultSource`:
+ * the decision about what to offer stays testable in plain node, and the one
+ * private Obsidian call behind it stays in its quarantine module
+ * (`nativeTagCounts.ts`) instead of spreading into a class that must import
+ * Obsidian types.
  *
- * Written against `AbstractInputSuggest` the same way `FolderSuggest` is, and
- * for the same reasons recorded there: `renderSuggestion`/`getSuggestions` are
- * abstract on the base class, and `selectSuggestion` is overridden rather than
- * using the `onSelect` callback so a pick both notifies the caller AND clears
- * the input in one place. `getSuggestions` runs on every keystroke, long after
- * construction succeeded, so a throw there reports outward rather than leaving
- * the field silently dead.
+ * `renderSuggestion`/`getSuggestions` are abstract on `AbstractInputSuggest`;
+ * `selectSuggestion` is not, but is overridden here (rather than using the
+ * `onSelect` callback) so a pick both notifies the caller AND clears the input
+ * in one place.
  *
- * Candidates come from `metadataCache.getTags()`, which returns a record of
- * tag to count. Whether it merges frontmatter and inline tags has NOT been
- * verified. A miss here costs a suggestion, not a wrong result: membership
- * itself is decided later by `getAllTags` (`ObsidianTagIndex.ts`), which does
- * read both.
+ * `onError` exists because a caller's try/catch around the constructor covers
+ * only a construction-time throw. `getSuggestions` runs on every keystroke,
+ * long after construction succeeded, and a throw there must not leave the
+ * field silently dead — it reports outward so the caller can flip the field to
+ * its plain-input fallback.
  *
- * Candidates are normalized before matching so the list holds one spelling of
- * each tag, matching the stored form; the leading `#` is added back only for
- * display.
+ * Tags are stored without a leading `#` and shown with one, which is why
+ * `renderSuggestion` adds it back and `onPick` does not.
  */
 export class TagSuggest extends AbstractInputSuggest<string> {
   /**
@@ -56,6 +43,7 @@ export class TagSuggest extends AbstractInputSuggest<string> {
   constructor(
     app: App,
     textInputEl: HTMLInputElement,
+    private readonly tags: TagSource,
     private readonly onPick: (tag: string) => void,
     private readonly onError: (e: unknown) => void
   ) {
@@ -78,12 +66,7 @@ export class TagSuggest extends AbstractInputSuggest<string> {
 
   protected override getSuggestions(query: string): string[] {
     try {
-      const want = normalizeTag(query);
-      const cache = this.app.metadataCache as unknown as TagCounts;
-      const all = Object.keys(cache.getTags()).map(normalizeTag);
-      const unique = [...new Set(all)].sort();
-      if (want.length === 0) return unique.slice(0, MAX_SUGGESTIONS);
-      return unique.filter((t) => t.includes(want)).slice(0, MAX_SUGGESTIONS);
+      return tagCandidates(this.tags, query);
     } catch (e) {
       this.onError(e);
       return [];
