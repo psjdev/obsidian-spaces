@@ -61,6 +61,13 @@ export interface SpaceDefinition {
    *
    * Absent rather than empty when the space excludes nothing, so a document
    * written before this field existed round-trips unchanged.
+   *
+   * An exclusion names a NOTE. Naming a folder does not exclude its
+   * contents: `buildVisibilitySnapshot` skips the folder itself but not its
+   * descendants, and the scaffold closure then puts the folder back to hold
+   * them. No gesture in the interface can produce one, since a member folder
+   * is removed as a member and a folder is never tag-matched, so this is a
+   * hand-edited `data.json` state only.
    */
   exclude?: string[];
   members: MemberEntry[];

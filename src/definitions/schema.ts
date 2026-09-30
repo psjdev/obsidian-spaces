@@ -99,6 +99,28 @@ function validateMembers(raw: unknown): MemberEntry[] | null {
     // An unrecognised kind is still fatal, which rejects the whole document
     // rather than silently dropping a member an older build would then write
     // back without. See the forward compatibility section of the spec.
+    //
+    // **This loader answers "a field I do not understand" in two different
+    // ways on purpose, and the next schema field has to pick one.** Here, an
+    // unrecognised member `kind` rejects the WHOLE document; in
+    // `validateSpace` below, an unusable `exclude` entry is dropped on its
+    // own and the space is kept. The question to ask is what the plugin
+    // would destroy by carrying on:
+    //
+    // - Reject the document when the value is a MEMBERSHIP the user chose
+    //   and a write-back would erase. A newer install's `kind` dropped here
+    //   would be written back without it, losing curation the user cannot
+    //   recover; a sticky refusal to write leaves their data intact and says
+    //   why. Anything that says what is IN a space belongs in this branch.
+    // - Drop the entry when the value only REFINES what is already there, so
+    //   losing it costs nothing the user cannot see and redo. A bad
+    //   `exclude` string is unusable, not incoherent, and rejecting the
+    //   space over it would cost its name, icon, color and every member.
+    //   `root` is handled the same way, for the same reason.
+    //
+    // Both are right for their own field. Copying whichever one you read
+    // first is how a space gets thrown away over a typo, or how a user's
+    // members get silently deleted by an older client.
     return null;
   }
   return out;
@@ -208,7 +230,9 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
   }
   // Shape only, entry by entry, exactly like `root` above: a bad string is
   // unusable, not incoherent, and dropping the whole space over one would
-  // cost the user its name, icon, color and members.
+  // cost the user its name, icon, color and members. The split between this
+  // and `validateMembers`' fatal branch is deliberate; the note at that
+  // branch says which of the two a new field wants.
   let exclude: string[] | undefined;
   if (Array.isArray(r.exclude)) {
     const seen = new Set<string>();
