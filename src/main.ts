@@ -238,6 +238,21 @@ export default class SpacesPlugin extends Plugin {
   private controller!: SpaceController;
 
   /**
+   * Whether Obsidian's metadata cache has finished its initial parse, which
+   * is what lets the controller tell "no matches yet" from "no matches".
+   *
+   * `metadataCache.on("resolved")` is the only thing that sets it true, and
+   * it is public. `onload()` seeds it from `workspace.layoutReady` because of
+   * the one case the event cannot cover: a plugin ENABLED after startup has
+   * already missed `resolved`, and would never see another until some file
+   * changed, so a tag space would stay fallen open indefinitely. During app
+   * startup `onload` runs before the layout is ready, so the seed is false
+   * exactly when the cache really is cold, and true exactly when the plugin
+   * was started into a running app whose cache is already warm.
+   */
+  private metadataResolved = false;
+
+  /**
    * Takes `fileManager.getNewFileParent` back off. Null until `start()`
    * installs it, and null again once teardown has run.
    */
@@ -373,6 +388,9 @@ export default class SpacesPlugin extends Plugin {
 
   override async onload(): Promise<void> {
     this.loaded = true;
+    // Read HERE and nowhere later: during app startup this is false, and by
+    // the time anything else could ask it would be true. See the field.
+    this.metadataResolved = this.app.workspace.layoutReady;
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -584,6 +602,7 @@ export default class SpacesPlugin extends Plugin {
       {
         apply: (snap) => this.onSnapshotApplied(snap),
         livePaths: () => this.liveLeafPaths(),
+        metadataReady: () => this.metadataResolved,
       },
       createLazyTagIndex(() => createObsidianTagIndex(this.app)),
       {

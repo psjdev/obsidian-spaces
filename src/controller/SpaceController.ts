@@ -7,6 +7,7 @@ import { compileIgnore, canonicalPath } from "../visibility/glob";
 import { RevealedSet } from "../visibility/RevealedSet";
 import { sameSelection } from "../order/sortOverride";
 import { hasRoot, rootOf } from "../visibility/folderSpace";
+import { watchesMetadata } from "../definitions/membership";
 import { resolveMembers } from "./resolveMembers";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from "../types";
@@ -19,6 +20,18 @@ interface ControllerHost {
    * revealed.
    */
   livePaths(): Set<string>;
+  /**
+   * Whether Obsidian's metadata cache has finished its initial parse.
+   *
+   * False means "ask again later", NOT "the answer is no". `getAllTags`
+   * returns null for every file the cache has not reached yet, so a tag space
+   * asked too early resolves to zero members. See `recompute`.
+   *
+   * Optional, and ABSENT MEANS READY. A host that cannot report readiness
+   * must filter rather than fall open forever, and that is also exactly the
+   * behaviour every caller had before this existed.
+   */
+  metadataReady?(): boolean;
 }
 
 /**
@@ -336,6 +349,39 @@ export class SpaceController {
       if (this.runtime.getSelection().kind === "space") {
         this.runtime.setSelection({ kind: "all" });
       }
+      this.snapshot = null;
+      this.host.apply(null);
+      return;
+    }
+    // FALL OPEN WHILE THE METADATA CACHE IS STILL BUILDING.
+    //
+    // `onLayoutReady` fires long before Obsidian finishes parsing, and
+    // `getAllTags` returns null for every file it has not reached, so a tag
+    // space resolved to zero members at first paint: 0 folder rows, 1 file
+    // row, no loading state, no explanation, for the ~3 s the cache takes to
+    // settle on a 10,000 note vault. That is indistinguishable from data
+    // loss, and the coalescer does not bound it — 6,550 `changed` events over
+    // 2 s produced exactly one flush, because the 250 ms max-wait cannot fire
+    // while the main thread is busy.
+    //
+    // Unfiltered rather than the previous snapshot, on purpose. At FIRST
+    // PAINT — the only moment this branch can be taken — there is no previous
+    // snapshot, so holding one degenerates to this anyway for the case that
+    // matters; and showing everything is this plugin's existing, stated
+    // failure posture ("Showing all files"), whereas holding a frozen tree
+    // over a vault that has since changed on disk is wrong in a way the user
+    // cannot see. It is self-correcting: `resolved` fires, main.ts requests a
+    // recompute, and the tree filters.
+    //
+    // Gated on `watchesMetadata`, so a folder space and a curated space of
+    // paths still filter normally at first paint — neither has anything to
+    // wait for, and falling open for them would trade one wrong tree for
+    // another.
+    //
+    // The hazard: a tag space that genuinely matches nothing MUST still
+    // render empty. "No matches yet" and "no matches" are different answers,
+    // which is why this reads a readiness signal and not the member count.
+    if (watchesMetadata(space) && this.host.metadataReady?.() === false) {
       this.snapshot = null;
       this.host.apply(null);
       return;
