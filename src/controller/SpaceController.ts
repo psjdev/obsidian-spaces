@@ -95,6 +95,17 @@ export class SpaceController {
     this.tags = index;
   }
 
+  /**
+   * The tag index the CURRENT snapshot was computed from.
+   *
+   * Exposed so a membership question asked outside a recompute answers from
+   * the same picture the tree was drawn from, rather than taking a second,
+   * possibly different one. *All*'s "Add to space" menu is the caller.
+   */
+  tagIndex(): TagIndex {
+    return this.tags;
+  }
+
   activeSpace(): SpaceDefinition | null {
     const sel = this.runtime.getSelection();
     if (sel.kind === "all") return null;

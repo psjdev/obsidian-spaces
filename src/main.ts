@@ -23,6 +23,7 @@ import { CreateSpacePanel } from "./ui/CreateSpacePanel";
 import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
 import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
+import { createLazyTagIndex } from "./visibility/TagIndex";
 import { repairOnRename, repairRenameIn } from "./lifecycle/pathRepair";
 import {
   correlate,
@@ -570,7 +571,7 @@ export default class SpacesPlugin extends Plugin {
         apply: (snap) => this.onSnapshotApplied(snap),
         livePaths: () => this.liveLeafPaths(),
       },
-      createObsidianTagIndex(this.app),
+      createLazyTagIndex(() => createObsidianTagIndex(this.app)),
       {
         transition: (from, to) =>
           this.runMaskedTransition(from, to),
@@ -1272,9 +1273,16 @@ export default class SpacesPlugin extends Plugin {
       // controller reference stays valid. Built at flush time, so it is the
       // burst's end state rather than any intermediate one.
       this.controller.setVaultIndex(createObsidianVaultIndex(this.app.vault));
-      // Rebuilt in the same breath. A recompute reading a fresh vault against
-      // a stale tag index would show a note the vault has and the tags do not.
-      this.controller.setTagIndex(createObsidianTagIndex(this.app));
+      // Replaced in the same breath, and LAZY. A recompute reading a fresh
+      // vault against a stale tag index would show a note the vault has and
+      // the tags do not, so the index must not survive this flush — but
+      // building it here unconditionally charged every user an O(vault)
+      // metadata walk per burst of vault events, tags or no tags. The wrapper
+      // keeps the first half and drops the second: the walk happens when
+      // `resolveMembers` expands a tag member and at no other time, and
+      // because it can only happen AFTER the line above, it is never older
+      // than the vault index it is read against.
+      this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
       this.controller.refresh();
     },
   });

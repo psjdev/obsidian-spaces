@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMapTagIndex } from "../src/visibility/TagIndex";
+import { createLazyTagIndex, createMapTagIndex } from "../src/visibility/TagIndex";
 
 const index = createMapTagIndex(
   new Map([
@@ -34,5 +34,35 @@ describe("createMapTagIndex", () => {
   // Review Focus item 2: a note whose metadata gave no usable tags.
   it("ignores a note with no tags", () => {
     expect(index.pathsMatching("project")).not.toContain("d.md");
+  });
+});
+
+/**
+ * The flush replaces the tag index on every burst of vault events. Building
+ * it there cost every user a walk of every markdown file and its metadata
+ * cache per burst, whether or not any space held a tag.
+ */
+describe("createLazyTagIndex", () => {
+  it("does not build the index until something asks it a question", () => {
+    let builds = 0;
+    createLazyTagIndex(() => {
+      builds++;
+      return createMapTagIndex(new Map());
+    });
+    expect(builds).toBe(0);
+  });
+
+  it("builds once and answers every later question from that one snapshot", () => {
+    // One recompute must see ONE picture: a wrapper that rebuilt per lookup
+    // would let two tag members in the same space disagree about the vault.
+    let builds = 0;
+    const lazy = createLazyTagIndex(() => {
+      builds++;
+      return createMapTagIndex(new Map([["a.md", ["project"]]]));
+    });
+    expect(lazy.pathsMatching("project")).toEqual(["a.md"]);
+    expect(lazy.pathsMatching("project")).toEqual(["a.md"]);
+    expect(lazy.pathsMatching("other")).toEqual([]);
+    expect(builds).toBe(1);
   });
 });

@@ -3,8 +3,8 @@ import { SpaceController } from "../src/controller/SpaceController";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildFakeVault } from "./helpers/fakeVault";
-import { createMapTagIndex } from "../src/visibility/TagIndex";
-import { SCHEMA_VERSION } from "../src/types";
+import { createLazyTagIndex, createMapTagIndex } from "../src/visibility/TagIndex";
+import { SCHEMA_VERSION, type MemberEntry } from "../src/types";
 import type { SwitchOutcome } from "../src/types";
 import { createSpace } from "../src/actions/spaceLifecycle";
 
@@ -1591,5 +1591,63 @@ describe("SpaceController", () => {
       expect(snap!.visiblePaths().size).toBeGreaterThan(0);
       expect(snap!.decisionFor("Papers/A.md").visible).toBe(true);
     });
+  });
+});
+
+/**
+ * What a recompute is allowed to COST when nothing in the space depends on a
+ * note's contents.
+ *
+ * `createObsidianTagIndex` walks every markdown file in the vault and reads
+ * each one's metadata cache. The coalescer replaces the tag index on every
+ * burst of vault events, so an eagerly built one charged that walk to every
+ * user on every burst, including everyone who has never put a tag in a space.
+ */
+describe("SpaceController tag index laziness", () => {
+  async function buildWith(members: MemberEntry[]) {
+    let stored: unknown = {
+      schemaVersion: SCHEMA_VERSION,
+      settings: { globalIgnore: [], restoreLayouts: false },
+      spaces: [
+        { id: "research", name: "Research", icon: "microscope", color: "#4ecdc4", members },
+      ],
+    };
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await store.load();
+    const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    runtime.load();
+    let builds = 0;
+    const controller = new SpaceController(
+      store,
+      runtime,
+      vault,
+      { apply: vi.fn(), livePaths: () => new Set<string>() },
+      createLazyTagIndex(() => {
+        builds++;
+        return createMapTagIndex(new Map([["Recipes.md", ["project"]]]));
+      })
+    );
+    return { controller, builds: () => builds };
+  }
+
+  it("never builds it for a space of files and folders", async () => {
+    const { controller, builds } = await buildWith([{ path: "Papers", kind: "folder" }]);
+    await controller.switchTo({ kind: "space", id: "research" });
+    controller.refresh();
+    expect(controller.currentSnapshot()?.decisionFor("Papers/A.md").visible).toBe(true);
+    expect(builds()).toBe(0);
+  });
+
+  it("builds it, once, for a space holding a tag member", async () => {
+    const { controller, builds } = await buildWith([{ kind: "tag", tag: "project" }]);
+    await controller.switchTo({ kind: "space", id: "research" });
+    controller.refresh();
+    expect(controller.currentSnapshot()?.decisionFor("Recipes.md").visible).toBe(true);
+    expect(builds()).toBe(1);
   });
 });

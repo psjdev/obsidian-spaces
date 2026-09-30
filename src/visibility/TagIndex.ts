@@ -36,3 +36,38 @@ export function createMapTagIndex(byPath: Map<string, string[]>): TagIndex {
     },
   };
 }
+
+/**
+ * A `TagIndex` that does not exist until something asks it a question.
+ *
+ * `createObsidianTagIndex` walks every markdown file in the vault, reads each
+ * one's metadata cache and allocates a tag array per file. The coalescer's
+ * flush replaces the tag index on every burst of vault events, so building it
+ * eagerly there made every user pay an O(vault) allocating walk per burst,
+ * including the great majority who have never put a tag in a space.
+ *
+ * Only `resolveMembers` ever asks, and only for a space holding a tag member,
+ * so wrapping the build makes the walk happen exactly when a tag member is
+ * about to be expanded and never otherwise. That is the same laziness
+ * `SpaceContentsModal` and `SettingsTab` already apply to their own copies;
+ * this is the flush finally applying it too.
+ *
+ * Built at most ONCE per wrapper, so one recompute sees one consistent
+ * picture, exactly as an eagerly built snapshot does. A caller wanting a
+ * fresh picture makes a fresh wrapper, which is what the flush does.
+ *
+ * Ordering matters and falls out right: the flush replaces the vault index
+ * first and this wrapper second, so the build can only ever happen at or
+ * AFTER the vault index was taken. A recompute can therefore never read a
+ * fresh vault against a stale tag index, which is the pairing that would show
+ * a note the vault has and the tags do not.
+ */
+export function createLazyTagIndex(build: () => TagIndex): TagIndex {
+  let built: TagIndex | null = null;
+  return {
+    pathsMatching(tag: string): string[] {
+      built ??= build();
+      return built.pathsMatching(tag);
+    },
+  };
+}
