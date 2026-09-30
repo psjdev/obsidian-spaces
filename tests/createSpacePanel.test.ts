@@ -31,6 +31,9 @@ const VAULT: Record<string, NodeKind> = {
   "inbox.md": "file",
 };
 
+/** What `nativeKnownTags` would hand over: Obsidian's spelling, `#` and all. */
+const VAULT_TAGS = ["#project", "#project/console", "#archive"];
+
 interface Harness {
   panel: CreateSpacePanel;
   parent: HTMLElement;
@@ -49,6 +52,7 @@ function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
       allPaths: () => Object.keys(VAULT),
       kindOf: (path) => VAULT[path] ?? null,
     },
+    tags: { knownTags: () => [...VAULT_TAGS] },
     customColors: [],
     useThemeIconColor: () => false,
     saveCustomColors: async (customs) => {
@@ -630,5 +634,174 @@ describe("the picker reads the vault once per session", () => {
     const after = reads();
     byKey("mode-folder").click();
     expect(reads()).toBeGreaterThan(after);
+  });
+});
+
+describe("the # sigil in the filter box", () => {
+  /**
+   * Every test here types a BARE `#`.
+   *
+   * That is not a narrow case, it is the only one reachable: a non-empty tag
+   * query builds an Obsidian fuzzy scorer, and the stub refuses to imitate
+   * `prepareFuzzySearch` on purpose (see its docstring) so that no ranking
+   * assertion can be written against a fake algorithm. The ranking itself is
+   * tested where the scorer is injected, in `fuzzyTagCandidates.test.ts`; what
+   * is left for this file is the WIRING, and a bare `#` exercises all of it —
+   * the mode switch, the rows, the pick, the chip and the way back.
+   */
+  const filterFor = (text: string): void => {
+    const f = byKey("item-filter") as HTMLInputElement;
+    f.value = text;
+    f.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const tagRows = (): HTMLElement[] =>
+    Array.from(panelEl().querySelectorAll<HTMLElement>("[role='option']"));
+  const tagRowFor = (tag: string): HTMLElement => {
+    const row = tagRows().find((r) => r.dataset.tag === tag);
+    if (!row) throw new Error(`no tag row for ${tag}; have ${tagRows().map((r) => r.dataset.tag)}`);
+    return row;
+  };
+  const chips = (): HTMLElement[] =>
+    Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-chip"));
+
+  const openCurated = (): void => {
+    byKey("create").click();
+    byKey("mode-curate").click();
+  };
+
+  it("swaps the tree for the vault's tags", () => {
+    makeHarness();
+    openCurated();
+    expect(rows().length).toBeGreaterThan(0);
+    filterFor("#");
+    // The tree is gone, not merely filtered to nothing.
+    expect(rows()).toEqual([]);
+    expect(tagRows().map((r) => r.dataset.tag)).toEqual(["archive", "project", "project/console"]);
+  });
+
+  it("stops being a tree while it is a list of tags", () => {
+    // A `role="tree"` owning `option`s reads as a malformed tree rather than
+    // as a list, and the box is the SAME element in both modes.
+    makeHarness();
+    openCurated();
+    filterFor("#");
+    expect(panelEl().querySelector("[role='tree']")).toBeNull();
+    expect(panelEl().querySelector("[role='listbox']")).not.toBeNull();
+  });
+
+  it("goes back to the tree when the sigil is backspaced away", () => {
+    // The tree is the control in the prototype comparison, so the way back has
+    // to be exactly the tree, with whatever text is left still filtering it.
+    // The vault below has no tag matching "inbox", so this walks the same two
+    // states a backspace does without asking the stub to score anything.
+    makeHarness({ tags: { knownTags: () => [] } });
+    openCurated();
+    filterFor("#inbox");
+    expect(rows()).toEqual([]);
+    expect(panelEl().querySelector("[role='listbox']")).not.toBeNull();
+    filterFor("inbox");
+    expect(panelEl().querySelector("[role='tree']")).not.toBeNull();
+    expect(rows().map((r) => r.dataset.path)).toEqual(["inbox.md"]);
+  });
+
+  it("adds a tag member, not a path member", () => {
+    const h = makeHarness();
+    openCurated();
+    typeName("Work");
+    filterFor("#");
+    tagRowFor("project").click();
+    byKey("create").click();
+    expect(h.submitted[0]?.opts.members).toEqual([{ kind: "tag", tag: "project" }]);
+  });
+
+  it("counts a tag on the Curated button, like any other member", () => {
+    makeHarness();
+    openCurated();
+    filterFor("#");
+    tagRowFor("project").click();
+    expect(byKey("mode-curate").textContent).toContain("1");
+  });
+
+  it("removes on a second click, and says which rows are chosen", () => {
+    makeHarness();
+    openCurated();
+    filterFor("#");
+    tagRowFor("project").click();
+    expect(tagRowFor("project").getAttribute("aria-selected")).toBe("true");
+    expect(tagRowFor("archive").getAttribute("aria-selected")).toBe("false");
+    tagRowFor("project").click();
+    expect(tagRowFor("project").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("keeps a chosen tag on screen once the tag list is gone", () => {
+    // The tree marks a chosen file in place; a tag has no row anywhere to
+    // mark, so without the chip the only trace of it would be a number.
+    makeHarness();
+    openCurated();
+    filterFor("#");
+    tagRowFor("project").click();
+    filterFor("");
+    expect(chips().map((c) => c.textContent)).toEqual(["#project"]);
+  });
+
+  it("removes a tag from its chip", () => {
+    const h = makeHarness();
+    openCurated();
+    typeName("Work");
+    filterFor("#");
+    tagRowFor("project").click();
+    filterFor("");
+    chips()[0]?.click();
+    expect(chips()).toEqual([]);
+    byKey("create").click();
+    expect(h.submitted[0]?.opts.members).toEqual([]);
+  });
+
+  it("leaves file and folder members to the tree, with no chip of their own", () => {
+    makeHarness();
+    openCurated();
+    rowFor("inbox.md").click();
+    expect(chips()).toEqual([]);
+    expect(rowFor("inbox.md").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("says so when the vault's tags cannot be listed", () => {
+    // `nativeKnownTags` reports a missing private `getTags` by RETURNING null.
+    // An empty box would be read as "this vault has no tags", which is a
+    // different thing with a different remedy.
+    makeHarness({ tags: { knownTags: () => null } });
+    openCurated();
+    filterFor("#");
+    const empty = panelEl().querySelector(".spaces-create-tree-empty");
+    expect(empty?.textContent).toMatch(/Settings, Contents/);
+  });
+
+  it("says so when the vault genuinely has no tags", () => {
+    makeHarness({ tags: { knownTags: () => [] } });
+    openCurated();
+    filterFor("#");
+    const empty = panelEl().querySelector(".spaces-create-tree-empty");
+    expect(empty?.textContent).toMatch(/No tags/);
+  });
+
+  it("leaves the sigil to the tree in folder mode", () => {
+    // A folder space is a window onto one root, and a tag is not one. Typing
+    // `#` there must go on filtering folders, not offer a member the mode
+    // cannot submit.
+    makeHarness();
+    byKey("create").click();
+    byKey("mode-folder").click();
+    filterFor("#");
+    expect(panelEl().querySelector("[role='listbox']")).toBeNull();
+    expect(panelEl().querySelector("[role='tree']")).not.toBeNull();
+  });
+
+  it("picks with the keyboard", () => {
+    makeHarness();
+    openCurated();
+    filterFor("#");
+    const row = tagRowFor("archive");
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(tagRowFor("archive").getAttribute("aria-selected")).toBe("true");
   });
 });

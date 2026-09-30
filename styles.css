@@ -371,6 +371,55 @@
   color: var(--text-muted);
   font-size: 0.9em;
 }
+
+/* §: the `#` sigil's tag list, drawn in the same box as the tree.
+   The row itself is `.spaces-create-tree-row`, so only the differences live
+   here: no caret slot to reserve, because nothing in a flat list expands. */
+.spaces-create-tag-row { padding-left: 6px; }
+/* The `#` is the whole icon. Muted so the tag's name is what the eye lands
+   on, and separate from the name because `renderResults` marks the matched
+   characters of the STORED tag, which has no `#` in it. */
+.spaces-create-tag-sigil {
+  color: var(--text-muted);
+  margin-right: 1px;
+}
+.spaces-create-tag-row.is-selected .spaces-create-tag-sigil { color: inherit; }
+
+/* The chosen tags. A file or a folder is marked in the tree, but a tag has no
+   row anywhere to mark, so it gets a chip instead. */
+.spaces-create-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+/* Collapsed rather than merely childless: the picker column has a 6px gap
+   between its children, which an empty chip row would otherwise double. */
+.spaces-create-chips.is-empty { display: none; }
+.spaces-create-chip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Obsidian's own tag pill, so a chip here looks like the tag it names looks
+     everywhere else in the app. */
+  padding: 1px 6px;
+  height: auto;
+  box-shadow: none;
+  border-radius: var(--tag-radius, 14px);
+  background: var(--tag-background, var(--background-modifier-hover));
+  color: var(--tag-color, var(--text-accent));
+  font-size: var(--tag-size, 0.85em);
+  line-height: 1.5;
+}
+.spaces-create-chip:hover {
+  background: var(--tag-background-hover, var(--background-modifier-hover));
+}
+.spaces-create-chip-x {
+  display: flex;
+  align-items: center;
+  opacity: 0.6;
+}
+.spaces-create-chip-x svg { width: 12px; height: 12px; }
+.spaces-create-chip:hover .spaces-create-chip-x { opacity: 1; }
 /* The theme button replaces the old swatch row: full width under the name,
    so it reads as an action rather than seven unexplained circles. The brush
    carries the current color (set inline from state), so the button shows the

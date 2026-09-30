@@ -20,6 +20,7 @@ import { SpaceSuggestModal } from "./ui/SpaceSuggestModal";
 import { spaceEntries } from "./ui/spaceEntries";
 import { knownIconIds } from "./ui/knownIcons";
 import { CreateSpacePanel } from "./ui/CreateSpacePanel";
+import { nativeKnownTags } from "./ui/nativeTagCounts";
 import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
 import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
@@ -1688,6 +1689,11 @@ export default class SpacesPlugin extends Plugin {
 
     const panel = new CreateSpacePanel({
       folders: this.folderSource(),
+      // The one private call behind the picker's `#` list, kept behind its
+      // quarantine module (`nativeTagCounts.ts`) exactly as the add-a-tag
+      // field in Settings keeps it. A build without `getTags` returns null,
+      // and the picker says so rather than showing an empty list.
+      tags: { knownTags: () => nativeKnownTags(this.app) },
       // The rotation, or the neutral swatch, per the user's setting.
       // Read here rather than captured, so flipping the toggle takes effect on
       // the next open of this panel without a reload.
