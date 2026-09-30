@@ -4,6 +4,7 @@ import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildFakeVault } from "./helpers/fakeVault";
 import { createLazyTagIndex, createMapTagIndex } from "../src/visibility/TagIndex";
+import { tagIndexOf } from "./helpers/tagIndex";
 import { SCHEMA_VERSION, type MemberEntry } from "../src/types";
 import type { SwitchOutcome } from "../src/types";
 import { createSpace } from "../src/actions/spaceLifecycle";
@@ -1629,7 +1630,7 @@ describe("SpaceController tag index laziness", () => {
       { apply: vi.fn(), livePaths: () => new Set<string>() },
       createLazyTagIndex(() => {
         builds++;
-        return createMapTagIndex(new Map([["Recipes.md", ["project"]]]));
+        return tagIndexOf(new Map([["Recipes.md", ["project"]]]));
       })
     );
     return { controller, builds: () => builds };

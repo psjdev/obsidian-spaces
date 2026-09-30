@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createLazyTagIndex, createMapTagIndex } from "../src/visibility/TagIndex";
+import { tagIndexOf } from "./helpers/tagIndex";
 
-const index = createMapTagIndex(
+const index = tagIndexOf(
   new Map([
     ["a.md", ["project", "urgent"]],
     ["b.md", ["project/atlas"]],
@@ -58,7 +59,7 @@ describe("createLazyTagIndex", () => {
     let builds = 0;
     const lazy = createLazyTagIndex(() => {
       builds++;
-      return createMapTagIndex(new Map([["a.md", ["project"]]]));
+      return tagIndexOf(new Map([["a.md", ["project"]]]));
     });
     expect(lazy.pathsMatching("project")).toEqual(["a.md"]);
     expect(lazy.pathsMatching("project")).toEqual(["a.md"]);

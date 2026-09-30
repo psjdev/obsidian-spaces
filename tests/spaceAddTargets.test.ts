@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spaceAddTargets } from "../src/actions/spaceAddTargets";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
+import { tagIndexOf } from "./helpers/tagIndex";
 import type { SpaceDefinition } from "../src/types";
 
 /**
@@ -119,7 +120,7 @@ describe("spaceAddTargets and tag members", () => {
     name: "Tagged",
     members: [{ kind: "tag", tag: "project" }],
   });
-  const index = createMapTagIndex(
+  const index = tagIndexOf(
     new Map([
       ["Anywhere/Tagged.md", ["project"]],
       ["Anywhere/Nested.md", ["project/atlas"]],

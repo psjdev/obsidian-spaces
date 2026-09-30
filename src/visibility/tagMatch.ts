@@ -38,6 +38,15 @@ export function normalizeTag(raw: string): string {
  *
  * Both arguments must already be normalized. Normalizing here instead would
  * run on every note for every member on every recompute.
+ *
+ * Nothing in `src/` calls this any more, and that is deliberate rather than
+ * rot. `pathsByTag` inverts it at build time, filing a note under each of its
+ * tags' ancestors, so a lookup now answers in one step what this used to be
+ * asked per note per query. It stays because it is still the DEFINITION of
+ * the relation that expansion implements: `tests/pathsByTag.test.ts` checks
+ * the built index against this function over a corpus, rather than against a
+ * restatement of the rule in an assertion. Widen or narrow the match here and
+ * that test says so.
  */
 export function tagMatches(member: string, noteTag: string): boolean {
   return noteTag === member || noteTag.startsWith(member + "/");

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildVisibilitySnapshot } from "../src/visibility/VisibilityEngine";
 import { createTreeVaultIndex } from "../src/visibility/VaultIndex";
-import { createMapTagIndex } from "../src/visibility/TagIndex";
+import { tagIndexOf } from "./helpers/tagIndex";
 import { compileIgnore, canonicalPath } from "../src/visibility/glob";
 import { resolveMembers } from "../src/controller/resolveMembers";
 import type { MemberEntry, MemberKind, SpaceDefinition } from "../src/types";
@@ -16,7 +16,7 @@ const vault = createTreeVaultIndex(
   ])
 );
 
-const tags = createMapTagIndex(
+const tags = tagIndexOf(
   new Map([
     ["Work/a.md", ["project"]],
     ["Personal/b.md", ["project/atlas"]],

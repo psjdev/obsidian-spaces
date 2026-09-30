@@ -28,13 +28,13 @@ vi.mock("../src/visibility/glob", async (importOriginal) => {
 });
 
 import { resolveMembers } from "../src/controller/resolveMembers";
-import { createMapTagIndex } from "../src/visibility/TagIndex";
+import { tagIndexOf } from "./helpers/tagIndex";
 import { canonicalPath } from "../src/visibility/glob";
 import type { MemberEntry, SpaceDefinition } from "../src/types";
 
 const spy = vi.mocked(canonicalPath);
 
-const tags = createMapTagIndex(
+const tags = tagIndexOf(
   new Map([
     ["Work/a.md", ["project"]],
     ["Work/b.md", ["project"]],

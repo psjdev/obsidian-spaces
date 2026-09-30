@@ -26,7 +26,8 @@ import { SpaceController } from "../src/controller/SpaceController";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildFakeVault } from "./helpers/fakeVault";
-import { createLazyTagIndex, createMapTagIndex } from "../src/visibility/TagIndex";
+import { createLazyTagIndex } from "../src/visibility/TagIndex";
+import { tagIndexOf } from "./helpers/tagIndex";
 import { SCHEMA_VERSION, type MemberEntry, type SpaceDefinition } from "../src/types";
 
 const vault = buildFakeVault({
@@ -79,7 +80,7 @@ async function build(
     },
     createLazyTagIndex(() => {
       builds++;
-      return createMapTagIndex(tags);
+      return tagIndexOf(tags);
     })
   );
   return {
@@ -205,7 +206,7 @@ describe("a host that reports no readiness at all", () => {
       runtime,
       vault,
       { apply: vi.fn(), livePaths: () => new Set<string>() },
-      createMapTagIndex(WARM)
+      tagIndexOf(WARM)
     );
     await controller.switchTo({ kind: "space", id: "research" });
     expect(controller.currentSnapshot()?.decisionFor("Recipes.md").visible).toBe(true);
