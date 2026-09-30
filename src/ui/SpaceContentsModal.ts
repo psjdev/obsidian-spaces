@@ -2,6 +2,7 @@ import { Modal, Notice, Setting, type App } from "obsidian";
 import { TagSuggest } from "./TagSuggest";
 import { nativeKnownTags } from "./nativeTagCounts";
 import {
+  exclusionRows,
   memberRows,
   withoutMember,
   withoutTagMember,
@@ -101,11 +102,12 @@ export class SpaceContentsModal extends Modal {
       return tags.pathsMatching(tag).length;
     };
 
-    const rows = memberRows(
-      space,
-      (path) => this.app.vault.getAbstractFileByPath(path) !== null,
-      matchCount
-    );
+    // Shared with the exclusions section below, which asks the same question
+    // of a different list of paths.
+    const exists = (path: string): boolean =>
+      this.app.vault.getAbstractFileByPath(path) !== null;
+
+    const rows = memberRows(space, exists, matchCount);
 
     // Above the list, so it is still reachable on a space with no members:
     // that is the space most in need of one.
@@ -120,7 +122,7 @@ export class SpaceContentsModal extends Modal {
       }
     }
 
-    this.renderExclusions(contentEl, space);
+    this.renderExclusions(contentEl, space, exists);
   }
 
   /**
@@ -219,13 +221,17 @@ export class SpaceContentsModal extends Modal {
     space: SpaceDefinition,
     row: PathMemberRow
   ): void {
+    // No em dashes in anything a user reads: this project's copy rule, and
+    // these three sentences were the last of them in this dialog. Recast as
+    // separate sentences rather than comma-spliced, which is what the tag row
+    // below already does ("Tag. No notes carry it right now.").
     const note =
       row.status === "missing"
-        ? "Missing — nothing at this path. Kept in case it comes back."
+        ? "Missing. Nothing at this path. Kept in case it comes back."
         : row.status === "redundant"
-          ? `Redundant — already covered by ${row.coveredBy}.`
+          ? `Redundant. Already covered by ${row.coveredBy}.`
           : row.kind === "folder"
-            ? "Folder — its contents are members too."
+            ? "Folder. Its contents are members too."
             : "File.";
 
     const setting = new Setting(containerEl)
@@ -290,13 +296,23 @@ export class SpaceContentsModal extends Modal {
    * names directly, because it was there through a folder or a tag. It shows
    * up nowhere in the member list, so this section is the only place it can be
    * seen or undone.
+   *
+   * A row says something only when something is wrong with it, which is the
+   * rule the member rows and `memberSummary` already follow. What can be
+   * wrong is that nothing lives at the path any more: the entry is as dead as
+   * a missing member and just as impossible to spot from the file tree, so it
+   * gets the same word and the same dimmed styling.
    */
-  private renderExclusions(containerEl: HTMLElement, space: SpaceDefinition): void {
-    const exclude = space.exclude ?? [];
-    if (exclude.length === 0) return;
+  private renderExclusions(
+    containerEl: HTMLElement,
+    space: SpaceDefinition,
+    exists: (path: string) => boolean
+  ): void {
+    const rows = exclusionRows(space, exists);
+    if (rows.length === 0) return;
 
     new Setting(containerEl).setName("Left out").setHeading();
-    for (const path of exclude) {
+    for (const { path, status } of rows) {
       const setting = new Setting(containerEl).setName(path).addButton((b) =>
         b
           .setButtonText("Put back")
@@ -312,6 +328,10 @@ export class SpaceContentsModal extends Modal {
             }, `could not put ${path} back`);
           })
       );
+      if (status === "missing") {
+        setting.setDesc("Missing. Nothing at this path. Put it back to clear the entry.");
+        setting.settingEl.addClass("is-missing");
+      }
       setting.settingEl.addClass("spaces-member-row");
     }
   }

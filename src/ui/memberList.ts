@@ -96,6 +96,40 @@ export function memberRows(
   });
 }
 
+/** A row for one of the paths a space leaves out. */
+export interface ExclusionRow {
+  path: string;
+  /** `missing` when nothing lives at the path any more. */
+  status: "present" | "missing";
+}
+
+/**
+ * One row per stored exclusion, in stored order.
+ *
+ * An exclusion resolving to nothing was drawn exactly like a healthy one,
+ * while a path MEMBER resolving to nothing has always been marked `missing`.
+ * The two entries are equally dead and equally invisible from the file tree,
+ * so they are worth the same word.
+ *
+ * `present` here means only that something lives at the path, not that the
+ * exclusion is doing any work: a space can exclude a path no rule of its own
+ * would have reached, and saying so would need the whole resolution rather
+ * than a vault lookup.
+ *
+ * `exists` is injected for the same reason `memberRows` injects it: this
+ * module stays pure, and the decision stays testable in plain node, where the
+ * `Setting` controls that draw these rows cannot go.
+ */
+export function exclusionRows(
+  space: SpaceDefinition,
+  exists: (path: string) => boolean
+): ExclusionRow[] {
+  return (space.exclude ?? []).map((path) => ({
+    path,
+    status: exists(path) ? ("present" as const) : ("missing" as const),
+  }));
+}
+
 /**
  * How many rows resolve to nothing.
  *

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  exclusionRows,
   memberRows,
   memberSummary,
   missingCount,
@@ -377,5 +378,36 @@ describe("spaceRowSummary", () => {
     const neverChosen = { ...folder, root: "" } as SpaceDefinition;
     const summary = spaceRowSummary(neverChosen, () => false, noTags);
     expect(summary).not.toContain("member");
+  });
+});
+
+/**
+ * The "Left out" section drew every exclusion identically, so an entry
+ * naming a path nothing lives at read as healthy. A path MEMBER in the same
+ * dialog has always been marked `missing`, and the two entries are equally
+ * dead and equally invisible from the file tree.
+ */
+describe("exclusionRows", () => {
+  it("has no rows when the space excludes nothing", () => {
+    expect(exclusionRows(space([]), exists)).toEqual([]);
+  });
+
+  it("marks an exclusion naming a path nothing lives at", () => {
+    const s = { ...space([]), exclude: ["Gone/Old.md"] };
+    expect(exclusionRows(s, exists)).toEqual([{ path: "Gone/Old.md", status: "missing" }]);
+  });
+
+  it("leaves an exclusion whose note is still there alone", () => {
+    const s = { ...space([]), exclude: ["Inbox/Today.md"] };
+    expect(exclusionRows(s, exists)).toEqual([{ path: "Inbox/Today.md", status: "present" }]);
+  });
+
+  it("keeps stored order, so rows do not move under the pointer mid-tidy", () => {
+    const s = { ...space([]), exclude: ["Inbox/A.md", "Gone/B.md", "Inbox/C.md"] };
+    expect(exclusionRows(s, exists).map((r) => r.path)).toEqual([
+      "Inbox/A.md",
+      "Gone/B.md",
+      "Inbox/C.md",
+    ]);
   });
 });
