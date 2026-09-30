@@ -24,6 +24,7 @@ import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
 import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
+import { createLazyVaultIndex } from "./visibility/VaultIndex";
 import { repairOnRename, repairRenameIn } from "./lifecycle/pathRepair";
 import {
   correlate,
@@ -566,7 +567,14 @@ export default class SpacesPlugin extends Plugin {
     this.controller = new SpaceController(
       this.defs,
       this.runtime,
-      createObsidianVaultIndex(this.app.vault),
+      // LAZY, for the same reason the tag index below is. The walk costs
+      // 6.6 ms on a 10,000 note vault and `recompute` returns before touching
+      // the vault index at all while All is active — which is the majority
+      // case, and the only case for a user who has never made a space. It ran
+      // here inside `onload()`, which Obsidian awaits. The ordering invariant
+      // survives: the flush installs the vault index before the tag index,
+      // and a wrapper can only build at or after the moment it was installed.
+      createLazyVaultIndex(() => createObsidianVaultIndex(this.app.vault)),
       {
         apply: (snap) => this.onSnapshotApplied(snap),
         livePaths: () => this.liveLeafPaths(),
