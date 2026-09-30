@@ -18,7 +18,6 @@ import {
   type SkipReason,
 } from "../visibility/glob";
 import { isFolderSpace } from "../visibility/folderSpace";
-import { createObsidianTagIndex } from "../visibility/ObsidianTagIndex";
 import type { TagIndex } from "../visibility/TagIndex";
 import { ConfirmModal } from "./ConfirmModal";
 import { SpaceContentsModal } from "./SpaceContentsModal";
@@ -127,6 +126,17 @@ export class SpacesSettingTab extends PluginSettingTab {
     app: App,
     plugin: Plugin,
     private defs: DefinitionStore,
+    /**
+     * The one tag index, reached rather than built.
+     *
+     * This tab never asks it a question itself — see `spaceItems()` — and
+     * holds it only to hand to the Contents dialog it opens. A function
+     * rather than the index, because the index is a SNAPSHOT that the
+     * coalescer's flush and every metadata change replace: a captured one
+     * would answer from the vault as it was when settings was registered,
+     * which is during `onload()`.
+     */
+    private getTagIndex: () => TagIndex,
     private hooks?: SpaceLifecycleHooks,
     private getEffectiveRestore?: () => EffectiveRestoreState,
     private getOrderingStatus?: () => OrderingStatus,
@@ -571,39 +581,34 @@ export class SpacesSettingTab extends PluginSettingTab {
 
     const exists = (path: string): boolean => this.app.vault.getAbstractFileByPath(path) !== null;
 
-    // One index for the whole page, built at most once and only if some space
-    // actually holds a tag member. `createObsidianTagIndex` walks every
-    // markdown file in the vault and this method runs on every settings
-    // render, so building it per space, or eagerly for the usual vault whose
-    // spaces are paths only, would be a vault walk nothing reads.
+    // NOTHING HERE MAY COUNT A TAG'S NOTES, and no `matchCount` is passed
+    // below for exactly that reason.
     //
-    // Memoized per tag as well, because every tag here is counted TWICE: once
-    // for `rows` below, and again inside `spaceRowSummary`, which re-runs
-    // `memberRows` over the same members to reach `memberSummary`. Each of
-    // those calls is a full scan of every note in
-    // `createMapTagIndex.pathsMatching`, so without this a space holding three
-    // tags scans the vault six times per render for three numbers that cannot
-    // have changed in between.
-    let tags: TagIndex | null = null;
-    const counted = new Map<string, number>();
-    const matchCount = (tag: string): number => {
-      const already = counted.get(tag);
-      if (already !== undefined) return already;
-      tags ??= createObsidianTagIndex(this.app);
-      const n = tags.pathsMatching(tag).length;
-      counted.set(tag, n);
-      return n;
-    };
-
+    // This method used to build a tag index to draw one. It runs during
+    // `onload()` — Obsidian builds a declarative tab the moment
+    // `addSettingTab` is called, and never calls `display()`, so there is no
+    // "when the page is shown" to defer to. Measured in a real Obsidian on a
+    // 10,000 note vault: 20.9 ms and 10,000 `getFileCache` calls inside the
+    // load Obsidian awaits, before the workspace exists, for a settings page
+    // nobody had opened. With a tag space also active the vault's metadata
+    // was walked twice per load, 20,000 calls, and load went from 84.9 ms to
+    // 146.3 ms. The design doc put this count out of scope pending exactly
+    // that measurement (`2026-09-28-tag-members-design.md`) and it shipped
+    // anyway; the measurement now exists and says it does not belong here.
+    //
+    // Nothing is lost that this row ever claimed: it counts stored ENTRIES,
+    // and a tag has always counted as one entry the way a folder counts as
+    // one rather than as its contents. The per-tag note count lives in the
+    // Contents dialog, one button to the right of this line, which the user
+    // opens deliberately and which can afford the walk.
     return spaces.map((space) => {
-      // One row per stored member, tags included, so `memberCount` below
-      // counts a tag as one entry the way a folder counts as one rather than
-      // as its contents. `missing` is unaffected: a tag row is never missing.
-      const rows = memberRows(space, exists, matchCount);
+      // One row per stored member, tags included. `missing` is unaffected: a
+      // tag row is never missing.
+      const rows = memberRows(space, exists);
       const missing = missingCount(rows);
       return {
         name: space.name,
-        desc: spaceRowSummary(space, exists, matchCount),
+        desc: spaceRowSummary(space, exists),
         render: (setting: Setting) => {
           setting.addText((t) => {
             t.setValue(space.name);
@@ -626,7 +631,12 @@ export class SpacesSettingTab extends PluginSettingTab {
                 .setButtonText("Contents…")
                 .setTooltip(`See and manage what is in ${space.name}`)
                 .onClick(() => {
-                  new SpaceContentsModal(this.app, this.defs, space.id).open();
+                  new SpaceContentsModal(
+                    this.app,
+                    this.defs,
+                    space.id,
+                    this.getTagIndex
+                  ).open();
                 })
             );
           }

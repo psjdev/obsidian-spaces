@@ -18,6 +18,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { SpacesSettingTab } from "../src/ui/SettingsTab";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import type { DefinitionStore } from "../src/definitions/DefinitionStore";
 import type { SpaceDefinition, SpacesDefinitions } from "../src/types";
 
@@ -56,7 +57,7 @@ function storeOf(spaces: SpaceDefinition[]): {
 function tabOf(spaces: SpaceDefinition[]) {
   const { store, set } = storeOf(spaces);
   const app = { vault: { getAbstractFileByPath: () => null } };
-  const tab = new SpacesSettingTab(app as never, {} as never, store);
+  const tab = new SpacesSettingTab(app as never, {} as never, store, () => createMapTagIndex(new Map()));
   // `update()` is Obsidian's; the harness does not model rendering, and what
   // matters here is only whether the tab asks for it.
   const update = vi.fn();

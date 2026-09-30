@@ -438,6 +438,12 @@ export default class SpacesPlugin extends Plugin {
         this.app,
         this,
         this.defs,
+        // THE tag index, reached rather than built. Deferred like the three
+        // accessors further down, and for a sharper reason than they have:
+        // the controller that owns the index is built in `start()` and this
+        // runs in `onload()`, and the index itself is a snapshot that every
+        // flush and every metadata change replaces.
+        () => this.controller.tagIndex(),
         {
           onDeleted: (id) => {
             this.runtime.dropLayoutFor(id);

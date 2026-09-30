@@ -9,7 +9,6 @@ import {
   type PathMemberRow,
   type TagMemberRow,
 } from "./memberList";
-import { createObsidianTagIndex } from "../visibility/ObsidianTagIndex";
 import { normalizeTag } from "../visibility/tagMatch";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -42,6 +41,23 @@ import type { SpaceDefinition } from "../types";
  * from `memberRows`, which is pure and tested in plain node, and both removal
  * filters come from `memberList.ts` for the same reason.
  */
+/**
+ * What a tag row says about its reach.
+ *
+ * Three cases, not two. `matchCount: null` means the caller did not count,
+ * and this dialog always does — but saying "no notes carry it" for an
+ * uncounted tag is precisely the conflation `TagMemberRow.matchCount` warns
+ * against, so the unreachable case is written out rather than folded into the
+ * zero one. A future caller that cannot afford the walk then degrades to
+ * saying less, never to saying something false.
+ */
+function tagRowDescription(row: TagMemberRow): string {
+  if (row.matchCount === null) return "Tag. Nested tags included.";
+  if (row.status === "matches-nothing") return "Tag. No notes carry it right now.";
+  const notes = row.matchCount === 1 ? "note" : "notes";
+  return `Tag. ${row.matchCount} ${notes}, nested tags included.`;
+}
+
 export class SpaceContentsModal extends Modal {
   /**
    * The live tag suggester, retained for the same reason
@@ -56,7 +72,23 @@ export class SpaceContentsModal extends Modal {
   constructor(
     app: App,
     private defs: DefinitionStore,
-    private spaceId: string
+    private spaceId: string,
+    /**
+     * The one tag index, reached rather than built.
+     *
+     * This dialog used to construct its own `createObsidianTagIndex`, as did
+     * the settings tab behind it and the controller: three walks of every
+     * markdown file's metadata cache over identical data, two of them within
+     * 30 ms of each other at load. The controller owns the index, replaces it
+     * on every flush and on every metadata change, and exposes it precisely
+     * so a question asked outside a recompute is answered from the same
+     * picture the tree was drawn from.
+     *
+     * A function rather than the index itself: it is a SNAPSHOT and the one
+     * in force is replaced under this dialog, which re-renders after every
+     * write.
+     */
+    private tagIndex: () => TagIndex
   ) {
     super(app);
   }
@@ -90,15 +122,15 @@ export class SpaceContentsModal extends Modal {
 
     this.titleEl.setText(`Contents of ${space.name}`);
 
-    // Built at most ONCE per render and closed over, never once per row:
-    // `createObsidianTagIndex` walks every markdown file in the vault and
-    // reads each one's metadata cache, so building it inside the row loop
-    // would walk the vault once per tag member. Lazy as well as shared, so a
-    // space holding no tags does not pay for the walk at all: this dialog
-    // re-renders after every write, and most curated spaces are paths only.
+    // Taken ONCE per render and closed over, never once per row. The shared
+    // index is lazy, so a space holding no tags still pays for no walk at
+    // all — this dialog re-renders after every write, and most curated
+    // spaces are paths only — and taking it once per render rather than once
+    // per row means every count on screen describes one picture of the
+    // vault.
     let tags: TagIndex | null = null;
     const matchCount = (tag: string): number => {
-      tags ??= createObsidianTagIndex(this.app);
+      tags ??= this.tagIndex();
       return tags.pathsMatching(tag).length;
     };
 
@@ -271,11 +303,7 @@ export class SpaceContentsModal extends Modal {
   ): void {
     const setting = new Setting(containerEl)
       .setName(`#${row.tag}`)
-      .setDesc(
-        row.status === "matches-nothing"
-          ? "Tag. No notes carry it right now."
-          : `Tag. ${row.matchCount} ${row.matchCount === 1 ? "note" : "notes"}, nested tags included.`
-      )
+      .setDesc(tagRowDescription(row))
       .addButton((b) =>
         b
           .setButtonText("Remove")

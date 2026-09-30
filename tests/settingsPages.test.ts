@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { SpacesSettingTab } from "../src/ui/SettingsTab";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { DEFAULT_DEFINITIONS, type SpacesDefinitions } from "../src/types";
 import type { DefinitionStore } from "../src/definitions/DefinitionStore";
 
@@ -27,7 +28,7 @@ function tab(): SpacesSettingTab {
     get: (): SpacesDefinitions => structuredClone(DEFAULT_DEFINITIONS),
   } as unknown as DefinitionStore;
   const app = { vault: { getAbstractFileByPath: () => null } };
-  return new SpacesSettingTab(app as never, {} as never, store);
+  return new SpacesSettingTab(app as never, {} as never, store, () => createMapTagIndex(new Map()));
 }
 
 const pages = (): Item[] => tab().getSettingDefinitions() as unknown as Item[];

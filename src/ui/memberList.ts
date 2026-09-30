@@ -42,8 +42,19 @@ export interface TagMemberRow {
   kind: "tag";
   tag: string;
   status: "present" | "matches-nothing";
-  /** How many notes the tag brings in right now. */
-  matchCount: number;
+  /**
+   * How many notes the tag brings in right now, or null when the caller did
+   * not count.
+   *
+   * NULL IS NOT ZERO and must never be drawn as one. Counting means expanding
+   * the tag over every note in the vault, and the settings tab cannot afford
+   * that: Obsidian builds a declarative tab during `onload()`, so the count
+   * cost a full vault metadata walk — 20.9 ms and 10,000 `getFileCache` calls
+   * on the measured vault — inside the load Obsidian awaits, for a page
+   * nobody had opened. The contents dialog, which the user opens
+   * deliberately, still counts and still passes a counter.
+   */
+  matchCount: number | null;
 }
 
 export type MemberRow = PathMemberRow | TagMemberRow;
@@ -64,15 +75,21 @@ export type MemberRow = PathMemberRow | TagMemberRow;
  * passes a vault lookup and a tag lookup. `matchCount` is called once per tag
  * row, so a caller backing it with a built index must build that index once and
  * close over it rather than rebuilding it per call.
+ *
+ * `matchCount` is OPTIONAL, and omitting it means "I cannot afford to count",
+ * not "the count is zero". A caller that omits it gets `matchCount: null` and
+ * `status: "present"` — never `matches-nothing`, which would put a permanent
+ * and false "needs attention" on every space holding a tag. The settings tab
+ * omits it (see `TagMemberRow.matchCount`); the contents dialog supplies it.
  */
 export function memberRows(
   space: SpaceDefinition,
   exists: (path: string) => boolean,
-  matchCount: (tag: string) => number
+  matchCount?: (tag: string) => number
 ): MemberRow[] {
   return space.members.map((m): MemberRow => {
     if (m.kind === "tag") {
-      const count = matchCount(m.tag);
+      const count = matchCount === undefined ? null : matchCount(m.tag);
       return {
         kind: "tag",
         tag: m.tag,
@@ -199,7 +216,8 @@ export function memberSummary(rows: readonly MemberRow[]): string {
  * A folder space has no member count to show — that is the point of it — so it
  * names its root instead, and says plainly when that folder is gone. `exists`
  * and `matchCount` are injected rather than looked up so this stays testable in
- * plain node; a folder space consults neither.
+ * plain node; a folder space consults neither. `matchCount` is optional here
+ * for the same reason it is on `memberRows`, and is threaded straight through.
  *
  * `typeof root === "string"` is `hasRoot`'s own test, inlined, telling
  * `undefined` (curated) apart from ANY string (folder space). The vault-root
@@ -220,7 +238,7 @@ export function memberSummary(rows: readonly MemberRow[]): string {
 export function spaceRowSummary(
   space: SpaceDefinition,
   exists: (path: string) => boolean,
-  matchCount: (tag: string) => number
+  matchCount?: (tag: string) => number
 ): string {
   const root = space.root;
   if (typeof root === "string") {

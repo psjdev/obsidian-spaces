@@ -23,6 +23,26 @@ describe("memberRows with tag members", () => {
     expect(rows[0]).toMatchObject({ kind: "tag", status: "matches-nothing" });
   });
 
+  // The settings tab stopped counting: building a tag index to draw the
+  // number cost a full vault metadata walk inside `onload()`, which Obsidian
+  // awaits, for a page nobody had opened. A caller that cannot count says so
+  // by passing nothing, and gets a row reporting no number rather than a
+  // wrong one.
+  it("returns a tag row with no count when the caller cannot count", () => {
+    const rows = memberRows(space([{ kind: "tag", tag: "project" }]), exists);
+    expect(rows).toEqual([
+      { kind: "tag", tag: "project", status: "present", matchCount: null },
+    ]);
+  });
+
+  it("does not accuse an uncounted tag of matching nothing", () => {
+    // "No matches" and "not counted" are different answers. Reporting the
+    // second as the first would put a permanent "needs attention" on every
+    // space holding a tag.
+    const rows = memberRows(space([{ kind: "tag", tag: "ghost" }]), exists);
+    expect(rows[0].status).toBe("present");
+  });
+
   it("keeps path rows in definition order beside tag rows", () => {
     const rows = memberRows(
       space([
