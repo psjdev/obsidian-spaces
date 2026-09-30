@@ -23,6 +23,8 @@ import { iconColorFor } from "./spaceIconColor";
 import { ancestorsOf, buildVaultTree, visibleRows, type VaultNode } from "./vaultTree";
 import { readPickerFilter, TAG_SIGIL } from "./pickerFilter";
 import { fuzzyTagCandidates, type TagSource } from "./tagCandidates";
+import { countTagRows, tagCountLabel } from "./tagRowCounts";
+import type { TagIndex } from "../visibility/TagIndex";
 
 import {
   isStillCovering as isStillCoveringPure,
@@ -89,6 +91,17 @@ export interface CreateSpacePanelDeps {
    * that no longer answers it.
    */
   tags: TagSource;
+  /**
+   * The one tag index, reached rather than built, so each row in the `#` list
+   * can say how many notes its tag currently brings in.
+   *
+   * A function rather than the index, for the reason `SettingsTab` documents:
+   * the index is a SNAPSHOT that the coalescer's flush and every metadata
+   * change replace, so a captured one would answer from the vault as it was
+   * when this panel opened. Building one here instead would walk the vault
+   * twice, once for this panel and once for the engine that already has one.
+   */
+  tagIndex: () => TagIndex;
   /**
    * The user's saved custom colors, and the way to persist a new one — the
    * theme button opens the same color popover the space strip uses, and that
@@ -1143,6 +1156,13 @@ export class CreateSpacePanel {
    *
    * WHAT is offered and in what order is `fuzzyTagCandidates`, which is pure
    * and tested. This function draws.
+   *
+   * Each row also reports how many notes its tag currently brings in, nested
+   * tags included, which is what `pathsMatching` already answers and therefore
+   * exactly what the member would resolve to. It is the row's confidence
+   * signal: the picker offers a SELECTOR, so there is no list of notes to
+   * click through here, and without the number a tag is a name and nothing
+   * else. Counted after the cap, never before it (see `countTagRows`).
    */
   private renderTagRows(host: HTMLElement, query: string): void {
     const doc = host.ownerDocument;
@@ -1180,8 +1200,13 @@ export class CreateSpacePanel {
       return;
     }
 
+    // Reached once per render, not once per row: the accessor hands back the
+    // engine's current snapshot, and `pathsMatching` is a map lookup on it.
+    const index = this.deps.tagIndex();
+    const counted = countTagRows(hits, (tag) => index.pathsMatching(tag).length);
+
     const chosen = new Set(this.state.items.flatMap((i) => (i.kind === "tag" ? [i.tag] : [])));
-    for (const hit of hits) {
+    for (const hit of counted) {
       const el = doc.win.createDiv();
       // Both classes: the tree's row rules are the layout, and the tag class
       // carries only what differs.
@@ -1207,6 +1232,14 @@ export class CreateSpacePanel {
       else name.textContent = hit.tag;
       label.appendChild(name);
       el.appendChild(label);
+
+      // Trailing the name and set in the muted type the rest of the picker
+      // uses for anything that is not a name: a hint the eye picks up while it
+      // is already deciding, rather than a second thing to read.
+      const count = doc.win.createSpan();
+      count.className = "spaces-create-tag-count";
+      count.textContent = tagCountLabel(hit.count);
+      el.appendChild(count);
 
       const choose = (): void => {
         this.state = toggleItem(this.state, { kind: "tag", tag: hit.tag });

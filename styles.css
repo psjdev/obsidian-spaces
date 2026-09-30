@@ -384,6 +384,24 @@
   margin-right: 1px;
 }
 .spaces-create-tag-row.is-selected .spaces-create-tag-sigil { color: inherit; }
+/* How many notes the tag brings in. `margin-left: auto` puts it against the
+   right edge so the numbers line up as a column the eye can skim, and the
+   name keeps the whole of the space left of it. Muted and a size down,
+   because it is a hint beside the name rather than a second name: the same
+   treatment `.spaces-create-tree-more` already gives a status line here. */
+.spaces-create-tag-count {
+  margin-left: auto;
+  padding-left: 8px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  font-weight: var(--font-normal, 400);
+  font-variant-numeric: tabular-nums;
+}
+/* A selected row goes accent-colored and semibold; the count must not follow
+   it there, or the hint becomes the loudest thing on the row it is hinting
+   about. */
+.spaces-create-tag-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
 
 /* The chosen tags. A file or a folder is marked in the tree, but a tag has no
    row anywhere to mark, so it gets a chip instead. */

@@ -1694,6 +1694,13 @@ export default class SpacesPlugin extends Plugin {
       // field in Settings keeps it. A build without `getTags` returns null,
       // and the picker says so rather than showing an empty list.
       tags: { knownTags: () => nativeKnownTags(this.app) },
+      // THE tag index, reached rather than built, exactly as `SpacesSettingTab`
+      // and `SpaceContentsModal` reach it. The picker asks it how many notes
+      // each offered tag brings in. Deferred because the index is a snapshot
+      // that every flush and every metadata change replaces, so a panel open
+      // for a while would otherwise count against the vault as it was when it
+      // opened.
+      tagIndex: () => this.controller.tagIndex(),
       // The rotation, or the neutral swatch, per the user's setting.
       // Read here rather than captured, so flipping the toggle takes effect on
       // the next open of this panel without a reload.

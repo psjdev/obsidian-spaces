@@ -34,18 +34,36 @@ const VAULT: Record<string, NodeKind> = {
 /** What `nativeKnownTags` would hand over: Obsidian's spelling, `#` and all. */
 const VAULT_TAGS = ["#project", "#project/console", "#archive"];
 
+/**
+ * What the engine's `TagIndex` would answer for those tags. Ancestors are
+ * already expanded in the real one, so `project` holds `project/console`'s
+ * note too, and `archive` is a tag Obsidian lists with nothing filed under it
+ * yet.
+ */
+const TAG_PATHS: Record<string, string[]> = {
+  project: ["Projects/Work/plan.md", "inbox.md"],
+  "project/console": ["inbox.md"],
+  archive: [],
+};
+
 interface Harness {
   panel: CreateSpacePanel;
   parent: HTMLElement;
   submitted: Array<{ name: string; opts: CreateSpaceOptions }>;
   closes: number;
   saved: string[][];
+  /** Every tag the panel asked the index about, in order. */
+  counted: string[];
+  /** How many times it reached for the index itself. */
+  reached: number;
 }
 
 function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
   const submitted: Harness["submitted"] = [];
   const saved: string[][] = [];
+  const counted: string[] = [];
   let closes = 0;
+  let reached = 0;
 
   const deps: CreateSpacePanelDeps = {
     folders: {
@@ -53,6 +71,15 @@ function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
       kindOf: (path) => VAULT[path] ?? null,
     },
     tags: { knownTags: () => [...VAULT_TAGS] },
+    tagIndex: () => {
+      reached += 1;
+      return {
+        pathsMatching: (tag) => {
+          counted.push(tag);
+          return [...(TAG_PATHS[tag] ?? [])];
+        },
+      };
+    },
     customColors: [],
     useThemeIconColor: () => false,
     saveCustomColors: async (customs) => {
@@ -84,8 +111,12 @@ function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
     parent,
     submitted,
     saved,
+    counted,
     get closes() {
       return closes;
+    },
+    get reached() {
+      return reached;
     },
   } as Harness;
 }
@@ -782,6 +813,61 @@ describe("the # sigil in the filter box", () => {
     filterFor("#");
     const empty = panelEl().querySelector(".spaces-create-tree-empty");
     expect(empty?.textContent).toMatch(/No tags/);
+  });
+
+  it("says how many notes each tag brings in", () => {
+    // The row's whole confidence signal: the picker offers a selector, so
+    // there is no list of notes to click through, and a bare tag name says
+    // nothing about whether it is the one meant. `project` reports its own
+    // note and `project/console`'s, because that is what the member resolves
+    // to.
+    const count = (tag: string): string | null =>
+      tagRowFor(tag).querySelector(".spaces-create-tag-count")?.textContent ?? null;
+    makeHarness();
+    openCurated();
+    filterFor("#");
+    expect(count("project")).toBe("2 notes");
+    expect(count("project/console")).toBe("1 note");
+    expect(count("archive")).toBe("no notes");
+  });
+
+  it("asks the index only about the tags it is drawing", () => {
+    // The list caps at 50. Counting before the cap would put one lookup per
+    // vault tag behind every keystroke, which is the cost this list exists
+    // under.
+    const many = Array.from({ length: 80 }, (_, i) => `#t${String(i).padStart(3, "0")}`);
+    const h = makeHarness({ tags: { knownTags: () => many } });
+    openCurated();
+    filterFor("#");
+    expect(tagRows().length).toBe(50);
+    expect(h.counted.length).toBe(50);
+    expect(h.counted).toEqual(tagRows().map((r) => r.dataset.tag));
+  });
+
+  it("reaches for the index once per draw, not once per row", () => {
+    const h = makeHarness();
+    openCurated();
+    filterFor("#");
+    expect(h.reached).toBe(1);
+    expect(h.counted.length).toBe(3);
+  });
+
+  it("re-reads the index rather than counting against the vault as it opened", () => {
+    // The index is a snapshot the coalescer's flush replaces. A captured one
+    // would go on reporting the vault as it was when the panel opened.
+    const h = makeHarness();
+    openCurated();
+    filterFor("#");
+    const first = h.reached;
+    tagRowFor("project").click();
+    expect(h.reached).toBeGreaterThan(first);
+  });
+
+  it("asks the index nothing while the tree is on screen", () => {
+    const h = makeHarness();
+    openCurated();
+    expect(h.reached).toBe(0);
+    expect(h.counted).toEqual([]);
   });
 
   it("leaves the sigil to the tree in folder mode", () => {
