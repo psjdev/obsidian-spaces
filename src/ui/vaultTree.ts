@@ -1,40 +1,61 @@
 /**
- * What the create panel's item picker shows: the vault as a tree, flattened to
- * the rows visible at a given expansion, filter and mode.
+ * A tree built from `/`-separated paths, flattened to the rows visible at a
+ * given expansion and filter — and what the create panel's two pickers both
+ * draw from.
  *
- * One tree serves both kinds of space. Curated mode shows files and folders
- * and takes any number of them; folder mode shows folders alone and takes one,
- * because a folder space has exactly one root. Files belong here because the
+ * It began as the vault picker alone: curated mode shows files and folders and
+ * takes any number of them; folder mode shows folders alone and takes one,
+ * because a folder space has exactly one root. Files belong there because the
  * data model has always allowed file members — `MemberEntry.kind` is
  * `"file" | "folder"`, and right-click "Add to space" has been making them all
  * along. It was only the create panel that could not.
  *
- * All of the picker's decisions live here — what a filter reveals, which
+ * Obsidian's tags use `/` the same way paths do (`area/health/active`), so the
+ * tag picker wants every rule in here unchanged: expansion, carets, a filter
+ * that keeps a node when a descendant matches, ancestors brought along with a
+ * deep hit. What it does NOT want is the file picker's vocabulary, so the kind
+ * is a type parameter rather than a fixed union, and the mode that hides files
+ * is `onlyKind` rather than `foldersOnly`. Calling a leaf tag a `"file"` and a
+ * parent tag a `"folder"` would have worked mechanically and left the type
+ * saying something false about every row in the tag tree.
+ *
+ * `K` defaults to `NodeKind`, so the file picker's calls read exactly as they
+ * did and cannot be handed a tag by accident.
+ *
+ * All of the pickers' decisions live here — what a filter reveals, which
  * ancestors it opens, what a mode hides — so they are testable in plain node
  * and the panel is left drawing rows. It imports nothing from `"obsidian"` and
  * knows nothing about the DOM.
  */
 
+/** The file picker's vocabulary: what a row in the vault tree can be. */
 export type NodeKind = "file" | "folder";
 
-interface VaultEntry {
+/**
+ * The tag picker's vocabulary. One kind, because every tag is a tag whether or
+ * not anything nests under it — the difference from the vault, where only one
+ * of the two kinds can contain anything.
+ */
+export type TagKind = "tag";
+
+interface VaultEntry<K extends string = NodeKind> {
   path: string;
-  kind: NodeKind;
+  kind: K;
 }
 
-export interface VaultNode {
-  /** Full vault path, the identity everything else keys on. */
+export interface VaultNode<K extends string = NodeKind> {
+  /** Full path, the identity everything else keys on. A tag tree's is the tag. */
   path: string;
   /** Last segment — what the row shows. */
   name: string;
-  kind: NodeKind;
-  children: VaultNode[];
+  kind: K;
+  children: VaultNode<K>[];
 }
 
-interface Row {
+interface Row<K extends string = NodeKind> {
   path: string;
   name: string;
-  kind: NodeKind;
+  kind: K;
   /** Nesting level, 0 at the top. The panel turns this into an indent. */
   depth: number;
   /** Only a node with children draws a caret. A file never has any. */
@@ -44,32 +65,59 @@ interface Row {
   selected: boolean;
 }
 
-interface ViewOptions {
+interface ViewOptions<K extends string = NodeKind> {
   /** Paths the user has opened. Ignored for a branch a filter forces open. */
   expanded: ReadonlySet<string>;
   /** Free text; empty means no filtering. */
   filter: string;
   /** Chosen paths. Folder mode holds at most one; curated holds any number. */
   selected: ReadonlySet<string>;
-  /** Folder mode: files are not candidates for a root, so they are not shown. */
-  foldersOnly: boolean;
+  /**
+   * Draw only rows of this kind, dropping a branch left with nothing under it.
+   *
+   * The file picker's folder mode passes `"folder"`: a file is not a candidate
+   * for a root, so it is not shown. Absent or null draws every kind, which is
+   * what curated mode and the whole of the tag tree want. Named for what it
+   * does rather than for the one caller that needed it, so a second tree does
+   * not inherit the word "folders" for rows that are not folders.
+   */
+  onlyKind?: K | null;
 }
 
 /**
- * Flat vault entries to a sorted tree.
+ * The kind an invented intermediate takes when the caller names none: a vault
+ * tree's, because only a folder can contain something.
+ */
+const DEFAULT_BRANCH_KIND = "folder";
+
+/**
+ * Flat entries to a sorted tree.
  *
  * Built from path segments rather than by matching parents to children, so a
  * missing intermediate cannot orphan a subtree: `a/b/c` alone still yields
- * `a › b › c`. Any intermediate invented this way is a folder — only a folder
- * can contain something.
+ * `a > b > c`. That is a defensive nicety for the vault, where Obsidian always
+ * has the parent, and the ordinary case for tags, where `area/health/active`
+ * can exist with nothing ever tagged `area` on its own.
+ *
+ * `branchKind` is what an invented intermediate becomes. The vault's is
+ * `"folder"` and the tag tree's is `"tag"`, which is why it is a parameter: an
+ * invented tag that claimed to be a folder would be a row whose type said one
+ * thing and whose behaviour said another.
  *
  * Folders sort before files at each level, then alphabetically: the order the
  * file explorer itself uses, and therefore the one a reader of this picker
- * already has in their head.
+ * already has in their head. A tree with one kind in it falls straight through
+ * to the alphabetical half, which is the whole of the tag tree's order.
  */
-export function buildVaultTree(entries: readonly VaultEntry[]): VaultNode[] {
-  const roots: VaultNode[] = [];
-  const byPath = new Map<string, VaultNode>();
+export function buildVaultTree<K extends string = NodeKind>(
+  entries: readonly VaultEntry<K>[],
+  // The cast is the price of leaving the vault's call sites unparameterised.
+  // It is only ever reached when the caller named no kind, and the only
+  // container kind a caller of the default `K` has is `"folder"`.
+  branchKind: K = DEFAULT_BRANCH_KIND as K
+): VaultNode<K>[] {
+  const roots: VaultNode<K>[] = [];
+  const byPath = new Map<string, VaultNode<K>>();
 
   for (const entry of entries) {
     const segments = entry.path.split("/").filter((s) => s !== "");
@@ -80,7 +128,7 @@ export function buildVaultTree(entries: readonly VaultEntry[]): VaultNode[] {
       const leaf = i === segments.length - 1;
       let node = byPath.get(prefix);
       if (!node) {
-        node = { path: prefix, name: segment, kind: leaf ? entry.kind : "folder", children: [] };
+        node = { path: prefix, name: segment, kind: leaf ? entry.kind : branchKind, children: [] };
         byPath.set(prefix, node);
         siblings.push(node);
       } else if (leaf) {
@@ -92,9 +140,9 @@ export function buildVaultTree(entries: readonly VaultEntry[]): VaultNode[] {
     });
   }
 
-  const sort = (nodes: VaultNode[]): void => {
+  const sort = (nodes: VaultNode<K>[]): void => {
     nodes.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+      if (a.kind !== b.kind) return a.kind === branchKind ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
     for (const n of nodes) sort(n.children);
@@ -117,22 +165,29 @@ export function buildVaultTree(entries: readonly VaultEntry[]): VaultNode[] {
  * name keeps its whole subtree, so typing a parent's name is a way to browse
  * into it rather than a way to hide its children.
  *
- * `foldersOnly` applies FIRST, before any of that. A folder whose only
- * matching descendant was a file must disappear along with it, rather than
- * linger as a branch that opens onto nothing.
+ * The match is against a node's own NAME, which is its last segment. In the
+ * tag tree that is what makes typing `atlas` find `project/atlas`.
+ *
+ * `onlyKind` applies FIRST, before any of that. A folder whose only matching
+ * descendant was a file must disappear along with it, rather than linger as a
+ * branch that opens onto nothing.
  */
-export function visibleRows(tree: readonly VaultNode[], opts: ViewOptions): Row[] {
+export function visibleRows<K extends string = NodeKind>(
+  tree: readonly VaultNode<K>[],
+  opts: ViewOptions<K>
+): Row<K>[] {
   const query = opts.filter.trim().toLowerCase();
-  const rows: Row[] = [];
+  const rows: Row<K>[] = [];
+  const only = opts.onlyKind ?? null;
 
-  const included = (node: VaultNode): boolean => !opts.foldersOnly || node.kind === "folder";
-  const matches = (node: VaultNode): boolean => node.name.toLowerCase().includes(query);
+  const included = (node: VaultNode<K>): boolean => only === null || node.kind === only;
+  const matches = (node: VaultNode<K>): boolean => node.name.toLowerCase().includes(query);
 
   /** Whether this node survives the filter, itself or through a descendant. */
-  const keep = (node: VaultNode): boolean =>
+  const keep = (node: VaultNode<K>): boolean =>
     included(node) && (query === "" || matches(node) || node.children.some(keep));
 
-  const walk = (nodes: readonly VaultNode[], depth: number, insideMatch: boolean): void => {
+  const walk = (nodes: readonly VaultNode<K>[], depth: number, insideMatch: boolean): void => {
     for (const node of nodes) {
       if (!included(node)) continue;
       const selfMatches = query !== "" && matches(node);

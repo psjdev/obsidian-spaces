@@ -441,11 +441,13 @@
   font-size: 0.9em;
 }
 
-/* §: the tag list, drawn in the same box as the tree and reached by the
+/* §: the tag tree, drawn in the same box as the item tree and reached by the
    Tags button above it.
-   The row itself is `.spaces-create-tree-row`, so only the differences live
-   here: no caret slot to reserve, because nothing in a flat list expands. */
-.spaces-create-tag-row { padding-left: 6px; }
+   The row itself is `.spaces-create-tree-row` -- including its caret slot, its
+   indent and the `.is-inherited` wash a covering parent gives it -- so only
+   the differences live here: the tag mark and the note count. No
+   `padding-left` of its own, because the panel sets one per row from the
+   depth and the two would be the same rule written twice. */
 .spaces-create-tag-row .spaces-create-tree-name {
   display: flex;
   align-items: center;

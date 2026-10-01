@@ -27,7 +27,6 @@ const none = {
   expanded: new Set<string>(),
   filter: "",
   selected: new Set<string>(),
-  foldersOnly: false,
 };
 const paths = (rows: readonly { path: string }[]): string[] => rows.map((r) => r.path);
 
@@ -182,18 +181,18 @@ describe("ancestorsOf", () => {
   });
 });
 
-describe("foldersOnly (the folder-space mode)", () => {
+describe("onlyKind (the folder-space mode)", () => {
   const tree = buildVaultTree(VAULT);
 
   it("hides files, so only a folder can become a root", () => {
-    const rows = visibleRows(tree, { ...none, foldersOnly: true });
+    const rows = visibleRows(tree, { ...none, onlyKind: "folder" as const });
     expect(paths(rows)).toEqual(["Archive", "Bulk", "Projects", "Reference"]);
   });
 
   it("hides files nested inside an expanded folder too", () => {
     const rows = visibleRows(tree, {
       ...none,
-      foldersOnly: true,
+      onlyKind: "folder" as const,
       expanded: new Set(["Projects"]),
     });
     expect(paths(rows)).toEqual([
@@ -209,12 +208,12 @@ describe("foldersOnly (the folder-space mode)", () => {
   it("drops a folder that only survived because a FILE beneath it matched", () => {
     // "bravo" is a file. With files hidden there is nothing left to show, so
     // `Archive` must not linger as an empty branch.
-    const rows = visibleRows(tree, { ...none, foldersOnly: true, filter: "bravo" });
+    const rows = visibleRows(tree, { ...none, onlyKind: "folder" as const, filter: "bravo" });
     expect(rows).toEqual([]);
   });
 
   it("still matches folders while filtering", () => {
-    const rows = visibleRows(tree, { ...none, foldersOnly: true, filter: "hardware" });
+    const rows = visibleRows(tree, { ...none, onlyKind: "folder" as const, filter: "hardware" });
     expect(paths(rows)).toEqual([
       "Projects",
       "Projects/Console 2030",
@@ -232,5 +231,55 @@ describe("foldersOnly (the folder-space mode)", () => {
   it("never lets a file claim children", () => {
     const rows = visibleRows(tree, none);
     expect(rows.find((r) => r.path === "Top.md")!.hasChildren).toBe(false);
+  });
+});
+
+/**
+ * The same two functions over the tag picker's vocabulary.
+ *
+ * Generalised rather than forked: `NodeKind` is still the file picker's and
+ * still the default, and a second caller brings its own kind instead of being
+ * made to call a leaf tag a file. These assert the parts of that generalisation
+ * a vault tree cannot reach — a one-kind tree, and an invented intermediate
+ * that must not come back as a folder.
+ */
+describe("a tree of another kind (the tag picker's)", () => {
+  const tag = (path: string) => ({ path, kind: "tag" as const });
+  // Nothing is tagged `area` or `area/health`; both exist only as prefixes.
+  const TAGS = [tag("project"), tag("area/health/active"), tag("area/health/paused")];
+  const tree = buildVaultTree(TAGS, "tag");
+
+  it("invents the intermediates a tag list leaves out, as tags", () => {
+    expect(tree.map((n) => n.path)).toEqual(["area", "project"]);
+    const area = tree[0];
+    expect(area.kind).toBe("tag");
+    expect(area.children.map((n) => n.path)).toEqual(["area/health"]);
+    expect(area.children[0].kind).toBe("tag");
+    expect(area.children[0].children.map((n) => n.path)).toEqual([
+      "area/health/active",
+      "area/health/paused",
+    ]);
+  });
+
+  it("names a node by its last segment, which is what a row shows", () => {
+    expect(tree[0].children[0].name).toBe("health");
+  });
+
+  it("orders one kind alphabetically, the branch-first rule falling away", () => {
+    // Every tag is the branch kind, so `a.kind !== b.kind` is never true and
+    // the comparator is the name test alone.
+    const flat = buildVaultTree([tag("zeta"), tag("alpha"), tag("mid/b"), tag("mid/a")], "tag");
+    expect(flat.map((n) => n.name)).toEqual(["alpha", "mid", "zeta"]);
+    expect(flat[1].children.map((n) => n.name)).toEqual(["a", "b"]);
+  });
+
+  it("draws every row when no kind is singled out", () => {
+    const rows = visibleRows(tree, { ...none, expanded: new Set(["area"]) });
+    expect(rows.map((r) => r.path)).toEqual(["area", "area/health", "project"]);
+  });
+
+  it("brings a deep match's ancestors with it, matching on the last segment", () => {
+    const rows = visibleRows(tree, { ...none, filter: "paused" });
+    expect(rows.map((r) => r.path)).toEqual(["area", "area/health", "area/health/paused"]);
   });
 });

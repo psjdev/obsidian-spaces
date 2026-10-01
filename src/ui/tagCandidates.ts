@@ -85,8 +85,15 @@ export function tagCandidates(
  * Alphabetical so an unranked list is stable rather than whatever order the
  * source happened to enumerate in, and so a ranked one has a tie-break that
  * does not reshuffle between keystrokes that changed no score.
+ *
+ * Exported uncapped for the create panel's tag tree, the one caller that must
+ * see every tag: a cap applied before a tree is built drops whole branches
+ * rather than the rows at the bottom of a list, and that tree does its own
+ * filtering and its own capping afterwards. The two capped readings above keep
+ * their caps, because the flat lists they back have nothing to lose a branch
+ * from.
  */
-function storedTags(src: TagSource): string[] | null {
+export function storedTags(src: TagSource): string[] | null {
   const known = src.knownTags();
   if (known === null) return null;
   return [...new Set(known.map(normalizeTag).filter((t) => t.length > 0))].sort();

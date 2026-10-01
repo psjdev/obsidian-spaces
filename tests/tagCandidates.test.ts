@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { tagCandidates, type TagSource } from "../src/ui/tagCandidates";
+import { storedTags, tagCandidates, type TagSource } from "../src/ui/tagCandidates";
 
 /** A source holding the tags Obsidian would hand over, `#` and all. */
 const from = (tags: string[]): TagSource => ({ knownTags: () => tags });
@@ -93,5 +93,29 @@ describe("tagCandidates", () => {
     // `normalizeTag("#")` is `""`, which would render as a `#` with no name
     // and add nothing at all if picked.
     expect(tagCandidates(from(["#", "#project"]), "")).toEqual(["project"]);
+  });
+});
+
+/**
+ * The same list, uncapped, for the create panel's tag tree.
+ *
+ * It is the one caller that must see every tag: a cap applied before a tree is
+ * built drops whole branches rather than the rows at the bottom of a list, so
+ * the tree takes all of them and does its own filtering and its own capping.
+ */
+describe("storedTags", () => {
+  it("hands back every tag, where the capped readings stop at 50", () => {
+    const many = Array.from({ length: 80 }, (_, i) => `#t${String(i).padStart(3, "0")}`);
+    expect(storedTags(from(many))).toHaveLength(80);
+    expect(tagCandidates(from(many), "")).toHaveLength(50);
+  });
+
+  it("normalizes, dedupes and sorts, as the capped readings already do", () => {
+    expect(storedTags(from(["#Zeta", "#alpha", "#ALPHA", "#"]))).toEqual(["alpha", "zeta"]);
+  });
+
+  it("propagates the source's null rather than flattening it to no tags", () => {
+    expect(storedTags({ knownTags: () => null })).toBeNull();
+    expect(storedTags(from([]))).toEqual([]);
   });
 });

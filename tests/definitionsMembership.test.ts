@@ -14,8 +14,10 @@ import { describe, expect, it } from "vitest";
 import {
   coveringFolder,
   coveringFolderIn,
+  coveringTagIn,
   inheritedFromFolder,
   memberFolderSet,
+  memberTagSet,
 } from "../src/definitions/membership";
 import { inheritedFromFolder as viaMembershipMenu } from "../src/actions/membershipMenu";
 import type { SpaceDefinition } from "../src/types";
@@ -140,5 +142,71 @@ describe("memberFolderSet and coveringFolderIn", () => {
     expect(coveringFolderIn(folders, "Projects/a.md")).toBe("Projects");
     expect(coveringFolderIn(folders, "Projects/b/c.md")).toBe("Projects");
     expect(coveringFolderIn(folders, "Archive/a.md")).toBeNull();
+  });
+});
+
+/**
+ * The tag half of the same question, for the create panel's tag tree: a
+ * selected parent tag covers everything nested under it, and the rows under it
+ * are drawn directly below it, so the tree says so.
+ *
+ * Analogous to the folder pair rather than shared with it: a tag's ancestors
+ * are its `/`-separated prefixes, so `ancestorsOf` answers for both, but the
+ * fold is `normalizeTag` (which also drops the `#` a user can see) rather than
+ * `canonicalPath`, and the ancestor returned is the OUTERMOST rather than the
+ * innermost.
+ */
+describe("memberTagSet and coveringTagIn", () => {
+  it("keeps the tag members and folds them to the stored spelling", () => {
+    const members: SpaceDefinition["members"] = [
+      { kind: "tag", tag: "#Project" },
+      { path: "Projects", kind: "folder" },
+      { path: "inbox.md", kind: "file" },
+    ];
+    expect([...memberTagSet(members)]).toEqual(["project"]);
+  });
+
+  it("names the selected ancestor that covers a nested tag", () => {
+    const tags = memberTagSet([{ kind: "tag", tag: "project" }]);
+    expect(coveringTagIn(tags, "project/alpha")).toBe("project");
+    expect(coveringTagIn(tags, "project/alpha/beta")).toBe("project");
+  });
+
+  it("does not treat a tag as its own covering ancestor", () => {
+    const tags = memberTagSet([{ kind: "tag", tag: "project" }]);
+    expect(coveringTagIn(tags, "project")).toBeNull();
+  });
+
+  it("returns the OUTERMOST ancestor when several are selected", () => {
+    // Opposite to the folder walk, and deliberately so: both ancestors are
+    // rows in the same tree, and the outermost is the one whose coverage is
+    // not itself covered. Deselect it and the whole branch is free in one
+    // gesture.
+    const tags = memberTagSet([
+      { kind: "tag", tag: "project" },
+      { kind: "tag", tag: "project/alpha" },
+    ]);
+    expect(coveringTagIn(tags, "project/alpha/beta")).toBe("project");
+  });
+
+  it("does not match a sibling tag that merely shares a name prefix", () => {
+    // The segment boundary is the whole correctness argument, the same one
+    // `tagMatches` makes: `proj` must not cover `project/alpha`.
+    const tags = memberTagSet([{ kind: "tag", tag: "proj" }]);
+    expect(coveringTagIn(tags, "project/alpha")).toBeNull();
+  });
+
+  it("ignores file and folder members, which name no tag to nest under", () => {
+    const members: SpaceDefinition["members"] = [
+      { path: "project", kind: "folder" },
+      { path: "project/alpha.md", kind: "file" },
+    ];
+    expect(coveringTagIn(memberTagSet(members), "project/alpha")).toBeNull();
+  });
+
+  it("folds the asked-about tag too, so a `#` spelling still answers", () => {
+    const tags = memberTagSet([{ kind: "tag", tag: "project" }]);
+    expect(coveringTagIn(tags, "#Project/Alpha")).toBe("project");
+    expect(coveringTagIn(new Set<string>(), "project/alpha")).toBeNull();
   });
 });

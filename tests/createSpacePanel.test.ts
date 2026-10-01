@@ -133,8 +133,12 @@ const byKey = (key: string): HTMLElement => {
 };
 const nameInput = (): HTMLInputElement => byKey("name") as HTMLInputElement;
 const tree = (): HTMLElement | null => panelEl().querySelector(".spaces-create-tree");
+/**
+ * The item tree's rows. Both bodies are trees now, so the role alone no longer
+ * tells them apart; the rows that carry a vault path are this one's.
+ */
 const rows = (): HTMLElement[] =>
-  Array.from(panelEl().querySelectorAll<HTMLElement>("[role='treeitem']"));
+  Array.from(panelEl().querySelectorAll<HTMLElement>("[role='treeitem'][data-path]"));
 const rowFor = (path: string): HTMLElement => {
   const row = rows().find((r) => r.dataset.path === path);
   if (!row) throw new Error(`no row for ${path}; have ${rows().map((r) => r.dataset.path)}`);
@@ -719,12 +723,20 @@ describe("the Items and Tags buttons under the filter box", () => {
   };
   const box = (): HTMLInputElement => byKey("item-filter") as HTMLInputElement;
   const tagRows = (): HTMLElement[] =>
-    Array.from(panelEl().querySelectorAll<HTMLElement>("[role='option']"));
+    Array.from(panelEl().querySelectorAll<HTMLElement>("[role='treeitem'][data-tag]"));
   const tagRowFor = (tag: string): HTMLElement => {
     const row = tagRows().find((r) => r.dataset.tag === tag);
     if (!row) throw new Error(`no tag row for ${tag}; have ${tagRows().map((r) => r.dataset.tag)}`);
     return row;
   };
+  /** Opens a tag's branch the way the pointer does, without choosing it. */
+  const expandTag = (tag: string): void => {
+    const caret = tagRowFor(tag).querySelector<HTMLElement>(".spaces-create-tree-caret");
+    if (!caret) throw new Error(`no caret on ${tag}`);
+    caret.click();
+  };
+  const overflow = (): string | null =>
+    panelEl().querySelector(".spaces-create-tree-more")?.textContent ?? null;
   const summary = (): string =>
     panelEl().querySelector(".spaces-create-summary")?.textContent ?? "";
 
@@ -761,9 +773,11 @@ describe("the Items and Tags buttons under the filter box", () => {
     makeHarness();
     openCurated();
     showTags();
-    // The tree is gone, not merely filtered to nothing.
+    // The item tree is gone, not merely filtered to nothing.
     expect(rows()).toEqual([]);
-    expect(tagRows().map((r) => r.dataset.tag)).toEqual(["archive", "project", "project/console"]);
+    // Collapsed to its roots, like the other body: `project/console` is behind
+    // `project`'s caret rather than sitting beside it.
+    expect(tagRows().map((r) => r.dataset.tag)).toEqual(["archive", "project"]);
     byKey("body-items").click();
     expect(tagRows()).toEqual([]);
     expect(rows().length).toBeGreaterThan(0);
@@ -777,14 +791,27 @@ describe("the Items and Tags buttons under the filter box", () => {
     expect(pressed("body-items")).toBe("false");
   });
 
-  it("stops being a tree while it is a list of tags", () => {
-    // A `role="tree"` owning `option`s reads as a malformed tree rather than
-    // as a list, and the box is the SAME element in both modes.
+  it("stays a tree in both bodies, and relabels itself across the switch", () => {
+    // Tags nest on `/` exactly as paths do, so the tag body is a tree too and
+    // the old `listbox` is gone. The box is the SAME element in both modes, so
+    // every attribute that differs has to be set on every draw rather than
+    // left behind by the body before it.
     makeHarness();
     openCurated();
+    const treeBox = (): HTMLElement => {
+      const el = panelEl().querySelector<HTMLElement>("[role='tree']");
+      if (!el) throw new Error("the window is not a tree");
+      return el;
+    };
+    expect(treeBox().getAttribute("aria-label")).toBe("Choose items");
+    expect(treeBox().hasAttribute("aria-multiselectable")).toBe(false);
     showTags();
-    expect(panelEl().querySelector("[role='tree']")).toBeNull();
-    expect(panelEl().querySelector("[role='listbox']")).not.toBeNull();
+    expect(panelEl().querySelector("[role='listbox']")).toBeNull();
+    expect(treeBox().getAttribute("aria-label")).toBe("Choose tags");
+    expect(treeBox().getAttribute("aria-multiselectable")).toBe("true");
+    byKey("body-items").click();
+    expect(treeBox().getAttribute("aria-label")).toBe("Choose items");
+    expect(treeBox().hasAttribute("aria-multiselectable")).toBe(false);
   });
 
   it("shows every tag with the chosen ones marked, which is what the tree does", () => {
@@ -794,11 +821,12 @@ describe("the Items and Tags buttons under the filter box", () => {
     makeHarness();
     openCurated();
     showTags();
-    tagRowFor("project").click();
+    expandTag("project");
     expect(tagRows().map((r) => r.dataset.tag)).toEqual(["archive", "project", "project/console"]);
+    tagRowFor("archive").click();
     expect(tagRows().map((r) => r.getAttribute("aria-selected"))).toEqual([
-      "false",
       "true",
+      "false",
       "false",
     ]);
   });
@@ -903,22 +931,33 @@ describe("the Items and Tags buttons under the filter box", () => {
     makeHarness();
     openCurated();
     showTags();
+    expandTag("project");
     expect(count("project")).toBe("2 notes");
     expect(count("project/console")).toBe("1 note");
     expect(count("archive")).toBe("no notes");
   });
 
   it("asks the index only about the tags it is drawing", () => {
-    // The list caps at 50. Counting before the cap would put one lookup per
-    // vault tag behind every keystroke, which is the cost this list exists
-    // under.
-    const many = Array.from({ length: 80 }, (_, i) => `#t${String(i).padStart(3, "0")}`);
+    // The tag tree caps at the same 200 rows the item tree does. Counting
+    // before the cap would put one lookup per vault tag behind every
+    // keystroke, which is the cost this body lives under.
+    const many = Array.from({ length: 250 }, (_, i) => `#t${String(i).padStart(3, "0")}`);
     const h = makeHarness({ tags: { knownTags: () => many } });
     openCurated();
     showTags();
-    expect(tagRows().length).toBe(50);
-    expect(h.counted.length).toBe(50);
+    expect(tagRows().length).toBe(200);
+    expect(h.counted.length).toBe(200);
     expect(h.counted).toEqual(tagRows().map((r) => r.dataset.tag));
+  });
+
+  it("says how many rows the cap kept back, in the notice the item tree uses", () => {
+    // The cap is a safety net for an expanded branch, not something the
+    // collapsed view should ever meet, so the user is told when it bites.
+    const many = Array.from({ length: 250 }, (_, i) => `#t${String(i).padStart(3, "0")}`);
+    makeHarness({ tags: { knownTags: () => many } });
+    openCurated();
+    showTags();
+    expect(overflow()).toMatch(/^50 more/);
   });
 
   it("reaches for the index once per draw, not once per row", () => {
@@ -926,7 +965,9 @@ describe("the Items and Tags buttons under the filter box", () => {
     openCurated();
     showTags();
     expect(h.reached).toBe(1);
-    expect(h.counted.length).toBe(3);
+    // Two roots while `project` is collapsed, so the nested tag costs nothing
+    // until it is on screen.
+    expect(h.counted.length).toBe(2);
   });
 
   it("re-reads the index rather than counting against the vault as it opened", () => {
@@ -977,6 +1018,191 @@ describe("the Items and Tags buttons under the filter box", () => {
     expect(placeholder()).toBe("Filter tags…");
   });
 
+  describe("the tag tree", () => {
+    /**
+     * A tag vault with real nesting and two intermediates nobody ever used:
+     * `area` and `area/health` exist only because `area/health/active` and
+     * `area/health/paused` do. That is the ordinary case for tags and the
+     * defensive one for paths, which is why the tree has to invent them.
+     */
+    const NESTED_TAGS = ["#area/health/active", "#area/health/paused", "#project"];
+    /**
+     * What the engine's index answers for them. Ancestors are already expanded
+     * in the real one, so `area` holds both notes without anything carrying
+     * that tag on its own.
+     */
+    const NESTED_PATHS: Record<string, string[]> = {
+      area: ["a.md", "b.md"],
+      "area/health": ["a.md", "b.md"],
+      "area/health/active": ["a.md"],
+      "area/health/paused": ["b.md"],
+      project: ["c.md"],
+    };
+    const nested = (): Harness =>
+      makeHarness({
+        tags: { knownTags: () => [...NESTED_TAGS] },
+        tagIndex: () => ({ pathsMatching: (tag) => [...(NESTED_PATHS[tag] ?? [])] }),
+      });
+    const countOn = (tag: string): string | null =>
+      tagRowFor(tag).querySelector(".spaces-create-tag-count")?.textContent ?? null;
+    const enterOn = (tag: string): void => {
+      tagRowFor(tag).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    };
+
+    it("nests tags on their slashes, inventing a parent nobody ever used", () => {
+      nested();
+      openCurated();
+      showTags();
+      expect(tagRows().map((r) => r.dataset.tag)).toEqual(["area", "project"]);
+      expandTag("area");
+      expect(tagRows().map((r) => r.dataset.tag)).toEqual(["area", "area/health", "project"]);
+      expandTag("area/health");
+      expect(tagRows().map((r) => r.dataset.tag)).toEqual([
+        "area",
+        "area/health",
+        "area/health/active",
+        "area/health/paused",
+        "project",
+      ]);
+    });
+
+    it("shows the last segment, which is the part that differs", () => {
+      nested();
+      openCurated();
+      showTags();
+      expandTag("area");
+      const name = (tag: string): string | undefined =>
+        tagRowFor(tag).querySelector(".spaces-create-tree-name")?.textContent ?? undefined;
+      expect(name("area")).toBe("area");
+      expect(name("area/health")).toBe("health");
+    });
+
+    it("gives an invented parent a count, and lets it be picked", async () => {
+      const h = nested();
+      openCurated();
+      typeName("Health");
+      showTags();
+      // Nobody tagged a note `area`. Picking it is still meaningful, because it
+      // matches everything beneath it, and the count says how much that is.
+      expect(countOn("area")).toBe("2 notes");
+      tagRowFor("area").click();
+      byKey("create").click();
+      await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
+      expect(h.submitted[0].opts.members).toEqual([{ kind: "tag", tag: "area" }]);
+    });
+
+    it("counts a parent's nested notes in the parent's own total", () => {
+      // The sum people will try to verify by hand. `area` reads 2 although
+      // nothing carries it, because both leaves beneath it are in its figure.
+      nested();
+      openCurated();
+      showTags();
+      expandTag("area");
+      expandTag("area/health");
+      expect(countOn("area")).toBe("2 notes");
+      expect(countOn("area/health")).toBe("2 notes");
+      expect(countOn("area/health/active")).toBe("1 note");
+      expect(countOn("area/health/paused")).toBe("1 note");
+    });
+
+    it("marks the children a selected parent already covers, at any depth", () => {
+      nested();
+      openCurated();
+      showTags();
+      tagRowFor("area").click();
+      expandTag("area");
+      const child = tagRowFor("area/health");
+      expect(child.classList.contains("is-inherited")).toBe(true);
+      expect(child.getAttribute("aria-disabled")).toBe("true");
+      expect(child.getAttribute("title")).toBe(
+        "Already included by the selected tag #area. " +
+          "Deselect that tag to pick tags under it one at a time."
+      );
+      expandTag("area/health");
+      // Depth is not special-cased: a grandchild names the same parent.
+      expect(tagRowFor("area/health/active").getAttribute("aria-disabled")).toBe("true");
+      expect(tagRowFor("area/health/active").getAttribute("title")).toMatch(/selected tag #area\./);
+      // And nothing outside the branch is touched.
+      expect(tagRowFor("project").classList.contains("is-inherited")).toBe(false);
+      expect(tagRowFor("project").hasAttribute("aria-disabled")).toBe(false);
+    });
+
+    it("does nothing at all when a covered child is clicked, or Entered", async () => {
+      const h = nested();
+      openCurated();
+      typeName("Health");
+      showTags();
+      tagRowFor("area").click();
+      expandTag("area");
+      tagRowFor("area/health").click();
+      expect(tagRowFor("area/health").getAttribute("aria-selected")).toBe("false");
+      enterOn("area/health");
+      expect(tagRowFor("area/health").getAttribute("aria-selected")).toBe("false");
+      byKey("create").click();
+      await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
+      expect(h.submitted[0].opts.members).toEqual([{ kind: "tag", tag: "area" }]);
+    });
+
+    it("leaves a child picked on its own alone when an unrelated tag is selected", () => {
+      nested();
+      openCurated();
+      showTags();
+      expandTag("area");
+      tagRowFor("area/health").click();
+      tagRowFor("project").click();
+      const child = tagRowFor("area/health");
+      expect(child.getAttribute("aria-selected")).toBe("true");
+      expect(child.classList.contains("is-inherited")).toBe(false);
+      expect(child.hasAttribute("aria-disabled")).toBe(false);
+      expect(child.title).toBe("Remove #area/health");
+    });
+
+    it("reads as picked rather than covered when it is both", () => {
+      nested();
+      openCurated();
+      showTags();
+      expandTag("area");
+      tagRowFor("area/health").click();
+      tagRowFor("area").click();
+      const child = tagRowFor("area/health");
+      expect(child.classList.contains("is-selected")).toBe(true);
+      expect(child.classList.contains("is-inherited")).toBe(false);
+      expect(child.hasAttribute("aria-disabled")).toBe(false);
+      expect(child.title).toBe("Remove #area/health");
+    });
+
+    it("brings a deep match's ancestors with it, opened to it", () => {
+      nested();
+      openCurated();
+      showTags();
+      // `paused` is only ever a last segment, so this is the case that says
+      // the match is on the name rather than on the whole tag.
+      filterFor("paused");
+      expect(tagRows().map((r) => r.dataset.tag)).toEqual([
+        "area",
+        "area/health",
+        "area/health/paused",
+      ]);
+    });
+
+    it("keeps its expansion apart from the item tree's", () => {
+      makeHarness();
+      openCurated();
+      const caret = rowFor("Projects").querySelector<HTMLElement>(".spaces-create-tree-caret");
+      if (!caret) throw new Error("no caret on Projects");
+      caret.click();
+      expect(rows().map((r) => r.dataset.path)).toContain("Projects/Work");
+      showTags();
+      expandTag("project");
+      expect(tagRows().map((r) => r.dataset.tag)).toContain("project/console");
+      byKey("body-items").click();
+      // Switching bodies does not collapse what was opened in the other one.
+      expect(rows().map((r) => r.dataset.path)).toContain("Projects/Work");
+      showTags();
+      expect(tagRows().map((r) => r.dataset.tag)).toContain("project/console");
+    });
+  });
+
   describe("the / and # shortcuts", () => {
     it("switches to tags on a # into an empty box", () => {
       vi.useFakeTimers();
@@ -985,7 +1211,7 @@ describe("the Items and Tags buttons under the filter box", () => {
         openCurated();
         typeChar("#");
         expect(pressed("body-tags")).toBe("true");
-        expect(tagRows().length).toBe(3);
+        expect(tagRows().length).toBe(2);
         // Taken rather than consumed outright: the box shows the character and
         // then gives it up, and the query never holds it either way.
         vi.runAllTimers();
@@ -1422,9 +1648,9 @@ describe("rows a selected tag covers", () => {
     panelEl().querySelector(".spaces-create-summary")?.textContent ?? "";
   const pickTag = (tag: string): void => {
     byKey("body-tags").click();
-    const row = Array.from(panelEl().querySelectorAll<HTMLElement>("[role='option']")).find(
-      (r) => r.dataset.tag === tag
-    );
+    const row = Array.from(
+      panelEl().querySelectorAll<HTMLElement>("[role='treeitem'][data-tag]")
+    ).find((r) => r.dataset.tag === tag);
     if (!row) throw new Error(`no tag row for ${tag}`);
     row.click();
     byKey("body-items").click();

@@ -20,6 +20,7 @@ import type { MemberEntry, PathMember, SpaceDefinition } from "../types";
 import { canonicalPath } from "../visibility/glob";
 import { ancestorsOf } from "../visibility/VaultIndex";
 import { hasRoot } from "../visibility/folderSpace";
+import { normalizeTag } from "../visibility/tagMatch";
 
 /**
  * The innermost ancestor folder that is itself an exact member -- the folder
@@ -85,6 +86,50 @@ export function coveringFolderIn(
  */
 export function inheritedFromFolder(space: SpaceDefinition, path: string): string | null {
   return coveringFolder(space.members, path);
+}
+
+/**
+ * The tag members, normalized, ready for `coveringTagIn`.
+ *
+ * The tag half of `memberFolderSet`, and split from its lookup for the same
+ * reason: the tag picker draws a row per tag and would otherwise rebuild this
+ * for every one of them.
+ *
+ * `normalizeTag` rather than `canonicalPath` is the whole difference between
+ * the two sides. A tag is stored bare and lowercased and is written with a
+ * leading `#` everywhere a user can see one, so folding here drops the sigil
+ * as well as the case; a path has no sigil to drop and is folded for case
+ * alone.
+ */
+export function memberTagSet(members: readonly MemberEntry[]): Set<string> {
+  return new Set(
+    members.flatMap((m) => (m.kind === "tag" ? [normalizeTag(m.tag)] : []))
+  );
+}
+
+/**
+ * The outermost selected tag that covers `tag`, or null when none does.
+ *
+ * `tagMatches` says a member covers its nested tags, so a space holding
+ * `project` already holds everything tagged `project/alpha`. A tag's ancestors
+ * are its `/`-separated prefixes, exactly as a path's are, so `ancestorsOf`
+ * answers for both and this is `coveringFolderIn` with a different fold.
+ *
+ * The OUTERMOST is returned, not the innermost. The folder side walks inwards
+ * because the nearest folder member is the one a user would recognise as the
+ * container on screen; here the ancestors are themselves rows in the same
+ * tree, and the outermost is the one whose coverage is not itself covered —
+ * deselect that and every row under it is free in one gesture, where naming an
+ * inner one would send the user back for the outer one straight after.
+ */
+export function coveringTagIn(
+  tags: ReadonlySet<string>,
+  tag: string
+): string | null {
+  for (const ancestor of ancestorsOf(normalizeTag(tag))) {
+    if (tags.has(ancestor)) return ancestor;
+  }
+  return null;
 }
 
 /**

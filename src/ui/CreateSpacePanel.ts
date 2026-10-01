@@ -1,4 +1,4 @@
-import { Notice, prepareFuzzySearch, renderResults, setIcon, type SearchResult } from "obsidian";
+import { Notice, setIcon } from "obsidian";
 import { openIconPicker } from "./IconPickerPopover";
 import { openColorPicker } from "./ColorPickerPopover";
 import type { AnchoredPopover } from "./AnchoredPopover";
@@ -20,7 +20,13 @@ import {
 import type { FormFault } from "./createSpaceForm";
 import { alignmentGap } from "./ribbonAlign";
 import { iconColorFor } from "./spaceIconColor";
-import { ancestorsOf, buildVaultTree, visibleRows, type VaultNode } from "./vaultTree";
+import {
+  ancestorsOf,
+  buildVaultTree,
+  visibleRows,
+  type TagKind,
+  type VaultNode,
+} from "./vaultTree";
 import {
   DEFAULT_PICKER_MODE,
   ITEMS_SIGIL,
@@ -28,10 +34,15 @@ import {
   TAG_SIGIL,
   type PickerMode,
 } from "./pickerFilter";
-import { coveringFolderIn, memberFolderSet } from "../definitions/membership";
+import {
+  coveringFolderIn,
+  coveringTagIn,
+  memberFolderSet,
+  memberTagSet,
+} from "../definitions/membership";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
 import { previewPaths } from "./memberPreview";
-import { fuzzyTagCandidates, type TagHit, type TagSource } from "./tagCandidates";
+import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { MemberEntry } from "../types";
@@ -315,6 +326,16 @@ export class CreateSpacePanel {
   private expandedFolders = new Set<string>();
 
   /**
+   * The tag tree's own expansion, kept apart from `expandedFolders`.
+   *
+   * One set would collide on any tag that shares a spelling with a folder, and
+   * would make a switch to Tags and back collapse whatever the user had opened
+   * in the other body. The two bodies are one picker to look at and two
+   * independent things to have browsed into.
+   */
+  private expandedTags = new Set<string>();
+
+  /**
    * Re-aligns when the window changes size, because the panel's top edge moves
    * with the workspace layout above it. Raw `addEventListener` with an
    * explicit removal in `destroy()`: this class is not a `Component`, so it
@@ -390,6 +411,7 @@ export class CreateSpacePanel {
     this.fault = null;
     this.itemFilter = "";
     this.expandedFolders = new Set<string>();
+    this.expandedTags = new Set<string>();
     // Arriving from "Create space from this folder": the root is already set,
     // so open the branch containing it rather than showing a collapsed tree
     // with the selection hidden inside it...
@@ -971,8 +993,9 @@ export class CreateSpacePanel {
       // around them. The role belongs HERE rather than on the box: ARIA
       // requires treeitems to be owned by the tree, and with an unroled div in
       // between assistive tech reported a tree of zero items and a pile of
-      // orphaned rows. Which role it is depends on what is being drawn, so
-      // `renderItemTree` sets it — a flat list of tags is not a tree.
+      // orphaned rows. Both bodies are trees now, but they differ on
+      // `aria-multiselectable` and on the label, so `renderItemTree` still
+      // sets the lot rather than leaving a stale one behind after a switch.
       const rowsEl = doc.win.createDiv();
       rowsEl.className = "spaces-create-tree-rows";
       // The list scrolls, the window does not. That is what lets the summary
@@ -1103,7 +1126,7 @@ export class CreateSpacePanel {
     ));
     // Folder mode holds at most one path; curated holds any number. One set
     // covers both, so the tree needs no idea which mode it is in beyond
-    // `foldersOnly`.
+    // `onlyKind`.
     const selected = this.state.folderMode
       ? new Set(this.state.root === "" ? [] : [this.state.root])
       : new Set(this.state.items.flatMap((i) => (i.kind === "tag" ? [] : [i.path])));
@@ -1112,7 +1135,7 @@ export class CreateSpacePanel {
       expanded: this.expandedFolders,
       filter: this.itemFilter,
       selected,
-      foldersOnly: this.state.folderMode,
+      onlyKind: this.state.folderMode ? "folder" : null,
     });
     const rows = matched.slice(0, MAX_PICKER_ROWS);
     this.renderOverflowNotice(matched.length - rows.length);
@@ -1261,15 +1284,20 @@ export class CreateSpacePanel {
   }
 
   /**
-   * The tags this space currently holds, in the order they were chosen.
+   * The tags this space currently holds, folded to the spelling the tag tree's
+   * rows are keyed on.
    *
    * Folder mode reports none. It keeps `items` so switching back costs nothing
    * (`setFolderMode`), but `toCreateOptions` submits the root alone, so
    * showing them would advertise members the space will not have.
+   *
+   * A set rather than the list it was: order said something when the tag body
+   * was a list in the order they were chosen, and the tree draws them where
+   * they belong instead.
    */
-  private chosenTags(): string[] {
-    if (this.state.folderMode) return [];
-    return this.state.items.flatMap((i) => (i.kind === "tag" ? [i.tag] : []));
+  private chosenTags(): Set<string> {
+    if (this.state.folderMode) return new Set<string>();
+    return memberTagSet(this.state.items);
   }
 
   /**
@@ -1459,62 +1487,70 @@ export class CreateSpacePanel {
   }
 
   /**
-   * The tag body: a flat list drawn into the same box the tree uses.
+   * The tag body: the vault's tags as a tree, drawn into the same box the
+   * vault tree uses.
    *
-   * It holds the vault's tags, all of them, with the ones this space already
-   * has marked — the same job the tree does for notes and folders, which is
-   * what makes the two buttons above the window mean the same kind of thing.
-   * An empty filter box is the whole list; text narrows it.
+   * It holds all of them, with the ones this space already has marked — the
+   * same job the item tree does for notes and folders, which is what makes the
+   * two buttons above the window mean the same kind of thing. An empty filter
+   * box is the whole tree, collapsed; text narrows it.
    *
-   * Flat rather than nested even though tags nest, because `tagMatches` makes
-   * a parent tag cover its children anyway — picking `project` already takes
-   * `project/console`, so a hierarchy here would be a second way to express
-   * something the member already means.
+   * **A tree, where this used to be a flat list of 50.** Obsidian's tags nest
+   * on `/` exactly as paths do, and a flat list threw that structure away
+   * twice over: it said nothing about `area/health/active` belonging under
+   * `area`, and on a real vault the cap hid most of it. Measured on the test
+   * vault, 446 distinct tags are 6 top-level roots, so what was 50 rows of 446
+   * is now six that open onto the rest. The old argument for flatness was that
+   * a selected parent covers its children anyway, which is true, and is
+   * answered below by SHOWING that coverage rather than by hiding the shape it
+   * is a fact about.
    *
-   * `prepareFuzzySearch` and `renderResults` are the quick switcher's own
-   * matching and highlighting, which is what makes this read as part of
-   * Obsidian rather than as a list bolted into the panel. Both are public API,
-   * so neither belongs in the private-API quarantine; the private call is
-   * `deps.tags`, one layer down.
+   * `buildVaultTree` and `visibleRows` are the item tree's own, generalised
+   * over the kind rather than forked: expansion, carets, a filter that keeps a
+   * node when a descendant matches, and the invented intermediates tags need
+   * more than paths do, since `area/health/active` can exist with nothing ever
+   * tagged `area` on its own.
    *
-   * WHAT is offered and in what order is `fuzzyTagCandidates`, which is pure
-   * and tested. This function draws.
+   * **Filtering is `visibleRows`, not `prepareFuzzySearch`.** A substring test
+   * against a node's own name, which is its last segment, so typing `atlas`
+   * finds `project/atlas` and brings its ancestors with it. The quick
+   * switcher's scorer went with the flat list it ranked: a rank is an order,
+   * and a tree already has one that the rows' indentation is drawing. Ranking
+   * inside a tree would either reorder siblings under their parent for reasons
+   * the indentation cannot show, or be computed and then thrown away. One
+   * filter rule now serves both bodies, which is also what the one filter box
+   * above them implies.
    *
-   * Each row also reports how many notes its tag currently brings in, nested
-   * tags included, which is what `pathsMatching` already answers and therefore
-   * exactly what the member would resolve to. It is the row's confidence
-   * signal: the picker offers a SELECTOR, so there is no list of notes to
-   * click through here, and without the number a tag is a name and nothing
-   * else. Counted after the cap, never before it (see `countTagRows`).
+   * Each row reports how many notes its tag currently brings in, which is what
+   * `pathsMatching` already answers and therefore exactly what the member
+   * would resolve to. It is the row's confidence signal: the picker offers a
+   * SELECTOR, so there is no list of notes to click through here, and without
+   * the number a tag is a name and nothing else. Counted after the cap, never
+   * before it (see `countTagRows`).
    */
   private renderTagBody(host: HTMLElement, query: string): void {
     const doc = host.ownerDocument;
-    // A flat list of choices, not a tree, and several may be chosen at once.
-    // Multi-select is also what makes ONE gesture enough: in a multi-select
-    // listbox, activating a selected option deselects it, so a click means
-    // "turn this on or off" here exactly as it does in the tree.
-    host.setAttribute("role", "listbox");
+    // A tree, like the body the Items button shows, because tags nest. Still
+    // multi-select, and multi-select is what makes ONE gesture enough:
+    // activating a selected row deselects it, so a click means "turn this on
+    // or off" here exactly as it does in the item tree.
+    host.setAttribute("role", "tree");
     host.setAttribute("aria-multiselectable", "true");
     host.setAttribute("aria-label", "Choose tags");
-    // The tree's count means nothing here; leaving it would report a stale
-    // number against a list it was never about.
-    this.renderOverflowNotice(0);
     host.replaceChildren();
 
     const message = (text: string): void => {
+      this.renderOverflowNotice(0);
       const empty = doc.win.createDiv();
       empty.className = "spaces-create-tree-empty";
       empty.textContent = text;
       host.appendChild(empty);
     };
 
-    const chosenTags = this.chosenTags();
-    // Named explicitly rather than inferred: `prepareFuzzySearch` returns
-    // `SearchResult | null`, and inference off a function-typed argument
-    // widens to the constraint, which then loses the `matches` that
-    // `renderResults` needs.
-    const found = fuzzyTagCandidates<SearchResult>(this.deps.tags, query, prepareFuzzySearch);
-    if (found === null) {
+    // Every tag, uncapped: a cap here would drop whole branches rather than
+    // the rows at the bottom of what is drawn.
+    const all = storedTags(this.deps.tags);
+    if (all === null) {
       // Null is the source saying it cannot list the vault's tags at all,
       // which is how `nativeKnownTags` reports a missing private `getTags` —
       // a return, not a throw, and the likelier of the two failures. The way
@@ -1523,61 +1559,161 @@ export class CreateSpacePanel {
       message("Tags cannot be listed here. Add a tag from Settings, Contents.");
       return;
     }
-    if (found.length === 0) {
+    if (all.length === 0) {
+      // Still split on the query, as the flat list was: a vault with no tags
+      // and a box with text in it is a search that found nothing, and telling
+      // someone mid-query about the vault's lifetime state answers a question
+      // they did not ask.
       message(query.trim() === "" ? "No tags in this vault yet" : "No matching tag");
       return;
     }
-    const hits: TagHit<SearchResult>[] = found;
 
-    // Reached once per render, not once per row: the accessor hands back the
+    const chosen = this.chosenTags();
+    // Rebuilt per draw rather than cached like `vaultTree`: the whole list is
+    // hundreds of short strings where the vault is tens of thousands of paths,
+    // and a tag appears the moment it is typed into a note.
+    const tree = buildVaultTree<TagKind>(
+      all.map((tag) => ({ path: tag, kind: "tag" })),
+      "tag"
+    );
+    const matched = visibleRows(tree, {
+      expanded: this.expandedTags,
+      filter: query,
+      selected: chosen,
+    });
+    // The same cap and the same notice the item tree uses, for the same reason
+    // and so both bodies truncate alike. It cannot bite the collapsed view,
+    // which is a handful of roots; it is here for a branch like `topic` with
+    // its 401 children, and the notice says how many are missing.
+    const rows = matched.slice(0, MAX_PICKER_ROWS);
+    this.renderOverflowNotice(matched.length - rows.length);
+    if (rows.length === 0) {
+      message("No matching tag");
+      return;
+    }
+
+    // Reached once per draw, not once per row: the accessor hands back the
     // engine's current snapshot, and `pathsMatching` is a map lookup on it.
     const index = this.deps.tagIndex();
-    const counted = countTagRows(hits, (tag) => index.pathsMatching(tag).length);
+    const counted = countTagRows(
+      rows.map((row) => ({ ...row, tag: row.path })),
+      (tag) => index.pathsMatching(tag).length
+    );
 
-    const chosen = new Set(chosenTags);
-    for (const hit of counted) {
+    for (const row of counted) {
       const el = doc.win.createDiv();
       // Both classes: the tree's row rules are the layout, and the tag class
       // carries only what differs.
       el.className = "spaces-create-tree-row spaces-create-tag-row";
-      el.setAttribute("role", "option");
+      el.setAttribute("role", "treeitem");
       el.tabIndex = 0;
-      el.dataset.tag = hit.tag;
-      const selected = chosen.has(hit.tag);
-      el.classList.toggle("is-selected", selected);
-      el.setAttribute("aria-selected", String(selected));
-      // The row toggles, so a selected one is offering to come off. Said in a
-      // tooltip rather than in a second control: a real remove button inside a
-      // clickable row gives two targets for one action.
-      if (selected) el.title = `Remove ${TAG_SIGIL}${hit.tag}`;
+      el.dataset.tag = row.tag;
+      // The caret's slot is reserved even on a childless row, so names stay in
+      // one column instead of jittering by level.
+      el.style.paddingLeft = `${row.depth * 14}px`;
+      el.classList.toggle("is-selected", row.selected);
+      el.setAttribute("aria-selected", String(row.selected));
+      if (row.hasChildren) el.setAttribute("aria-expanded", String(row.expanded));
+      // A selected tag covers its children through `tagMatches`, and here the
+      // parent is the row directly above them, so the tint states a fact about
+      // the tree on screen. That is the whole difference from the item tree,
+      // which deliberately does NOT mark the notes a tag covers: a tag's reach
+      // over a NOTE is a rule matching files scattered anywhere, not a
+      // position in the tree it would have been drawn in. Same principle,
+      // opposite outcome, because the structure on screen is different.
+      //
+      // Picked wins over covered: a tag chosen by hand is a member in its own
+      // right and still removable, and reading it as inherited would hide the
+      // entry it is.
+      const coveringTag = row.selected ? null : coveringTagIn(chosen, row.tag);
+      el.classList.toggle("is-inherited", coveringTag !== null);
+      if (coveringTag !== null) {
+        // `aria-disabled` rather than the tint alone, for the reason the item
+        // tree gives: covered is a third state, and neither
+        // `aria-selected="false"` nor a background color tells a screen reader
+        // it is one. Not `disabled`, which would take the row out of the tab
+        // order and leave a keyboard user with no way to reach the title.
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute(
+          "title",
+          `Already included by the selected tag ${TAG_SIGIL}${coveringTag}. ` +
+            "Deselect that tag to pick tags under it one at a time."
+        );
+      } else if (row.selected) {
+        // The row toggles, so a selected one is offering to come off. Said in
+        // a tooltip rather than in a second control: a real remove button
+        // inside a clickable row gives two targets for one action.
+        el.title = `Remove ${TAG_SIGIL}${row.tag}`;
+      }
+
+      const caret = doc.win.createSpan();
+      caret.className = "spaces-create-tree-caret";
+      if (row.hasChildren) {
+        setIcon(caret, row.expanded ? "chevron-down" : "chevron-right");
+        // Hidden from assistive tech rather than labelled as a button: it
+        // takes no focus, and the row's `aria-expanded` already carries the
+        // state. Keyboard users expand with the arrow keys below.
+        caret.setAttribute("aria-hidden", "true");
+        caret.addEventListener("click", (e) => {
+          // Expanding is browsing, not choosing. It works on a covered row
+          // too, which is what lets someone look inside a branch a selected
+          // parent already takes.
+          e.stopPropagation();
+          if (this.expandedTags.has(row.tag)) this.expandedTags.delete(row.tag);
+          else this.expandedTags.add(row.tag);
+          this.renderItemTree();
+        });
+      }
+      el.appendChild(caret);
 
       const label = doc.win.createSpan();
       label.className = "spaces-create-tree-name";
       const sigil = doc.win.createSpan();
       sigil.className = "spaces-create-tag-sigil";
-      // A Lucide tag, not a `#`: the same mark the window's corner carries, so
-      // one shape means "tag" everywhere in this panel.
+      // A Lucide tag, not a `#`: the same mark the Tags button carries, so one
+      // shape means "tag" everywhere in this panel.
       setIcon(sigil, "tag");
       label.appendChild(sigil);
       const name = doc.win.createSpan();
-      // The icon is a sibling rather than part of the highlighted text: the
-      // match positions are against the STORED tag, and anything prefixed to
-      // it would put every one of them out by that much.
-      if (hit.match) renderResults(name, hit.tag, hit.match);
-      else name.textContent = hit.tag;
+      // The last segment, not the whole tag: the indentation and the rows
+      // above it are already saying where this one sits, and repeating the
+      // ancestors on every row would put the part that differs last.
+      name.textContent = row.name;
       label.appendChild(name);
       el.appendChild(label);
 
       // Trailing the name and set in the muted type the rest of the picker
       // uses for anything that is not a name: a hint the eye picks up while it
       // is already deciding, rather than a second thing to read.
+      //
+      // A parent's count INCLUDES the notes under its children, because
+      // `pathsMatching` resolves a tag the way a member would and the index
+      // files a note under each of its tags' ancestors. So `project` reading
+      // more than its own children add up to is correct rather than a double
+      // count: a note tagged only `project/atlas` is in the figure for both.
       const count = doc.win.createSpan();
       count.className = "spaces-create-tag-count";
-      count.textContent = tagCountLabel(hit.count);
+      count.textContent = tagCountLabel(row.count);
       el.appendChild(count);
 
+      const setExpanded = (open: boolean): void => {
+        if (!row.hasChildren) return;
+        if (open) this.expandedTags.add(row.tag);
+        else this.expandedTags.delete(row.tag);
+        this.renderItemTree();
+        const again = host.querySelector<HTMLElement>(`[data-tag="${CSS.escape(row.tag)}"]`);
+        again?.focus();
+      };
+
       const choose = (): void => {
-        this.state = toggleItem(this.state, { kind: "tag", tag: hit.tag });
+        // A click on a covered row would store a tag member the selected
+        // parent already covers. Nothing is the honest answer, and the title
+        // says which tag gave it.
+        if (coveringTag !== null) return;
+        // An invented intermediate is as selectable as any other row. Nobody
+        // may have tagged a note `area`, but `area` matches everything beneath
+        // it, which is exactly what picking it means.
+        this.state = toggleItem(this.state, { kind: "tag", tag: row.tag });
         this.clearFault("root");
         this.renderSummary();
         this.renderItemTree();
@@ -1585,8 +1721,14 @@ export class CreateSpacePanel {
       };
       el.addEventListener("click", choose);
       el.addEventListener("keydown", (e) => {
-        // No arrow handling: there is nothing to expand, so the only keys
-        // that mean anything here are the two that pick.
+        // Arrows browse, Enter and Space pick — the same split the caret and
+        // the row body draw for the mouse, so expanding never selects.
+        if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+          if (!row.hasChildren) return;
+          e.preventDefault();
+          setExpanded(e.key === "ArrowRight");
+          return;
+        }
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
         choose();
