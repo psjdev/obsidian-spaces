@@ -1,59 +1,87 @@
 /**
- * The one rule that decides whether the create panel's picker shows the vault
- * tree or the vault's tags.
+ * The shortcut rule: when a character typed into the create panel's filter box
+ * presses one of the two buttons above the window instead of landing in the
+ * box.
  *
- * Layer 1: a pure function, no DOM, no `obsidian`. It is tested apart from the
- * panel because it is the part of the `#` sigil prototype that is meant to
- * outlive it — the panel around it is one of three look-and-feel candidates,
- * this rule is not.
+ * Layer 1: a pure function, no DOM, no `obsidian`. Tested apart from the panel
+ * because the panel is one of several look-and-feel candidates and this rule
+ * is not. It is also the rule with the sharpest failure mode in the whole
+ * prototype: it is the one thing here that can throw a keystroke away.
  */
 
 import { describe, expect, it } from "vitest";
-import { readPickerFilter, TAG_SIGIL } from "../src/ui/pickerFilter";
+import {
+  DEFAULT_PICKER_MODE,
+  ITEMS_SIGIL,
+  readModeSigil,
+  TAG_SIGIL,
+} from "../src/ui/pickerFilter";
 
-describe("readPickerFilter", () => {
-  it("leaves an ordinary filter to the tree, byte for byte", () => {
-    // The tree is the control in the prototype comparison. Anything this
-    // function did to the filter on the way past — a trim, a lowercase —
-    // would make every tree behaviour a new behaviour, so the assertion is on
-    // identity rather than on equivalence.
-    for (const raw of ["", "plan", "  plan  ", "Projects/Work", "a#b", "PLAN"]) {
-      expect(readPickerFilter(raw)).toEqual({ mode: "tree", query: raw });
+describe("readModeSigil", () => {
+  it("switches to items on a slash into an empty box", () => {
+    expect(readModeSigil({ box: "", key: ITEMS_SIGIL })).toBe("items");
+  });
+
+  it("switches to tags on a hash into an empty box", () => {
+    expect(readModeSigil({ box: "", key: TAG_SIGIL })).toBe("tags");
+  });
+
+  it("leaves every other character alone", () => {
+    // Null is the answer for almost everything, and the caller's job on null
+    // is to do nothing and let the character land.
+    for (const key of ["a", "Z", "1", " ", "-", "Backspace", "Enter", "ArrowLeft"]) {
+      expect(readModeSigil({ box: "", key })).toBeNull();
     }
   });
 
-  it("switches to tags on a leading sigil, and hands back the rest", () => {
-    expect(readPickerFilter("#proj")).toEqual({ mode: "tag", query: "proj" });
+  it("leaves a sigil alone once the box holds anything", () => {
+    // This is the rule's whole point. `/` is in nearly every path a curated
+    // space is picked from, so a box that switched modes mid-word would throw
+    // away both the keystroke and the view someone was halfway through using.
+    for (const box of ["P", "Projects", "Projects/", "#", "/"]) {
+      expect(readModeSigil({ box, key: ITEMS_SIGIL })).toBeNull();
+      expect(readModeSigil({ box, key: TAG_SIGIL })).toBeNull();
+    }
   });
 
-  it("treats a bare sigil as a query, not as a missing one", () => {
-    // Typing `#` is how someone who does not know what the vault holds finds
-    // out. An empty body here would make the sigil look broken at the very
-    // moment it is first tried.
-    expect(readPickerFilter("#")).toEqual({ mode: "tag", query: "" });
+  it("counts a box holding only whitespace as text, not as empty", () => {
+    // Everywhere else in this picker a blank box counts as empty. Not here:
+    // this rule DELETES the character it claims, and a box with a space in it
+    // is one someone is already typing in.
+    expect(readModeSigil({ box: " ", key: TAG_SIGIL })).toBeNull();
   });
 
-  it("finds the sigil behind leading whitespace", () => {
-    // Invisible, so it cannot be the difference between two modes. A space
-    // picked up from a paste would otherwise search the tree for a file
-    // called "#project" with nothing on screen to explain why.
-    expect(readPickerFilter("  #project")).toEqual({ mode: "tag", query: "project" });
+  it("ignores a sigil reached with ctrl, meta or alt", () => {
+    // Those are shortcuts the app or the OS owns, and the character never
+    // arrives in the box either.
+    expect(readModeSigil({ box: "", key: ITEMS_SIGIL, modified: true })).toBeNull();
+    expect(readModeSigil({ box: "", key: TAG_SIGIL, modified: true })).toBeNull();
   });
 
-  it("keeps a sigil that is not the first character in the tree", () => {
-    // `#` is legal in a file name, and a filter that starts with something
-    // else is not asking for tags.
-    expect(readPickerFilter("notes #2")).toEqual({ mode: "tree", query: "notes #2" });
+  it("still fires when shift is what produced the character", () => {
+    // `#` is a shifted key on most layouts, so treating shift as a modifier
+    // would disable the shortcut on the keyboards it was written for. Shift is
+    // simply not reported here.
+    expect(readModeSigil({ box: "", key: TAG_SIGIL, modified: false })).toBe("tags");
   });
 
-  it("strips exactly one sigil, so a second one reaches the query", () => {
-    // `normalizeTag` drops the other, deliberately: a doubled `#` is a typo,
-    // and the picker should not silently read it as something else here.
-    expect(readPickerFilter("##proj")).toEqual({ mode: "tag", query: "#proj" });
+  it("stays out of the way of an IME mid-composition", () => {
+    // The key is not a finished character yet, so nothing has been typed for
+    // the rule to be about.
+    expect(readModeSigil({ box: "", key: TAG_SIGIL, composing: true })).toBeNull();
   });
 
-  it("keeps the sigil the panel draws and the one it reads in step", () => {
-    expect(TAG_SIGIL).toBe("#");
-    expect(readPickerFilter(TAG_SIGIL).mode).toBe("tag");
+  it("answers for no inherited object property", () => {
+    // The lookup key is whatever the keyboard produced. An object literal
+    // would answer for `constructor` and `toString` as readily as for a sigil.
+    for (const key of ["constructor", "toString", "__proto__"]) {
+      expect(readModeSigil({ box: "", key })).toBeNull();
+    }
+  });
+
+  it("opens on items", () => {
+    // The window's resting body is the vault tree, which is what every
+    // prototype in this comparison has opened on.
+    expect(DEFAULT_PICKER_MODE).toBe("items");
   });
 });

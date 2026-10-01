@@ -1,106 +1,83 @@
 /**
- * The rule that decides what the create panel's explorer window is showing,
- * now that the window has two doors into tags: the `#` sigil in the filter box
- * and the tag icon in its own corner.
+ * Which body the create panel's explorer window draws, and what the row pinned
+ * under it says.
  *
  * Layer 1: pure functions, no DOM, no `obsidian`. Tested apart from the panel
  * because this is the part of the prototype meant to outlive it — the window
- * around it is one of several look-and-feel candidates, the rule is not.
+ * around it is one of several look-and-feel candidates, the rules are not.
  */
 
 import { describe, expect, it } from "vitest";
-import { leaveTagView, readPickerBody, tagToggleLabel } from "../src/ui/pickerBody";
+import { countPicked, pickedSummary, readPickerBody } from "../src/ui/pickerBody";
+import type { MemberEntry } from "../src/types";
 
 describe("readPickerBody", () => {
-  it("leaves an ordinary filter to the tree, byte for byte", () => {
-    // The tree is the control across every one of these prototypes. Anything
-    // done to the filter on the way past would make each of its behaviours a
-    // new behaviour, so this asserts identity rather than equivalence.
-    for (const raw of ["", "plan", "  plan  ", "Projects/Work", "a#b", "PLAN"]) {
-      expect(readPickerBody(raw, false)).toEqual({ body: "tree", query: raw });
-    }
+  it("draws whichever body the buttons hold", () => {
+    expect(readPickerBody("items", false)).toBe("items");
+    expect(readPickerBody("tags", false)).toBe("tags");
   });
 
-  it("shows what was chosen when the icon is on and the box is empty", () => {
-    // The review-and-remove list, and the only place a chosen tag is visible
-    // now that the row of chips above the window is gone.
-    expect(readPickerBody("", true)).toEqual({ body: "tag-chosen", query: "" });
-  });
-
-  it("counts a box holding only whitespace as empty", () => {
-    // Whitespace is invisible, so it must not be the difference between the
-    // list of what you chose and a search that will match nothing.
-    expect(readPickerBody("   ", true)).toEqual({ body: "tag-chosen", query: "" });
-  });
-
-  it("searches the vault once the box has text, with no sigil needed", () => {
-    // The icon has already said "tags", so the sigil would be a second way of
-    // saying it. Typing is just typing.
-    expect(readPickerBody("proj", true)).toEqual({ body: "tag-search", query: "proj" });
-  });
-
-  it("still enters the search on a leading sigil with the icon off", () => {
-    expect(readPickerBody("#proj", false)).toEqual({ body: "tag-search", query: "proj" });
-  });
-
-  it("browses the whole tag list on a bare sigil", () => {
-    // The sigil is TEXT in the box, and text searches. A bare `#` searches
-    // with an empty query, which is the browse the sigil has always been: it
-    // is how someone with nothing chosen yet goes looking, and an empty body
-    // here would make the sigil look broken the first time it is tried.
-    expect(readPickerBody("#", false)).toEqual({ body: "tag-search", query: "" });
-    expect(readPickerBody("#", true)).toEqual({ body: "tag-search", query: "" });
-  });
-
-  it("lets the sigil overrule an icon that is off", () => {
-    // Two doors into one room, so either one opens it. The sigil is checked
-    // first, which also means the icon can never shut a door the text is
-    // holding open.
-    expect(readPickerBody("  #a", false).body).toBe("tag-search");
+  it("overrules the buttons in folder mode", () => {
+    // A folder space is a window onto one root, and a tag is not one. The
+    // Tags button is not drawn there at all, so a press that happened before
+    // the switch must not leave the window showing tags it cannot submit.
+    expect(readPickerBody("tags", true)).toBe("items");
+    expect(readPickerBody("items", true)).toBe("items");
   });
 });
 
-describe("leaveTagView", () => {
-  it("drops the sigil so pressing the icon off reaches the tree", () => {
-    // Without this the text would hold the window in tag mode against the
-    // control that has just said to leave it.
-    expect(leaveTagView("#proj")).toBe("proj");
-    expect(leaveTagView("#")).toBe("");
+describe("countPicked", () => {
+  const file = (path: string): MemberEntry => ({ kind: "file", path });
+  const folder = (path: string): MemberEntry => ({ kind: "folder", path });
+  const tag = (name: string): MemberEntry => ({ kind: "tag", tag: name });
+
+  it("counts nothing for a space with no members yet", () => {
+    expect(countPicked([])).toEqual({ notes: 0, folders: 0, tags: 0 });
   });
 
-  it("leaves a filter with no sigil exactly as it is", () => {
-    expect(leaveTagView("plan")).toBe("plan");
-    expect(leaveTagView("")).toBe("");
-  });
-
-  it("lands where backspacing the sigil away lands", () => {
-    // The icon and the keyboard are two ways to do the same thing, so they
-    // have to leave the box saying the same thing.
-    for (const raw of ["#proj", "#", "  #a b"]) {
-      expect(readPickerBody(leaveTagView(raw), false).body).toBe("tree");
-    }
+  it("sorts the three kinds apart", () => {
+    expect(
+      countPicked([file("a.md"), tag("project"), folder("Archive"), file("b.md"), tag("inbox")])
+    ).toEqual({ notes: 2, folders: 1, tags: 2 });
   });
 });
 
-describe("tagToggleLabel", () => {
-  it("offers tags while the vault is on screen", () => {
-    expect(tagToggleLabel(false, 0)).toBe("Show tags");
+describe("pickedSummary", () => {
+  it("says so when nothing has been chosen", () => {
+    // The state the window opens in, so an empty row here would read as a row
+    // that failed to draw.
+    expect(pickedSummary({ notes: 0, folders: 0, tags: 0 })).toBe("Nothing selected");
   });
 
-  it("offers the vault back while tags are on screen", () => {
-    // The label names what pressing it does, not what is on screen, because
-    // that is the question a tooltip is being asked.
-    expect(tagToggleLabel(true, 3)).toBe("Show files and folders");
+  it("names the three kinds in order", () => {
+    expect(pickedSummary({ notes: 3, folders: 1, tags: 2 })).toBe("3 notes, 1 folder, 2 tags");
   });
 
-  it("carries the count, because the digits beside the icon are unreadable", () => {
-    expect(tagToggleLabel(false, 1)).toBe("Show tags, 1 chosen");
-    expect(tagToggleLabel(false, 4)).toBe("Show tags, 4 chosen");
+  it("leaves out a kind with nothing in it", () => {
+    // The row is one line tall, and "0 folders" spends it on something that is
+    // not there.
+    expect(pickedSummary({ notes: 3, folders: 0, tags: 0 })).toBe("3 notes");
+    expect(pickedSummary({ notes: 0, folders: 0, tags: 1 })).toBe("1 tag");
+    expect(pickedSummary({ notes: 0, folders: 2, tags: 4 })).toBe("2 folders, 4 tags");
   });
 
-  it("says nothing about a count of none", () => {
-    // Nothing is drawn beside the icon either, so a label claiming "0 chosen"
-    // would describe something that is not there.
-    expect(tagToggleLabel(false, 0)).not.toMatch(/0|chosen/);
+  it("reads naturally for one of each kind", () => {
+    expect(pickedSummary({ notes: 1, folders: 1, tags: 1 })).toBe("1 note, 1 folder, 1 tag");
+  });
+
+  it("uses the plugin's own words for what a space holds", () => {
+    // "notes and folders" is what the README, the settings tab and the tag
+    // rows' own counts say. A picker with a third vocabulary for the same two
+    // things would make the reader check whether a third thing was meant.
+    const text = pickedSummary({ notes: 2, folders: 2, tags: 2 });
+    expect(text).not.toMatch(/file|item/i);
+  });
+
+  it("groups a large count by locale, like every other number here", () => {
+    // A vault where this matters is exactly the vault where unseparated digits
+    // are hard to read.
+    expect(pickedSummary({ notes: 1234, folders: 0, tags: 0 })).toBe(
+      `${(1234).toLocaleString()} notes`
+    );
   });
 });
