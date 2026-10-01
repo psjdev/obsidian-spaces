@@ -37,23 +37,73 @@ export function coveringFolder(
   members: readonly MemberEntry[],
   path: string
 ): string | null {
-  // Folded on both sides, so a folder stored as `Inbox` still covers a
-  // live `inbox/today.md`. Without this the row is visible — the
-  // snapshot resolves the stored path — but every caller that asks WHY it is
-  // visible gets "not inherited", so the disabled menu entry loses the folder
-  // name it exists to report. The LIVE ancestor is returned, not the stored
-  // spelling, because that is what the caller is labelling.
+  return coveringFolderIn(memberFolderSet(members), path);
+}
+
+/**
+ * The folder members, canonicalised, ready for `coveringFolderIn`.
+ *
+ * Split out so a caller asking about a whole list of paths builds this once
+ * instead of once per path. The create panel draws up to two hundred rows per
+ * keystroke and was rebuilding it for every one of them.
+ */
+export function memberFolderSet(members: readonly MemberEntry[]): Set<string> {
+  // Folded, so a folder stored as `Inbox` still covers a live
+  // `inbox/today.md`. Without this the row is visible — the snapshot resolves
+  // the stored path — but every caller that asks WHY it is visible gets "not
+  // inherited", so the disabled menu entry loses the folder name it exists to
+  // report.
   //
   // Merged by the arbiter: x5 moved this function here while x4
   // canonicalised it in its old home. Both were wanted; this is the union.
-  const memberFolders = new Set(
+  return new Set(
     members.filter((m) => m.kind === "folder").map((m) => canonicalPath(m.path))
   );
+}
+
+/**
+ * `coveringFolder` against an already-built folder set.
+ *
+ * The LIVE ancestor is returned, not the stored spelling, because that is
+ * what the caller is labelling.
+ */
+export function coveringFolderIn(
+  folders: ReadonlySet<string>,
+  path: string
+): string | null {
   const ancestors = ancestorsOf(path);
   for (let i = ancestors.length - 1; i >= 0; i--) {
-    if (memberFolders.has(canonicalPath(ancestors[i]))) return ancestors[i];
+    if (folders.has(canonicalPath(ancestors[i]))) return ancestors[i];
   }
   return null;
+}
+
+/**
+ * Every path a tag member already covers, mapped to the tag responsible.
+ *
+ * Resolved in one pass rather than asked path by path, because this answer
+ * needs the tag index and the folder answer does not. A predicate shaped like
+ * `coveringFolder` would consult the index once per path it was asked about,
+ * and the create panel asks about every row it draws, on every keystroke.
+ *
+ * Nesting needs no work here: `pathsMatching` resolves it at build time, so a
+ * `project` member arrives carrying the notes tagged `project/atlas` already.
+ *
+ * The first member to claim a path keeps it, so the tag a covered row names
+ * does not move when a later member happens to match the same note.
+ */
+export function coveringTags(
+  members: readonly MemberEntry[],
+  pathsMatching: (tag: string) => readonly string[]
+): Map<string, string> {
+  const byPath = new Map<string, string>();
+  for (const member of members) {
+    if (member.kind !== "tag") continue;
+    for (const path of pathsMatching(member.tag)) {
+      if (!byPath.has(path)) byPath.set(path, member.tag);
+    }
+  }
+  return byPath;
 }
 
 /**
