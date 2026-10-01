@@ -28,6 +28,7 @@ import {
   TAG_SIGIL,
   type PickerMode,
 } from "./pickerFilter";
+import { coveringFolder } from "../definitions/membership";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
 import { previewPaths } from "./memberPreview";
 import { fuzzyTagCandidates, type TagHit, type TagSource } from "./tagCandidates";
@@ -1143,6 +1144,30 @@ export class CreateSpacePanel {
       // reads as "not selectable" rather than "not selected".
       el.setAttribute("aria-selected", String(row.selected));
       if (row.hasChildren) el.setAttribute("aria-expanded", String(row.expanded));
+      // Everything under a selected folder is already in the space, at every
+      // depth, so the tree says so rather than leaving the children looking
+      // untouched. Picked wins over covered: a row chosen by hand is a member
+      // in its own right and still removable, and reading it as inherited
+      // would hide the entry it is. Folder mode takes one root and keeps no
+      // member list, so nothing there can be covered.
+      const coveredBy =
+        this.state.folderMode || row.selected
+          ? null
+          : coveringFolder(this.state.items, row.path);
+      el.classList.toggle("is-inherited", coveredBy !== null);
+      if (coveredBy !== null) {
+        // `aria-disabled` rather than the tint alone: covered is a third
+        // state, and neither `aria-selected="false"` nor a background color
+        // tells a screen reader it is one. Not `disabled`, which would take
+        // the row out of the tab order and leave a keyboard user with no way
+        // to reach the title that explains it.
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute(
+          "title",
+          `Already included by the selected folder ${coveredBy}. ` +
+            "Deselect that folder to pick items under it one at a time."
+        );
+      }
 
       const caret = doc.win.createSpan();
       caret.className = "spaces-create-tree-caret";
@@ -1184,6 +1209,11 @@ export class CreateSpacePanel {
       };
 
       const choose = (): void => {
+        // A click on a covered row did nothing visible and stored a `file`
+        // member the selected folder already covers — the state `memberRows`
+        // calls `redundant`. Nothing is the honest answer, and the title says
+        // which folder gave it.
+        if (coveredBy !== null) return;
         if (this.state.folderMode) {
           // One root: picking replaces, and picking the same one again clears,
           // so a mis-click is undoable without leaving the picker.

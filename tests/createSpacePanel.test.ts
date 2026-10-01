@@ -1268,3 +1268,144 @@ describe("the Items and Tags buttons under the filter box", () => {
     });
   });
 });
+
+/**
+ * Selecting a folder selects everything under it, and until now the tree did
+ * not say so: the folder got `.is-selected` and its children looked untouched
+ * while being just as much in the space. Clicking one of those children stored
+ * a second member the folder already covered — the state `memberRows` calls
+ * `redundant` — with nothing on screen to say the click had been pointless.
+ *
+ * Nothing about what gets STORED changes here. These tests pin the marking,
+ * the guard and the counts that must not move with them.
+ */
+describe("rows a selected folder already covers", () => {
+  const covered = (path: string): boolean => rowFor(path).classList.contains("is-inherited");
+  /** The caret, not the row: expanding is browsing, and a covered row still opens. */
+  const expand = (path: string): void => {
+    const caret = rowFor(path).querySelector<HTMLElement>(".spaces-create-tree-caret");
+    if (!caret) throw new Error(`no caret on ${path}`);
+    caret.click();
+  };
+  const summaryText = (): string =>
+    panelEl().querySelector(".spaces-create-summary")?.textContent ?? "";
+
+  it("marks a direct child and a descendant three levels down alike", () => {
+    makeHarness();
+    byKey("mode-curate").click();
+    rowFor("Projects").click();
+    expand("Projects");
+    expect(covered("Projects/Work")).toBe(true);
+    // The covered folder still opens, which is the whole reason the marking
+    // has to reach past the first level.
+    expand("Projects/Work");
+    expect(covered("Projects/Work/plan.md")).toBe(true);
+  });
+
+  it("leaves everything outside the selected folder alone", () => {
+    makeHarness();
+    byKey("mode-curate").click();
+    rowFor("Projects").click();
+    expect(covered("Archive")).toBe(false);
+    expect(covered("inbox.md")).toBe(false);
+    // Nor the folder itself: it is picked, not covered.
+    expect(covered("Projects")).toBe(false);
+    expect(rowFor("Projects").classList.contains("is-selected")).toBe(true);
+  });
+
+  it("says so to assistive tech, and names the folder responsible", () => {
+    // Colour alone does not distinguish a covered row from an ordinary one,
+    // and `aria-selected="false"` says the opposite of what is true.
+    makeHarness();
+    byKey("mode-curate").click();
+    rowFor("Projects").click();
+    expand("Projects");
+    const row = rowFor("Projects/Work");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.getAttribute("title")).toContain("Projects");
+    expect(rowFor("Archive").hasAttribute("aria-disabled")).toBe(false);
+    expect(rowFor("Archive").hasAttribute("title")).toBe(false);
+  });
+
+  it("does nothing at all when a covered row is clicked", async () => {
+    const h = makeHarness();
+    typeName("Covered");
+    byKey("mode-curate").click();
+    rowFor("Projects").click();
+    expand("Projects");
+    expand("Projects/Work");
+    const before = summaryText();
+
+    rowFor("Projects/Work/plan.md").click();
+    rowFor("Projects/Work").click();
+
+    // The row is still only covered, the count has not moved, and the member
+    // list is the one folder it was.
+    expect(covered("Projects/Work/plan.md")).toBe(true);
+    expect(rowFor("Projects/Work/plan.md").getAttribute("aria-selected")).toBe("false");
+    expect(summaryText()).toBe(before);
+
+    byKey("create").click();
+    await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
+    expect(h.submitted[0].opts.members).toEqual([{ path: "Projects", kind: "folder" }]);
+  });
+
+  it("keeps the keyboard from storing one either", () => {
+    makeHarness();
+    byKey("mode-curate").click();
+    rowFor("Projects").click();
+    expand("Projects");
+    const row = rowFor("Projects/Work");
+    row.focus();
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(rowFor("Projects/Work").getAttribute("aria-selected")).toBe("false");
+    expect(summaryText()).toBe("1 note, 1 folder");
+  });
+
+  it("reads as picked rather than covered when it is both", async () => {
+    // The stronger state is the true one: the entry exists, the user made it,
+    // and they must be able to click it off again.
+    const h = makeHarness();
+    typeName("Both");
+    byKey("mode-curate").click();
+    expand("Projects");
+    expand("Projects/Work");
+    rowFor("Projects/Work/plan.md").click();
+    rowFor("Projects").click();
+
+    const row = rowFor("Projects/Work/plan.md");
+    expect(row.classList.contains("is-selected")).toBe(true);
+    expect(covered("Projects/Work/plan.md")).toBe(false);
+    expect(row.hasAttribute("aria-disabled")).toBe(false);
+
+    row.click();
+    expect(rowFor("Projects/Work/plan.md").getAttribute("aria-selected")).toBe("false");
+    expect(covered("Projects/Work/plan.md")).toBe(true);
+    byKey("create").click();
+    await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
+    expect(h.submitted[0].opts.members).toEqual([{ path: "Projects", kind: "folder" }]);
+  });
+
+  it("marks nothing in folder mode, which holds one root and no members", () => {
+    makeHarness();
+    byKey("mode-folder").click();
+    rowFor("Projects").click();
+    expand("Projects");
+    expect(covered("Projects/Work")).toBe(false);
+    // Still pickable: choosing a nested folder REPLACES the root.
+    rowFor("Projects/Work").click();
+    expect(rowFor("Projects/Work").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("leaves the summary row's counts where they were", () => {
+    // A covered row is not a picked member, and the resolved total already
+    // counted it through the folder. Marking it must not move either figure.
+    makeHarness();
+    byKey("mode-curate").click();
+    rowFor("Projects").click();
+    expect(summaryText()).toBe("1 note, 1 folder");
+    expand("Projects");
+    expand("Projects/Work");
+    expect(summaryText()).toBe("1 note, 1 folder");
+  });
+});

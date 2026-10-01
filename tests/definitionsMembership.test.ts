@@ -11,7 +11,7 @@
  * Layer 1: pure, no `obsidian`.
  */
 import { describe, expect, it } from "vitest";
-import { inheritedFromFolder } from "../src/definitions/membership";
+import { coveringFolder, inheritedFromFolder } from "../src/definitions/membership";
 import { inheritedFromFolder as viaMembershipMenu } from "../src/actions/membershipMenu";
 import type { SpaceDefinition } from "../src/types";
 
@@ -64,5 +64,50 @@ describe("inheritedFromFolder", () => {
     // the two importers owned by other branches. A second copy of the
     // predicate would let the two import paths silently diverge over time.
     expect(viaMembershipMenu).toBe(inheritedFromFolder);
+  });
+});
+
+/**
+ * The same walk, asked of a member list that is not a space yet. The create
+ * panel's picker holds `CreateFormState.items` and tints everything a selected
+ * folder covers, so this is the shape it needs.
+ */
+describe("coveringFolder", () => {
+  it("answers for a bare member list, as inheritedFromFolder does for a space", () => {
+    const members: SpaceDefinition["members"] = [{ path: "Projects", kind: "folder" }];
+    expect(coveringFolder(members, "Projects/Console/notes.md")).toBe("Projects");
+    expect(inheritedFromFolder(space(members), "Projects/Console/notes.md")).toBe(
+      coveringFolder(members, "Projects/Console/notes.md")
+    );
+  });
+
+  it("covers a descendant any number of levels down", () => {
+    const members: SpaceDefinition["members"] = [{ path: "Projects", kind: "folder" }];
+    expect(coveringFolder(members, "Projects/Console/2030/Q1/notes.md")).toBe("Projects");
+  });
+
+  it("folds case on both sides, and hands back the LIVE ancestor", () => {
+    // The reason the panel shares this rather than writing its own: a picker
+    // that compared paths as typed would leave a covered row untinted and
+    // clickable on exactly the vaults this folding exists for. The folder
+    // named in the row's title has to be the one the user can see in the tree,
+    // which is the live spelling, not the stored one.
+    const members: SpaceDefinition["members"] = [{ path: "INBOX", kind: "folder" }];
+    expect(coveringFolder(members, "Inbox/today.md")).toBe("Inbox");
+  });
+
+  it("ignores tag members, which name no path to inherit from", () => {
+    const members: SpaceDefinition["members"] = [
+      { kind: "tag", tag: "project" },
+      { path: "Projects", kind: "folder" },
+    ];
+    expect(coveringFolder(members, "Projects/notes.md")).toBe("Projects");
+    expect(coveringFolder(members, "Inbox/today.md")).toBeNull();
+  });
+
+  it("returns null for a sibling outside every selected folder", () => {
+    const members: SpaceDefinition["members"] = [{ path: "Projects", kind: "folder" }];
+    expect(coveringFolder(members, "Archive/old.md")).toBeNull();
+    expect(coveringFolder([], "Projects/notes.md")).toBeNull();
   });
 });

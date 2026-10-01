@@ -1,6 +1,7 @@
 /**
- * Membership predicates over a `SpaceDefinition` — the ownership-vs-membership
- * model itself, asked as a question rather than rendered.
+ * Membership predicates over a `SpaceDefinition`, or over the member list
+ * behind one — the ownership-vs-membership model itself, asked as a question
+ * rather than rendered.
  *
  * `inheritedFromFolder` used to live in `actions/membershipMenu.ts`,
  * which made it a menu-rendering module's export that four unrelated modules
@@ -15,18 +16,27 @@
  * `"obsidian"` import.
  */
 
-import type { PathMember, SpaceDefinition } from "../types";
+import type { MemberEntry, PathMember, SpaceDefinition } from "../types";
 import { canonicalPath } from "../visibility/glob";
 import { ancestorsOf } from "../visibility/VaultIndex";
 import { hasRoot } from "../visibility/folderSpace";
 
 /**
  * The innermost ancestor folder that is itself an exact member -- the folder
- * responsible for `path` being visible via inheritance. Returns null if none
+ * responsible for `path` being covered by inheritance. Returns null if none
  * is found (shouldn't happen when the caller already knows the path is
  * inherited, but this stays defensive).
+ *
+ * Takes a bare member list rather than a space, because the create panel asks
+ * this question of `CreateFormState.items` — a selection that is not a space
+ * yet and may never become one. A second copy of the walk for that caller
+ * would be a second place for the case folding below to be forgotten, and the
+ * disagreement would only surface on a vault that spells a folder two ways.
  */
-export function inheritedFromFolder(space: SpaceDefinition, path: string): string | null {
+export function coveringFolder(
+  members: readonly MemberEntry[],
+  path: string
+): string | null {
   // Folded on both sides, so a folder stored as `Inbox` still covers a
   // live `inbox/today.md`. Without this the row is visible — the
   // snapshot resolves the stored path — but every caller that asks WHY it is
@@ -37,13 +47,22 @@ export function inheritedFromFolder(space: SpaceDefinition, path: string): strin
   // Merged by the arbiter: x5 moved this function here while x4
   // canonicalised it in its old home. Both were wanted; this is the union.
   const memberFolders = new Set(
-    space.members.filter((m) => m.kind === "folder").map((m) => canonicalPath(m.path))
+    members.filter((m) => m.kind === "folder").map((m) => canonicalPath(m.path))
   );
   const ancestors = ancestorsOf(path);
   for (let i = ancestors.length - 1; i >= 0; i--) {
     if (memberFolders.has(canonicalPath(ancestors[i]))) return ancestors[i];
   }
   return null;
+}
+
+/**
+ * `coveringFolder`, asked of a stored space. The spelling every caller that
+ * holds a `SpaceDefinition` uses, kept so none of them reaches into
+ * `space.members` to ask one question about it.
+ */
+export function inheritedFromFolder(space: SpaceDefinition, path: string): string | null {
+  return coveringFolder(space.members, path);
 }
 
 /**

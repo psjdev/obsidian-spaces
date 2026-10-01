@@ -392,6 +392,20 @@
   outline: none;
   box-shadow: inset 0 0 0 2px var(--text-accent);
 }
+/* In the space because a selected folder above it is, not because anyone
+   picked it. The accent washed down to 10%, the strength
+   `.spaces-drop-parent` already uses for the same kind of statement: a
+   consequence of something else the user did. `.is-selected` below out-ranks
+   it in the cascade and adds accent text and a heavier weight to its own
+   background, so the two cannot read alike at a glance.
+
+   After `:hover`, so the wash survives the pointer passing over it, and
+   `cursor: default` because the click is a no-op. A row that looks clickable
+   and does nothing is worse than one that says so. */
+.spaces-create-tree-row.is-inherited {
+  background: color-mix(in oklch, var(--interactive-accent) 10%, transparent);
+  cursor: default;
+}
 .spaces-create-tree-row.is-selected {
   background: var(--background-modifier-active-hover, var(--background-modifier-hover));
   color: var(--text-accent);
