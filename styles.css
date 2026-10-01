@@ -392,8 +392,8 @@
   outline: none;
   box-shadow: inset 0 0 0 2px var(--text-accent);
 }
-/* In the space because a selected folder or tag already brings it in, not
-   because anyone picked it. The accent washed down to 10%, the strength
+/* In the space because a selected folder above it is, not because anyone
+   picked it. The accent washed down to 10%, the strength
    `.spaces-drop-parent` already uses for the same kind of statement: a
    consequence of something else the user did. `.is-selected` below out-ranks
    it in the cascade and adds accent text and a heavier weight to its own

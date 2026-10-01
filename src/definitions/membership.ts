@@ -79,34 +79,6 @@ export function coveringFolderIn(
 }
 
 /**
- * Every path a tag member already covers, mapped to the tag responsible.
- *
- * Resolved in one pass rather than asked path by path, because this answer
- * needs the tag index and the folder answer does not. A predicate shaped like
- * `coveringFolder` would consult the index once per path it was asked about,
- * and the create panel asks about every row it draws, on every keystroke.
- *
- * Nesting needs no work here: `pathsMatching` resolves it at build time, so a
- * `project` member arrives carrying the notes tagged `project/atlas` already.
- *
- * The first member to claim a path keeps it, so the tag a covered row names
- * does not move when a later member happens to match the same note.
- */
-export function coveringTags(
-  members: readonly MemberEntry[],
-  pathsMatching: (tag: string) => readonly string[]
-): Map<string, string> {
-  const byPath = new Map<string, string>();
-  for (const member of members) {
-    if (member.kind !== "tag") continue;
-    for (const path of pathsMatching(member.tag)) {
-      if (!byPath.has(path)) byPath.set(path, member.tag);
-    }
-  }
-  return byPath;
-}
-
-/**
  * `coveringFolder`, asked of a stored space. The spelling every caller that
  * holds a `SpaceDefinition` uses, kept so none of them reaches into
  * `space.members` to ask one question about it.

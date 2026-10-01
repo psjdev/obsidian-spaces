@@ -1411,186 +1411,70 @@ describe("rows a selected folder already covers", () => {
 });
 
 /**
- * The same marking for tags, which until now was the visible asymmetry: a note
- * under a selected folder was washed, a note carrying a selected tag was not,
- * and clicking the latter stored a `file` member the tag already covered.
- *
- * The cost is the part worth pinning. The folder answer is a path-prefix test
- * over the member list; the tag answer needs the index, so it is resolved once
- * for the whole list before any row is drawn. A per-row lookup would reach the
- * index up to MAX_PICKER_ROWS times per keystroke, and the last test here is
- * the one that fails if that creeps back.
+ * A note only a selected tag covers is an ordinary row. A folder's coverage is
+ * a fact about the tree on screen; a tag's is a rule matching notes scattered
+ * anywhere, and tinting them marked a scattered majority of a broad tag's
+ * folders and left no way to tell why a row was marked. Tags mode and the
+ * summary row report it instead.
  */
-describe("rows a selected tag already covers", () => {
-  const covered = (path: string): boolean => rowFor(path).classList.contains("is-inherited");
-  const expand = (path: string): void => {
-    const caret = rowFor(path).querySelector<HTMLElement>(".spaces-create-tree-caret");
-    if (!caret) throw new Error(`no caret on ${path}`);
-    caret.click();
-  };
+describe("rows a selected tag covers", () => {
   const summaryText = (): string =>
     panelEl().querySelector(".spaces-create-summary")?.textContent ?? "";
-  const tagRowFor = (tag: string): HTMLElement => {
+  const pickTag = (tag: string): void => {
+    byKey("body-tags").click();
     const row = Array.from(panelEl().querySelectorAll<HTMLElement>("[role='option']")).find(
       (r) => r.dataset.tag === tag
     );
     if (!row) throw new Error(`no tag row for ${tag}`);
-    return row;
-  };
-  /** Pick a tag in the Tags body, then come back to the tree it marks. */
-  const pickTag = (tag: string): void => {
-    byKey("body-tags").click();
-    tagRowFor(tag).click();
+    row.click();
     byKey("body-items").click();
   };
 
-  it("washes every note the selected tag reaches, at any depth of folder", () => {
-    // `project` holds `inbox.md` only because the index expanded
-    // `project/console` into it, so this is the nesting case and the direct
-    // one in the same assertion. The tree needs no depth rule of its own.
-    makeHarness();
-    byKey("mode-curate").click();
-    pickTag("project");
-    expect(covered("inbox.md")).toBe(true);
-    expand("Projects");
-    expand("Projects/Work");
-    expect(covered("Projects/Work/plan.md")).toBe(true);
-  });
-
-  it("leaves alone what the selected tag does not reach", () => {
-    // `project/console` is the narrower member: it carries `inbox.md` and not
-    // `plan.md`, which only the parent tag reaches.
-    makeHarness();
-    byKey("mode-curate").click();
-    pickTag("project/console");
-    expect(covered("inbox.md")).toBe(true);
-    expand("Projects");
-    expand("Projects/Work");
-    expect(covered("Projects/Work/plan.md")).toBe(false);
-    // Folders are not in a tag's answer, so no branch is washed by one.
-    expect(covered("Projects")).toBe(false);
-    expect(covered("Archive")).toBe(false);
-  });
-
-  it("says so to assistive tech, and names the tag with the # it is written with", () => {
-    // Members store a tag bare; everywhere the user can see one it has its
-    // sigil, and this title is one of those places.
-    makeHarness();
-    byKey("mode-curate").click();
-    pickTag("project");
-    const row = rowFor("inbox.md");
-    expect(row.getAttribute("aria-disabled")).toBe("true");
-    expect(row.getAttribute("title")).toContain("#project");
-    expect(row.getAttribute("title")).not.toContain("folder");
-    expect(rowFor("Archive").hasAttribute("aria-disabled")).toBe(false);
-  });
-
-  it("does nothing at all when a tag-covered row is clicked", async () => {
+  it("are clickable, and clicking one adds the note as its own member", async () => {
+    // Clicking is redundant with the tag and harmless. What would be wrong is
+    // a row that looks interactive and silently does nothing, which is what a
+    // partial revert of the click guard would leave.
     const h = makeHarness();
-    typeName("Covered by tag");
+    typeName("Tag and note");
     byKey("mode-curate").click();
     pickTag("project");
     const before = summaryText();
 
     rowFor("inbox.md").click();
 
-    expect(covered("inbox.md")).toBe(true);
-    expect(rowFor("inbox.md").getAttribute("aria-selected")).toBe("false");
+    expect(rowFor("inbox.md").getAttribute("aria-selected")).toBe("true");
+    expect(rowFor("inbox.md").classList.contains("is-selected")).toBe(true);
     expect(summaryText()).toBe(before);
 
     byKey("create").click();
     await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
-    expect(h.submitted[0].opts.members).toEqual([{ kind: "tag", tag: "project" }]);
+    expect(h.submitted[0].opts.members).toEqual([
+      { kind: "tag", tag: "project" },
+      { kind: "file", path: "inbox.md" },
+    ]);
   });
 
-  it("keeps the keyboard from storing one either", () => {
-    makeHarness();
-    byKey("mode-curate").click();
-    pickTag("project");
-    const row = rowFor("inbox.md");
-    row.focus();
-    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(rowFor("inbox.md").getAttribute("aria-selected")).toBe("false");
-    expect(summaryText()).toBe("2 notes, 1 tag");
-  });
-
-  it("reads as picked rather than covered when it is both", async () => {
-    // The stronger state is the true one, exactly as for a folder: the entry
-    // exists, the user made it, and they must be able to click it off again.
-    const h = makeHarness();
-    typeName("Both");
-    byKey("mode-curate").click();
-    rowFor("inbox.md").click();
-    pickTag("project");
-
-    const row = rowFor("inbox.md");
-    expect(row.classList.contains("is-selected")).toBe(true);
-    expect(covered("inbox.md")).toBe(false);
-    expect(row.hasAttribute("aria-disabled")).toBe(false);
-
-    row.click();
-    expect(covered("inbox.md")).toBe(true);
-    byKey("create").click();
-    await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
-    expect(h.submitted[0].opts.members).toEqual([{ kind: "tag", tag: "project" }]);
-  });
-
-  it("names the folder when a folder and a tag both cover the row", () => {
-    // Either sentence is true. The folder's is the one already in the product,
-    // so a row that gains a second reason to be washed does not change what it
-    // says.
-    makeHarness();
-    byKey("mode-curate").click();
-    rowFor("Projects").click();
-    pickTag("project");
-    expand("Projects");
-    expand("Projects/Work");
-    const row = rowFor("Projects/Work/plan.md");
-    expect(covered("Projects/Work/plan.md")).toBe(true);
-    expect(row.getAttribute("title")).toContain("selected folder Projects");
-    expect(row.getAttribute("title")).not.toContain("#project");
-  });
-
-  it("marks nothing in folder mode, and asks the index nothing to draw it", () => {
-    // Folder mode holds one root and keeps no member list, so there is no tag
-    // to be covered by and no reason to reach for the snapshot.
+  it("look like any other row, and drawing the tree never resolves a tag", () => {
+    // The structure scales with the vault only if a draw does per-tag work.
+    // It must not: the folder set is the only thing built per draw.
     const h = makeHarness();
     byKey("mode-curate").click();
     pickTag("project");
-    byKey("mode-folder").click();
-    const reached = h.reached;
-    expand("Projects");
-    expect(covered("Projects/Work")).toBe(false);
-    expect(h.reached).toBe(reached);
-  });
-
-  it("leaves the summary row's counts where they were", () => {
-    // A washed row is not a picked member, and the resolved total already
-    // counted it through the tag.
-    makeHarness();
-    byKey("mode-curate").click();
-    pickTag("project");
-    expect(summaryText()).toBe("2 notes, 1 tag");
-    expand("Projects");
-    expand("Projects/Work");
-    expect(summaryText()).toBe("2 notes, 1 tag");
-  });
-
-  it("asks the index once per draw of the tree, not once per row", () => {
-    // The regression this design exists to prevent. The answer cannot change
-    // within one draw, so one lookup per tag member is the whole cost; one per
-    // drawn row would put up to MAX_PICKER_ROWS of them behind every keystroke.
-    const h = makeHarness();
-    byKey("mode-curate").click();
-    pickTag("project");
-    expand("Projects");
-    const reached = h.reached;
     h.counted.length = 0;
+    const caret = rowFor("Projects").querySelector<HTMLElement>(".spaces-create-tree-caret");
+    if (!caret) throw new Error("no caret on Projects");
+    caret.click();
+    expect(h.counted).toEqual([]);
+    const row = rowFor("inbox.md");
+    expect(row.classList.contains("is-inherited")).toBe(false);
+    expect(row.hasAttribute("aria-disabled")).toBe(false);
+    expect(row.hasAttribute("title")).toBe(false);
+  });
 
-    expand("Projects/Work");
-
-    expect(rows().length).toBeGreaterThan(1);
-    expect(h.counted).toEqual(["project"]);
-    expect(h.reached).toBe(reached + 1);
+  it("do not move the summary row, which counts them through the tag", () => {
+    makeHarness();
+    byKey("mode-curate").click();
+    pickTag("project");
+    expect(summaryText()).toBe("2 notes, 1 tag");
   });
 });

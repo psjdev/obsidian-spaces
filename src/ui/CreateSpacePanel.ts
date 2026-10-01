@@ -28,7 +28,7 @@ import {
   TAG_SIGIL,
   type PickerMode,
 } from "./pickerFilter";
-import { coveringFolderIn, coveringTags, memberFolderSet } from "../definitions/membership";
+import { coveringFolderIn, memberFolderSet } from "../definitions/membership";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
 import { previewPaths } from "./memberPreview";
 import { fuzzyTagCandidates, type TagHit, type TagSource } from "./tagCandidates";
@@ -77,43 +77,6 @@ const SIGIL_FLASH_MS = 120;
 
 const DESIGN_TITLE_GAP = 22;
 const TITLE_GAP_TOLERANCE = 6;
-
-/**
- * What a curated selection already includes, in the two shapes the tree reads
- * per row: a folder set for the ancestor walk, and a path to tag map for the
- * lookup. Built by `coveringSelection`, once per draw.
- */
-interface CoveringSelection {
-  folders: ReadonlySet<string>;
-  tags: ReadonlyMap<string, string>;
-}
-
-/**
- * What a row the selection already covers tells the user, or null when
- * nothing covers it. Doubles as the guard on the click: a notice means the
- * row is not pickable.
- *
- * The folder is named when both a folder and a tag cover the row. Either
- * sentence would be true, and the folder's is the one already in the product.
- *
- * `#` on the tag because that is how a tag is written everywhere the user can
- * see one; members store it bare.
- */
-function coveredNotice(covering: CoveringSelection, path: string): string | null {
-  const folder = coveringFolderIn(covering.folders, path);
-  if (folder !== null) {
-    return (
-      `Already included by the selected folder ${folder}. ` +
-      "Deselect that folder to pick items under it one at a time."
-    );
-  }
-  const tag = covering.tags.get(path);
-  if (tag === undefined) return null;
-  return (
-    `Already included by the selected tag #${tag}. ` +
-    "Deselect that tag to pick items carrying it one at a time."
-  );
-}
 
 /**
  * Shared by the constructor and every `mount()` so a fresh open always starts
@@ -1153,13 +1116,11 @@ export class CreateSpacePanel {
     });
     const rows = matched.slice(0, MAX_PICKER_ROWS);
     this.renderOverflowNotice(matched.length - rows.length);
-    // Resolved for the whole list, once, before any row is drawn. The tag half
-    // needs the index, the list redraws on every keystroke and MAX_PICKER_ROWS
-    // is 200, so a per-row lookup would be two hundred index reads for an
-    // answer that cannot change within one draw. Folder mode takes one root and
-    // keeps no member list, so nothing there can be covered and nothing is
-    // built.
-    const covering = this.state.folderMode ? null : this.coveringSelection();
+    // Built once per draw rather than once per row: the list redraws on every
+    // keystroke and holds up to MAX_PICKER_ROWS rows, none of which changes the
+    // member list. Folder mode takes one root and keeps no member list, so
+    // nothing there can be covered and nothing is built.
+    const coveringFolders = this.state.folderMode ? null : memberFolderSet(this.state.items);
 
     host.replaceChildren();
     if (rows.length === 0) {
@@ -1188,21 +1149,35 @@ export class CreateSpacePanel {
       // reads as "not selectable" rather than "not selected".
       el.setAttribute("aria-selected", String(row.selected));
       if (row.hasChildren) el.setAttribute("aria-expanded", String(row.expanded));
-      // Everything a selected folder or tag brings in is already in the space,
-      // so the tree says so rather than leaving those rows looking untouched.
-      // Picked wins over covered: a row chosen by hand is a member in its own
-      // right and still removable, and reading it as inherited would hide the
-      // entry it is.
-      const coveredBy = covering === null || row.selected ? null : coveredNotice(covering, row.path);
-      el.classList.toggle("is-inherited", coveredBy !== null);
-      if (coveredBy !== null) {
+      // Everything under a selected folder is already in the space, at every
+      // depth, and the folder is the row directly above its children, so the
+      // tint states a fact about the tree on screen. Picked wins over covered:
+      // a row chosen by hand is a member in its own right and still removable,
+      // and reading it as inherited would hide the entry it is.
+      //
+      // Tags are deliberately not shown here. A tag is a rule that matches notes
+      // scattered across the vault, not a position in the tree, so marking them
+      // tinted a scattered majority of rows at a broad tag and left no way to
+      // tell why a given row was marked. Tags mode lists the selected tags with
+      // their counts, and the summary row counts every note the selection
+      // resolves to.
+      const coveringFolder =
+        coveringFolders === null || row.selected
+          ? null
+          : coveringFolderIn(coveringFolders, row.path);
+      el.classList.toggle("is-inherited", coveringFolder !== null);
+      if (coveringFolder !== null) {
         // `aria-disabled` rather than the tint alone: covered is a third
         // state, and neither `aria-selected="false"` nor a background color
         // tells a screen reader it is one. Not `disabled`, which would take
         // the row out of the tab order and leave a keyboard user with no way
         // to reach the title that explains it.
         el.setAttribute("aria-disabled", "true");
-        el.setAttribute("title", coveredBy);
+        el.setAttribute(
+          "title",
+          `Already included by the selected folder ${coveringFolder}. ` +
+            "Deselect that folder to pick items under it one at a time."
+        );
       }
 
       const caret = doc.win.createSpan();
@@ -1249,7 +1224,7 @@ export class CreateSpacePanel {
         // member the selected folder already covers — the state `memberRows`
         // calls `redundant`. Nothing is the honest answer, and the title says
         // which folder gave it.
-        if (coveredBy !== null) return;
+        if (coveringFolder !== null) return;
         if (this.state.folderMode) {
           // One root: picking replaces, and picking the same one again clears,
           // so a mis-click is undoable without leaving the picker.
@@ -1433,27 +1408,6 @@ export class CreateSpacePanel {
       return;
     }
     filter.placeholder = this.pickerMode === "tags" ? "Filter tags…" : "Filter notes and folders…";
-  }
-
-  /**
-   * What the curated selection already includes, resolved once per draw of the
-   * tree and read per row from there.
-   *
-   * The two halves are built together because they are asked together and are
-   * both answers about the same member list. The index is reached lazily and
-   * only through `coveringTags`, which calls back once per tag member, so a
-   * selection holding no tag never touches the engine's snapshot to draw a
-   * tree.
-   */
-  private coveringSelection(): CoveringSelection {
-    let index: ReturnType<typeof this.deps.tagIndex> | null = null;
-    return {
-      folders: memberFolderSet(this.state.items),
-      tags: coveringTags(this.state.items, (tag) => {
-        index ??= this.deps.tagIndex();
-        return index.pathsMatching(tag);
-      }),
-    };
   }
 
   /**

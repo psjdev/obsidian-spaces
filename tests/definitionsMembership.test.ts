@@ -14,11 +14,9 @@ import { describe, expect, it } from "vitest";
 import {
   coveringFolder,
   coveringFolderIn,
-  coveringTags,
   inheritedFromFolder,
   memberFolderSet,
 } from "../src/definitions/membership";
-import { createMapTagIndex, pathsByTag } from "../src/visibility/TagIndex";
 import { inheritedFromFolder as viaMembershipMenu } from "../src/actions/membershipMenu";
 import type { SpaceDefinition } from "../src/types";
 
@@ -142,77 +140,5 @@ describe("memberFolderSet and coveringFolderIn", () => {
     expect(coveringFolderIn(folders, "Projects/a.md")).toBe("Projects");
     expect(coveringFolderIn(folders, "Projects/b/c.md")).toBe("Projects");
     expect(coveringFolderIn(folders, "Archive/a.md")).toBeNull();
-  });
-});
-
-/**
- * The tag half, which could not take the shape of `coveringFolder` because its
- * answer needs the tag index. One pass over the members gives both the
- * membership and the tag to name, and the caller reads the result per path.
- */
-describe("coveringTags", () => {
-  /** A real index, so nesting is resolved by the thing that really resolves it. */
-  const indexOf = (files: Record<string, string[]>): ((tag: string) => readonly string[]) => {
-    const index = createMapTagIndex(
-      pathsByTag(
-        Object.entries(files),
-        ([path]) => path,
-        ([, tags]) => tags
-      )
-    );
-    return (tag) => index.pathsMatching(tag);
-  };
-
-  it("maps each covered path to the tag member responsible", () => {
-    const paths = indexOf({ "a.md": ["project"], "b.md": ["chore"] });
-    expect(coveringTags([{ kind: "tag", tag: "project" }], paths)).toEqual(
-      new Map([["a.md", "project"]])
-    );
-  });
-
-  it("covers a note whose tag is NESTED under the member, and names the member", () => {
-    // `a.md` carries `project/atlas` and nothing else. The index files it under
-    // `project` too, so there is no depth rule here and none is wanted: the
-    // name the user sees has to be the tag they selected, not the one on the
-    // note.
-    const paths = indexOf({ "a.md": ["project/atlas"], "b.md": ["projects"] });
-    expect(coveringTags([{ kind: "tag", tag: "project" }], paths)).toEqual(
-      new Map([["a.md", "project"]])
-    );
-  });
-
-  it("keeps the first member to claim a path, so a row's title does not move", () => {
-    const paths = indexOf({ "a.md": ["project/atlas", "urgent"] });
-    const members: SpaceDefinition["members"] = [
-      { kind: "tag", tag: "project" },
-      { kind: "tag", tag: "urgent" },
-    ];
-    expect(coveringTags(members, paths).get("a.md")).toBe("project");
-  });
-
-  it("ignores file and folder members, and asks nothing when no tag is a member", () => {
-    const asked: string[] = [];
-    const paths = (tag: string): readonly string[] => {
-      asked.push(tag);
-      return [];
-    };
-    const members: SpaceDefinition["members"] = [
-      { path: "Projects", kind: "folder" },
-      { path: "inbox.md", kind: "file" },
-    ];
-    expect(coveringTags(members, paths).size).toBe(0);
-    expect(asked).toEqual([]);
-  });
-
-  it("asks the index once per tag member, however many paths come back", () => {
-    // The whole reason this is a map built up front rather than a predicate.
-    const asked: string[] = [];
-    const paths = (tag: string): readonly string[] => {
-      asked.push(tag);
-      return ["a.md", "b.md", "c.md"];
-    };
-    const map = coveringTags([{ kind: "tag", tag: "project" }], paths);
-    expect(asked).toEqual(["project"]);
-    expect(map.size).toBe(3);
   });
 });
