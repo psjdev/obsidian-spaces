@@ -23,6 +23,8 @@ import { iconColorFor } from "./spaceIconColor";
 import {
   ancestorsOf,
   buildVaultTree,
+  isBranchByChildren,
+  isBranchByKind,
   visibleRows,
   type TagKind,
   type VaultNode,
@@ -1122,7 +1124,9 @@ export class CreateSpacePanel {
       src
         .allPaths()
         .map((path) => ({ path, kind: src.kindOf(path) }))
-        .filter((e): e is { path: string; kind: "file" | "folder" } => e.kind !== null)
+        .filter((e): e is { path: string; kind: "file" | "folder" } => e.kind !== null),
+      "folder",
+      isBranchByKind
     ));
     // Folder mode holds at most one path; curated holds any number. One set
     // covers both, so the tree needs no idea which mode it is in beyond
@@ -1574,7 +1578,8 @@ export class CreateSpacePanel {
     // and a tag appears the moment it is typed into a note.
     const tree = buildVaultTree<TagKind>(
       all.map((tag) => ({ path: tag, kind: "tag" })),
-      "tag"
+      "tag",
+      isBranchByChildren
     );
     const matched = visibleRows(tree, {
       expanded: this.expandedTags,

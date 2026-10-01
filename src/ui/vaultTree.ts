@@ -90,6 +90,13 @@ interface ViewOptions<K extends string = NodeKind> {
  */
 const DEFAULT_BRANCH_KIND = "folder";
 
+/** Branch-ness by kind: the file tree's rule. An empty folder is still a folder. */
+export const isBranchByKind = (node: VaultNode<string>): boolean =>
+  node.kind === DEFAULT_BRANCH_KIND;
+
+/** Branch-ness by shape: the tag tree's rule, there being no other kind to key on. */
+export const isBranchByChildren = (node: VaultNode<string>): boolean => node.children.length > 0;
+
 /**
  * Flat entries to a sorted tree.
  *
@@ -104,17 +111,24 @@ const DEFAULT_BRANCH_KIND = "folder";
  * invented tag that claimed to be a folder would be a row whose type said one
  * thing and whose behaviour said another.
  *
- * Folders sort before files at each level, then alphabetically: the order the
- * file explorer itself uses, and therefore the one a reader of this picker
- * already has in their head. A tree with one kind in it falls straight through
- * to the alphabetical half, which is the whole of the tag tree's order.
+ * Branches sort before leaves at each level, then alphabetically, and what
+ * counts as a branch is the caller's `isBranch`. For the file tree it is the
+ * node's KIND (`isBranchByKind`): a folder sorts first even when empty, which
+ * is the order the file explorer itself uses and therefore the one a reader of
+ * this picker already has in their head. For the tag tree it is whether the
+ * node HAS CHILDREN (`isBranchByChildren`), because every tag is the same kind
+ * and there is nothing else to key on. A parent tag is a container in the same
+ * way a folder is, and putting the leaves after it keeps the branching
+ * structure legible at a glance. The two cannot share a rule: under
+ * has-children an empty folder would sort down among the files.
  */
 export function buildVaultTree<K extends string = NodeKind>(
   entries: readonly VaultEntry<K>[],
   // The cast is the price of leaving the vault's call sites unparameterised.
   // It is only ever reached when the caller named no kind, and the only
   // container kind a caller of the default `K` has is `"folder"`.
-  branchKind: K = DEFAULT_BRANCH_KIND as K
+  branchKind: K = DEFAULT_BRANCH_KIND as K,
+  isBranch: (node: VaultNode<K>) => boolean = isBranchByKind
 ): VaultNode<K>[] {
   const roots: VaultNode<K>[] = [];
   const byPath = new Map<string, VaultNode<K>>();
@@ -142,7 +156,8 @@ export function buildVaultTree<K extends string = NodeKind>(
 
   const sort = (nodes: VaultNode<K>[]): void => {
     nodes.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === branchKind ? -1 : 1;
+      const aBranch = isBranch(a);
+      if (aBranch !== isBranch(b)) return aBranch ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
     for (const n of nodes) sort(n.children);

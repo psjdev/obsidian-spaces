@@ -777,7 +777,7 @@ describe("the Items and Tags buttons under the filter box", () => {
     expect(rows()).toEqual([]);
     // Collapsed to its roots, like the other body: `project/console` is behind
     // `project`'s caret rather than sitting beside it.
-    expect(tagRows().map((r) => r.dataset.tag)).toEqual(["archive", "project"]);
+    expect(tagRows().map((r) => r.dataset.tag)).toEqual(["project", "archive"]);
     byKey("body-items").click();
     expect(tagRows()).toEqual([]);
     expect(rows().length).toBeGreaterThan(0);
@@ -822,12 +822,12 @@ describe("the Items and Tags buttons under the filter box", () => {
     openCurated();
     showTags();
     expandTag("project");
-    expect(tagRows().map((r) => r.dataset.tag)).toEqual(["archive", "project", "project/console"]);
+    expect(tagRows().map((r) => r.dataset.tag)).toEqual(["project", "project/console", "archive"]);
     tagRowFor("archive").click();
     expect(tagRows().map((r) => r.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "false",
       "true",
-      "false",
-      "false",
     ]);
   });
 

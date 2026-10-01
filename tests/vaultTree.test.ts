@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ancestorsOf, buildVaultTree, visibleRows } from "../src/ui/vaultTree";
+import {
+  ancestorsOf,
+  buildVaultTree,
+  isBranchByChildren,
+  isBranchByKind,
+  visibleRows,
+} from "../src/ui/vaultTree";
 
 /**
  * Layer 1: what the folder picker shows, with the drawing left to the panel.
@@ -31,6 +37,17 @@ const none = {
 const paths = (rows: readonly { path: string }[]): string[] => rows.map((r) => r.path);
 
 describe("buildVaultTree", () => {
+  it("sorts an EMPTY folder before files, because branch-ness is kind here", () => {
+    const entries = [file("a.md"), folder("zz-empty"), file("b.md"), folder("mm-empty")];
+    for (const t of [buildVaultTree(entries), buildVaultTree(entries, "folder", isBranchByKind)]) {
+      expect(t.map((n) => n.name)).toEqual(["mm-empty", "zz-empty", "a.md", "b.md"]);
+    }
+    // The same input under the tag rule moves the empty folders: the two
+    // rules differ, which is why the sort is a parameter.
+    const byChildren = buildVaultTree(entries, "folder", isBranchByChildren);
+    expect(byChildren.map((n) => n.name)).toEqual(["a.md", "b.md", "mm-empty", "zz-empty"]);
+  });
+
   it("nests by path segment", () => {
     const tree = buildVaultTree(VAULT);
     expect(tree.map((n) => n.path)).toEqual(["Archive", "Bulk", "Projects", "Reference", "Top.md"]);
@@ -265,12 +282,25 @@ describe("a tree of another kind (the tag picker's)", () => {
     expect(tree[0].children[0].name).toBe("health");
   });
 
-  it("orders one kind alphabetically, the branch-first rule falling away", () => {
-    // Every tag is the branch kind, so `a.kind !== b.kind` is never true and
-    // the comparator is the name test alone.
-    const flat = buildVaultTree([tag("zeta"), tag("alpha"), tag("mid/b"), tag("mid/a")], "tag");
-    expect(flat.map((n) => n.name)).toEqual(["alpha", "mid", "zeta"]);
-    expect(flat[1].children.map((n) => n.name)).toEqual(["a", "b"]);
+  it("sorts a parent tag before a childless one, alphabetically within each group", () => {
+    const t = buildVaultTree(
+      [
+        tag("zeta"),
+        tag("alpha"),
+        tag("mid/b"),
+        tag("mid/a"),
+        tag("mid/deep/x"),
+        tag("mid/zed"),
+        tag("mid/alone"),
+        tag("top/q"),
+      ],
+      "tag",
+      isBranchByChildren
+    );
+    // Root: mid and top have children; alpha and zeta do not.
+    expect(t.map((n) => n.name)).toEqual(["mid", "top", "alpha", "zeta"]);
+    // Nested: deep has a child, so it leads a, alone, b, zed.
+    expect(t[0].children.map((n) => n.name)).toEqual(["deep", "a", "alone", "b", "zed"]);
   });
 
   it("draws every row when no kind is singled out", () => {
