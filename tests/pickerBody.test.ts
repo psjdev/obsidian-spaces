@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { canOfferCollapseAll, countPicked, pickedSummary, readPickerBody } from "../src/ui/pickerBody";
+import { countPicked, pickedSummary, readPickerBody } from "../src/ui/pickerBody";
 import type { MemberEntry } from "../src/types";
 
 describe("readPickerBody", () => {
@@ -23,25 +23,6 @@ describe("readPickerBody", () => {
     // the switch must not leave the window showing tags it cannot submit.
     expect(readPickerBody("tags", true)).toBe("items");
     expect(readPickerBody("items", true)).toBe("items");
-  });
-});
-
-describe("canOfferCollapseAll", () => {
-  it("is withheld when nothing is stored as expanded", () => {
-    expect(canOfferCollapseAll(0, "")).toBe(false);
-  });
-
-  it("is offered when the user has opened something and no filter is typed", () => {
-    expect(canOfferCollapseAll(1, "")).toBe(true);
-    expect(canOfferCollapseAll(12, "   ")).toBe(true);
-  });
-
-  it("is withheld while a filter is typed, because filter-forced branches are not in the set", () => {
-    expect(canOfferCollapseAll(3, "proj")).toBe(false);
-  });
-
-  it("is withheld for an empty set even with a filter", () => {
-    expect(canOfferCollapseAll(0, "proj")).toBe(false);
   });
 });
 

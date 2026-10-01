@@ -35,21 +35,6 @@ export function readPickerBody(mode: PickerMode, folderMode: boolean): PickerMod
   return folderMode ? "items" : mode;
 }
 
-/**
- * Whether right-click in the picker window should offer "Collapse all".
- *
- * `storedExpanded` is the size of the ACTIVE mode's stored expansion set, not
- * what is on screen: `visibleRows` force-opens every branch a filter matches,
- * and that is computed, never stored, so clearing the set cannot close it.
- * With a filter typed the item would therefore do nothing the user can see
- * until the filter is cleared. It is withheld then rather than offered as a
- * dead click, and an empty menu is worse than none, so the caller shows no
- * menu at all when this is false.
- */
-export function canOfferCollapseAll(storedExpanded: number, filter: string): boolean {
-  return storedExpanded > 0 && filter.trim() === "";
-}
-
 /** What this space has taken so far, in the kinds the summary row names. */
 export interface PickedCounts {
   notes: number;
