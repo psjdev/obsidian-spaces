@@ -380,6 +380,60 @@ describe("re-mounting", () => {
   });
 });
 
+describe("scroll position of the picker window", () => {
+  // jsdom lays nothing out, so a real scroll offset cannot be read. What can
+  // be asserted is the decision to call `scrollIntoView`, which is what moved
+  // the box: a stub in `beforeEach` is replaced here by a spy.
+  const spyScroll = (): { calls: number } => {
+    const seen = { calls: 0 };
+    Element.prototype.scrollIntoView = (): void => {
+      seen.calls += 1;
+    };
+    return seen;
+  };
+
+  it("brings a pre-chosen root into view when the panel opens", () => {
+    const seen = spyScroll();
+    makeHarness({ root: "Projects/Work" });
+    expect(seen.calls).toBe(1);
+  });
+
+  it("does not move the box on a pick, an expand, a collapse or a filter", () => {
+    makeHarness();
+    typeName("Stay");
+    const seen = spyScroll();
+    byKey("mode-curate").click();
+    const base = seen.calls;
+    const caret = (path: string): HTMLElement => {
+      const c = rowFor(path).querySelector<HTMLElement>(".spaces-create-tree-caret");
+      if (!c) throw new Error(`no caret on ${path}`);
+      return c;
+    };
+    caret("Projects").click();
+    rowFor("inbox.md").click();
+    // A second selection is what made the first-match lookup drag the box up.
+    rowFor("Projects/Work").click();
+    rowFor("inbox.md").click();
+    caret("Projects").click();
+    const filter = byKey("item-filter") as HTMLInputElement;
+    filter.value = "inbox";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(seen.calls).toBe(base);
+  });
+
+  it("does not move the tag body on a pick either", () => {
+    makeHarness();
+    typeName("Tags");
+    const seen = spyScroll();
+    byKey("mode-curate").click();
+    byKey("body-tags").click();
+    const row = panelEl().querySelector<HTMLElement>("[data-tag='archive']");
+    if (!row) throw new Error("no archive tag row");
+    row.click();
+    expect(seen.calls).toBe(0);
+  });
+});
+
 describe("arriving from \"Create space from this folder\"", () => {
   it("opens with the mode on, the picker open and the branch expanded", () => {
     makeHarness({ root: "Projects/Work" });

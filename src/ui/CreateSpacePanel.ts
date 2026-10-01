@@ -1025,7 +1025,7 @@ export class CreateSpacePanel {
       el.appendChild(view);
       this.renderPlaceholder();
       this.renderSummary();
-      this.renderItemTree();
+      this.renderItemTree(true);
     } else {
       this.treeEl = null;
       this.summaryEl = null;
@@ -1103,8 +1103,12 @@ export class CreateSpacePanel {
    * Folder mode never reaches the tag body: a folder space is a window onto
    * one root, and a tag is not one, so that mode draws neither button and the
    * sigils do nothing there.
+   *
+   * `revealSelection` is for the draw that builds the window and no other.
+   * Every later draw (filtering, expanding, picking) redraws rows the user is
+   * already looking at, and moving the box there throws away their place.
    */
-  private renderItemTree(): void {
+  private renderItemTree(revealSelection = false): void {
     const host = this.treeEl;
     if (!host) return;
     if (readPickerBody(this.pickerMode, this.state.folderMode) === "tags") {
@@ -1281,10 +1285,16 @@ export class CreateSpacePanel {
       host.appendChild(el);
     }
 
-    const selectedEl = host.querySelector(".is-selected");
-    // Opened with a root already chosen (the right-click entry), the selection
-    // can be below the fold of a scrolling box.
-    if (selectedEl instanceof HTMLElement) selectedEl.scrollIntoView({ block: "nearest" });
+    // Only when the window has just been built, with a root already chosen
+    // (the right-click entry): the selection can then sit below the fold of a
+    // scrolling box the user has not scrolled yet. It must NOT run on a pick,
+    // an expand or a filter. `querySelector` returns the topmost selected
+    // row, so on a pick with several chosen it dragged the box back to the
+    // first of them, away from the row that was just clicked.
+    if (revealSelection) {
+      const selectedEl = host.querySelector(".is-selected");
+      if (selectedEl instanceof HTMLElement) selectedEl.scrollIntoView({ block: "nearest" });
+    }
   }
 
   /**
