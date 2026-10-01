@@ -49,38 +49,49 @@ describe("pickedSummary", () => {
     expect(pickedSummary({ notes: 0, folders: 0, tags: 0 }, 0)).toBe("Nothing selected");
   });
 
-  it("names the three kinds, then what they come to", () => {
+  it("leads with the notes the selection comes to, then names the selectors", () => {
     expect(pickedSummary({ notes: 3, folders: 1, tags: 2 }, 253)).toBe(
-      "3 notes, 1 folder, 2 tags · 253 notes"
+      "253 notes, 1 folder, 2 tags"
     );
   });
 
-  it("leaves out a kind with nothing in it", () => {
+  it("leaves out a kind of selector with nothing in it", () => {
     // The row is one line tall, and "0 folders" spends it on something that is
     // not there.
-    expect(pickedSummary({ notes: 0, folders: 0, tags: 1 }, 40)).toBe("1 tag · 40 notes");
-    expect(pickedSummary({ notes: 0, folders: 2, tags: 4 }, 9)).toBe(
-      "2 folders, 4 tags · 9 notes"
-    );
+    expect(pickedSummary({ notes: 0, folders: 0, tags: 1 }, 253)).toBe("253 notes, 1 tag");
+    expect(pickedSummary({ notes: 0, folders: 1, tags: 0 }, 50)).toBe("50 notes, 1 folder");
+    expect(pickedSummary({ notes: 0, folders: 2, tags: 4 }, 9)).toBe("9 notes, 2 folders, 4 tags");
   });
 
   it("reads naturally for one of each kind", () => {
-    expect(pickedSummary({ notes: 1, folders: 1, tags: 1 }, 1)).toBe(
-      "1 note, 1 folder, 1 tag · 1 note"
-    );
+    expect(pickedSummary({ notes: 1, folders: 1, tags: 1 }, 1)).toBe("1 note, 1 folder, 1 tag");
   });
 
-  it("leaves the total off when notes alone were picked", () => {
-    // A note selects itself and nothing else, so the left half already IS the
-    // total. Printing it twice would send the reader looking for a difference
-    // between two numbers that cannot differ.
+  it("says just the notes when notes alone were picked", () => {
     expect(pickedSummary({ notes: 3, folders: 0, tags: 0 }, 3)).toBe("3 notes");
+  });
+
+  it("prints the resolved total, not how many notes were picked by hand", () => {
+    // Three by hand, but a folder and a tag overlap them: the figure is what
+    // the caller resolved, and the hand-picked count appears nowhere.
+    const text = pickedSummary({ notes: 3, folders: 1, tags: 2 }, 41);
+    expect(text).toBe("41 notes, 1 folder, 2 tags");
+    expect(text).not.toMatch(/3 notes/);
   });
 
   it("words a selection that comes to nothing", () => {
     // A tag nothing carries yet, or an empty folder. A bare `0` reads as a
     // count that failed to arrive rather than as an answer.
-    expect(pickedSummary({ notes: 0, folders: 0, tags: 1 }, 0)).toBe("1 tag · no notes");
+    expect(pickedSummary({ notes: 0, folders: 0, tags: 1 }, 0)).toBe("no notes, 1 tag");
+    expect(pickedSummary({ notes: 0, folders: 1, tags: 0 }, 0)).toBe("no notes, 1 folder");
+  });
+
+  it("still reports a selection whose notes have all gone", () => {
+    expect(pickedSummary({ notes: 1, folders: 0, tags: 0 }, 0)).toBe("no notes");
+  });
+
+  it("prints no second figure", () => {
+    expect(pickedSummary({ notes: 3, folders: 1, tags: 2 }, 253)).not.toContain("·");
   });
 
   it("uses the plugin's own words for what a space holds", () => {
@@ -102,7 +113,7 @@ describe("pickedSummary", () => {
       `${(1234).toLocaleString()} notes`
     );
     expect(pickedSummary({ notes: 0, folders: 1, tags: 0 }, 1234)).toBe(
-      `1 folder · ${(1234).toLocaleString()} notes`
+      `${(1234).toLocaleString()} notes, 1 folder`
     );
   });
 });

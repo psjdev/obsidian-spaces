@@ -1391,17 +1391,16 @@ export class CreateSpacePanel {
     if (!host) return;
     const picked = this.pickedMembers();
     const counts = countPicked(picked);
-    // Resolved only when something that EXPANDS was picked. A note selects
-    // itself, so the count on the left is already the total, and reaching for
-    // the index or walking the vault to establish that would put both of the
-    // picker's O(vault) costs behind picking a single file.
-    let notes = counts.notes;
-    if (counts.folders > 0 || counts.tags > 0) {
-      // Reached once per draw rather than once per tag, for the reason the tag
-      // rows give: the accessor hands back the engine's current snapshot.
-      const index = this.deps.tagIndex();
-      notes = previewPaths(picked, this.deps.folders, (tag) => index.pathsMatching(tag)).notes;
-    }
+    // The total is the whole row's lead figure, so it is resolved on every
+    // draw. The index is reached lazily, once per draw and only if a tag was
+    // picked: the accessor hands back the engine's current snapshot, and a
+    // selection of notes and folders has no use for it. `previewPaths` reads
+    // the vault listing only if a folder was picked.
+    let index: ReturnType<typeof this.deps.tagIndex> | null = null;
+    const notes = previewPaths(picked, this.deps.folders, (tag) => {
+      index ??= this.deps.tagIndex();
+      return index.pathsMatching(tag);
+    }).notes;
     host.textContent = pickedSummary(counts, notes);
   }
 

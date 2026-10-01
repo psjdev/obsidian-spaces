@@ -1172,11 +1172,11 @@ describe("the Items and Tags buttons under the filter box", () => {
       rowFor("inbox.md").click();
       expect(summary()).toBe("1 note");
       // `Archive` is empty, so the folder adds a selector and no notes. The
-      // tail says so rather than leaving the reader to assume it added some.
+      // figure stays at the one note picked by hand.
       rowFor("Archive").click();
-      expect(summary()).toBe("1 note, 1 folder · 1 note");
+      expect(summary()).toBe("1 note, 1 folder");
       rowFor("inbox.md").click();
-      expect(summary()).toBe("1 folder · no notes");
+      expect(summary()).toBe("no notes, 1 folder");
     });
 
     it("counts tags alongside them, which is how a tag stays visible from the tree", () => {
@@ -1190,13 +1190,13 @@ describe("the Items and Tags buttons under the filter box", () => {
       tagRowFor("archive").click();
       // `inbox.md` by hand, and `#project` carrying it and `plan.md`. Two
       // notes: the hand-picked one is not counted again for the tag.
-      expect(summary()).toBe("1 note, 2 tags · 2 notes");
+      expect(summary()).toBe("2 notes, 2 tags");
       byKey("body-items").click();
-      expect(summary()).toBe("1 note, 2 tags · 2 notes");
+      expect(summary()).toBe("2 notes, 2 tags");
     });
 
     it("counts the union of what is selected, not the parts added up", () => {
-      // The assertion the whole tail rests on. `Projects` brings `plan.md`;
+      // The assertion the whole figure rests on. `Projects` brings `plan.md`;
       // `#project` brings `plan.md` and `inbox.md`. Two notes, not three: a
       // note inside a selected folder that also carries a selected tag is one
       // note.
@@ -1205,7 +1205,7 @@ describe("the Items and Tags buttons under the filter box", () => {
       rowFor("Projects").click();
       showTags();
       tagRowFor("project").click();
-      expect(summary()).toBe("1 folder, 1 tag · 2 notes");
+      expect(summary()).toBe("2 notes, 1 folder, 1 tag");
     });
 
     it("counts a note picked by hand once when a selected tag carries it too", () => {
@@ -1214,14 +1214,16 @@ describe("the Items and Tags buttons under the filter box", () => {
       rowFor("inbox.md").click();
       showTags();
       tagRowFor("project").click();
-      expect(summary()).toBe("1 note, 1 tag · 2 notes");
+      expect(summary()).toBe("2 notes, 1 tag");
     });
 
-    it("counts everything under a selected folder, not the folder alone", () => {
+    it("counts the notes under a selected folder, and not its subfolders", () => {
+      // `Projects` resolves to three paths: `Projects/Work`, `Projects/Work/plan.md`
+      // and itself. Only `plan.md` is a note.
       makeHarness();
       openCurated();
       rowFor("Projects").click();
-      expect(summary()).toBe("1 folder · 1 note");
+      expect(summary()).toBe("1 note, 1 folder");
     });
 
     it("counts the notes a nested tag brings in with its parent", () => {
@@ -1231,7 +1233,7 @@ describe("the Items and Tags buttons under the filter box", () => {
       openCurated();
       showTags();
       tagRowFor("project").click();
-      expect(summary()).toBe("1 tag · 2 notes");
+      expect(summary()).toBe("2 notes, 1 tag");
     });
 
     it("says so when what is selected comes to no notes", () => {
@@ -1239,12 +1241,12 @@ describe("the Items and Tags buttons under the filter box", () => {
       openCurated();
       showTags();
       tagRowFor("archive").click();
-      expect(summary()).toBe("1 tag · no notes");
+      expect(summary()).toBe("no notes, 1 tag");
     });
 
-    it("asks the index nothing while only notes are selected", () => {
-      // A note selects itself, so there is nothing to resolve, and the row
-      // must not reach for a snapshot to establish that.
+    it("asks the index nothing while no tag is selected", () => {
+      // Only a tag needs the snapshot, and the row must not reach for it to
+      // count a note.
       const h = makeHarness();
       openCurated();
       rowFor("inbox.md").click();
@@ -1262,7 +1264,7 @@ describe("the Items and Tags buttons under the filter box", () => {
       byKey("mode-folder").click();
       expect(summary()).toBe("Nothing selected");
       rowFor("Archive").click();
-      expect(summary()).toBe("1 folder · no notes");
+      expect(summary()).toBe("no notes, 1 folder");
     });
   });
 });
