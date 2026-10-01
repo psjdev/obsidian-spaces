@@ -21,8 +21,14 @@ import type { FormFault } from "./createSpaceForm";
 import { alignmentGap } from "./ribbonAlign";
 import { iconColorFor } from "./spaceIconColor";
 import { ancestorsOf, buildVaultTree, visibleRows, type VaultNode } from "./vaultTree";
-import { TAG_SIGIL } from "./pickerFilter";
-import { leaveTagView, readPickerBody, tagToggleLabel, type PickerView } from "./pickerBody";
+import {
+  DEFAULT_PICKER_MODE,
+  ITEMS_SIGIL,
+  readModeSigil,
+  TAG_SIGIL,
+  type PickerMode,
+} from "./pickerFilter";
+import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
 import { fuzzyTagCandidates, type TagHit, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -217,21 +223,30 @@ export class CreateSpacePanel {
   private treeEl: HTMLElement | null = null;
 
   /**
-   * The tag icon in the explorer window's own top corner, kept so
-   * `renderTagToggle()` can redraw its count in place: picking a tag must not
-   * rebuild the window under the pointer that just clicked in it.
+   * The row pinned under the window's list, kept so `renderSummary()` can
+   * redraw its words in place: picking must not rebuild the window under the
+   * pointer that just clicked in it.
    */
-  private tagToggleEl: HTMLElement | null = null;
+  private summaryEl: HTMLElement | null = null;
+
+  /** The filter box, kept so the sigil shortcut can retitle its placeholder. */
+  private filterEl: HTMLInputElement | null = null;
 
   /**
-   * Whether the explorer window is showing tags rather than the vault.
-   *
-   * Held here rather than read back out of the filter text, because the icon
-   * is the second way in and it leaves the filter box untouched. The sigil
-   * still forces tags on top of this, so the flag is one input to
-   * `readPickerBody` rather than the answer.
+   * The Items and Tags buttons, kept so a mode reached by the sigil can press
+   * the right one without redrawing the pair.
    */
-  private tagView = false;
+  private pickerModeEls = new Map<PickerMode, HTMLElement>();
+
+  /**
+   * Which body the explorer window is showing.
+   *
+   * Held here rather than read back out of the filter text: the buttons are
+   * the thing that holds the mode now, and the sigil presses a button rather
+   * than leaving a mark in the box. Folder mode overrules it, which is
+   * `readPickerBody`'s job rather than this field's.
+   */
+  private pickerMode: PickerMode = DEFAULT_PICKER_MODE;
 
   /**
    * The vault as a tree, kept while the picker stays open.
@@ -838,7 +853,7 @@ export class CreateSpacePanel {
         // The window is rebuilt for the mode being opened, and folder mode has
         // no tags at all, so it reopens on the vault rather than on whatever
         // the last curated session left it showing.
-        this.tagView = false;
+        this.pickerMode = DEFAULT_PICKER_MODE;
         this.render();
       });
       return btn;
@@ -852,30 +867,53 @@ export class CreateSpacePanel {
       const view = doc.win.createDiv();
       view.className = "spaces-create-items";
 
-      const treeEl = doc.win.createDiv();
-      treeEl.className = "spaces-create-tree";
+      // Folder mode is offered neither button, for the reason it is offered no
+      // sigil: a folder space is a window onto one root, and a tag is not one.
+      this.pickerModeEls.clear();
+      if (!this.state.folderMode) {
+        const bodies = doc.win.createDiv();
+        bodies.className = "spaces-create-bodies";
+        bodies.setAttribute("role", "group");
+        bodies.setAttribute("aria-label", "What the window below shows");
+        bodies.appendChild(this.bodyBtn(doc, "items", "Items", "folder-tree", ITEMS_SIGIL));
+        bodies.appendChild(this.bodyBtn(doc, "tags", "Tags", "tag", TAG_SIGIL));
+        view.appendChild(bodies);
+      }
+
+      const windowEl = doc.win.createDiv();
+      windowEl.className = "spaces-create-tree";
       // Focusable programmatically but NOT in the tab order: `showFault` marks
       // this box and then focuses it, and `focus()` is a silent no-op on an
       // element with no tabindex — so a keyboard user refused a Create got the
       // Notice, a red border they could not reach, and focus left on the
       // button.
-      treeEl.tabIndex = -1;
+      windowEl.tabIndex = -1;
 
       const filter = doc.win.createEl("input");
       filter.type = "text";
       filter.className = "text-input";
-      // The sigil is named in the placeholder because nothing else on screen
-      // could teach it. A folder space has one root and a tag is not one, so
-      // that mode is offered nothing to type.
-      filter.placeholder = this.state.folderMode
-        ? "Filter folders…"
-        : `Filter items, or ${TAG_SIGIL} for tags…`;
       filter.value = this.itemFilter;
       filter.dataset.focusKey = "item-filter";
       filter.addEventListener("input", () => {
         this.itemFilter = filter.value;
         this.renderItemTree();
       });
+      filter.addEventListener("keydown", (e) => {
+        if (this.state.folderMode) return;
+        const mode = readModeSigil({
+          box: filter.value,
+          key: e.key,
+          modified: e.ctrlKey || e.metaKey || e.altKey,
+          composing: e.isComposing,
+        });
+        if (mode === null) return;
+        // Consumed: the character presses a button and does not also land in
+        // the box, so the query it was typed ahead of starts from an empty box
+        // with the caret already where it was.
+        e.preventDefault();
+        this.setPickerMode(mode);
+      });
+      this.filterEl = filter;
       view.appendChild(filter);
 
       // Rows live in their own child so redrawing them cannot disturb the box
@@ -886,47 +924,37 @@ export class CreateSpacePanel {
       // `renderItemTree` sets it — a flat list of tags is not a tree.
       const rowsEl = doc.win.createDiv();
       rowsEl.className = "spaces-create-tree-rows";
-      treeEl.appendChild(rowsEl);
+      // The list scrolls, the window does not. That is what lets the summary
+      // row below sit still: the list gives up the height instead of the
+      // window taking more.
+      const scroll = doc.win.createDiv();
+      scroll.className = "spaces-create-tree-scroll";
+      scroll.appendChild(rowsEl);
+      windowEl.appendChild(scroll);
       this.treeEl = rowsEl;
 
-      // A positioning context around the window, not a second window: the
-      // wrapper has no border, no padding and no background, and exists only
-      // so the tag icon can sit in the window's own corner instead of
-      // scrolling away with the rows inside it.
-      const wrap = doc.win.createDiv();
-      wrap.className = "spaces-create-tree-wrap";
-      wrap.appendChild(treeEl);
-      // Folder mode is offered no icon, for the reason it is offered no sigil:
-      // a folder space is a window onto one root, and a tag is not one.
-      if (!this.state.folderMode) {
-        const toggle = doc.win.createEl("button");
-        toggle.type = "button";
-        toggle.className = "spaces-create-tag-toggle clickable-icon";
-        toggle.dataset.focusKey = "tag-toggle";
-        toggle.addEventListener("click", () => {
-          // Pressing off drops a sigil the box may still be carrying, or the
-          // text would hold the window in tag mode against the control that
-          // has just said to leave it.
-          if (this.tagView) {
-            this.itemFilter = leaveTagView(this.itemFilter);
-            filter.value = this.itemFilter;
-          }
-          this.tagView = !this.tagView;
-          this.renderTagToggle();
-          this.renderItemTree();
-        });
-        wrap.appendChild(toggle);
-        this.tagToggleEl = toggle;
-        treeEl.classList.add("has-tag-toggle");
-      }
-      view.appendChild(wrap);
+      // Inside the window and pinned under its list: a choice made in one body
+      // is still visible from the other, which is what the row above the
+      // window used to do before it was taken out for crowding the pane.
+      const summary = doc.win.createDiv();
+      summary.className = "spaces-create-summary";
+      // Announced when it changes, because the thing that changed it may have
+      // been a click in a list the user is not reading.
+      summary.setAttribute("role", "status");
+      windowEl.appendChild(summary);
+      this.summaryEl = summary;
+
+      view.appendChild(windowEl);
 
       el.appendChild(view);
-      this.renderTagToggle();
+      this.renderPlaceholder();
+      this.renderSummary();
       this.renderItemTree();
     } else {
       this.treeEl = null;
-      this.tagToggleEl = null;
+      this.summaryEl = null;
+      this.filterEl = null;
+      this.pickerModeEls.clear();
     }
 
 
@@ -1023,23 +1051,21 @@ export class CreateSpacePanel {
   }
 
   /**
-   * Draws whichever body the filter text and the tag icon ask for.
+   * Draws whichever body the two buttons above the window ask for.
    *
    * Which one that is lives in `readPickerBody`, not here, so the rule can be
    * read and tested without a DOM rather than inferred from the panel that
    * happens to be this prototype's drawing.
    *
    * Folder mode never reaches the tag body: a folder space is a window onto
-   * one root, and a tag is not one. Someone who types `#` there gets the tree
-   * filtering on a literal `#`, which is what it did before the sigil existed,
-   * and the icon is not drawn for that mode at all.
+   * one root, and a tag is not one, so that mode draws neither button and the
+   * sigils do nothing there.
    */
   private renderItemTree(): void {
     const host = this.treeEl;
     if (!host) return;
-    const view = readPickerBody(this.itemFilter, this.tagView);
-    if (view.body !== "tree" && !this.state.folderMode) {
-      this.renderTagBody(host, view);
+    if (readPickerBody(this.pickerMode, this.state.folderMode) === "tags") {
+      this.renderTagBody(host, this.itemFilter);
       return;
     }
     const doc = host.ownerDocument;
@@ -1149,6 +1175,7 @@ export class CreateSpacePanel {
           this.state = toggleItem(this.state, { path: row.path, kind: row.kind });
         }
         this.clearFault("root");
+        this.renderSummary();
         this.renderItemTree();
         this.refreshCreateButton();
         this.refreshModeLabels();
@@ -1189,59 +1216,124 @@ export class CreateSpacePanel {
   }
 
   /**
-   * The tag icon in the explorer window's own corner, and the count riding on
-   * it.
+   * One of the two buttons that choose what the window below them shows.
    *
-   * The icon exists because the `#` sigil is undiscoverable: nothing on screen
-   * can teach a character you have to already know to type. It is drawn inside
-   * the window rather than above it, which is the whole constraint this
-   * prototype is built under.
+   * They are new furniture in a pane that was kept bare on purpose, and that
+   * is the point: a corner icon and a typed sigil both ask the user to already
+   * know the other body is there. Two labelled buttons say it.
    *
-   * The count is the only thing the tree body now says about tags, the row of
-   * chips above it having gone. A number rather than a dot, because a dot says
-   * that something is there and the window could already say that much by
-   * having an icon at all.
+   * `aria-pressed` rather than a radio group or a tablist: the pair beside
+   * them, Curated and Folder pinned, is already a pressed-button pair in this
+   * panel, and one idiom for two segmented pairs on one pane is what makes
+   * them read as the same kind of control.
    *
-   * Redrawn in place rather than through `render()`, so picking a tag does not
+   * The title names the shortcut, which is the only place the shortcut is
+   * written down now that the placeholder is about filtering again.
+   */
+  private bodyBtn(
+    doc: Document,
+    mode: PickerMode,
+    label: string,
+    icon: string,
+    sigil: string
+  ): HTMLButtonElement {
+    const btn = doc.win.createEl("button");
+    btn.type = "button";
+    btn.className = "spaces-create-body";
+    btn.dataset.focusKey = mode === "tags" ? "body-tags" : "body-items";
+    btn.title = `${label}. Type ${sigil} in an empty filter box.`;
+    const ic = doc.win.createSpan();
+    ic.className = "spaces-create-theme-icon";
+    setIcon(ic, icon);
+    const text = doc.win.createSpan();
+    text.textContent = label;
+    btn.appendChild(ic);
+    btn.appendChild(text);
+    btn.addEventListener("click", () => {
+      this.setPickerMode(mode);
+    });
+    this.pickerModeEls.set(mode, btn);
+    this.paintPickerModes();
+    return btn;
+  }
+
+  /**
+   * Switches the window over, from either door.
+   *
+   * The filter text is left exactly as it is. The box narrows whichever body
+   * is on screen, so text in it is a query the user wrote and not a thing the
+   * old body owned; clearing it would make the buttons destructive, and a
+   * button that loses work is a button people stop pressing.
+   *
+   * Redrawn in place rather than through `render()`, so switching does not
+   * rebuild the pane under the pointer or take focus off the filter box the
+   * sigil was typed into.
+   */
+  private setPickerMode(mode: PickerMode): void {
+    this.pickerMode = mode;
+    this.paintPickerModes();
+    this.renderPlaceholder();
+    this.renderItemTree();
+  }
+
+  /** Marks the button whose body is on screen, for the eye and for ARIA. */
+  private paintPickerModes(): void {
+    for (const [mode, btn] of this.pickerModeEls) {
+      const active = mode === this.pickerMode;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", String(active));
+    }
+  }
+
+  /**
+   * What the filter box says it will filter.
+   *
+   * It names the body on screen rather than the sigil, which the buttons now
+   * teach by being visible. Folder mode gets its own words, as it always has.
+   */
+  private renderPlaceholder(): void {
+    const filter = this.filterEl;
+    if (!filter) return;
+    if (this.state.folderMode) {
+      filter.placeholder = "Filter folders…";
+      return;
+    }
+    filter.placeholder = this.pickerMode === "tags" ? "Filter tags…" : "Filter notes and folders…";
+  }
+
+  /**
+   * The row pinned under the window's list: what this space holds so far.
+   *
+   * It is what makes the two bodies one picker. A tag chosen in Tags mode has
+   * no row to mark in the tree, and a note chosen in the tree has none in the
+   * tag list, so without this the window could only ever report half of what
+   * was picked. Counting both in one line also keeps it to one line, which is
+   * what the row of chips above the window failed at.
+   *
+   * Folder mode reports its root, by the same count. The mode holds one folder
+   * or none, and `toCreateOptions` submits the root alone, so reporting the
+   * curated items it is still carrying would advertise members the space will
+   * not have.
+   *
+   * Redrawn in place rather than through `render()`, so picking does not
    * rebuild the window under the pointer that just clicked inside it.
    */
-  private renderTagToggle(): void {
-    const host = this.tagToggleEl;
+  private renderSummary(): void {
+    const host = this.summaryEl;
     if (!host) return;
-    const doc = host.ownerDocument;
-    const chosen = this.chosenTags().length;
-    const label = tagToggleLabel(this.tagView, chosen);
-    host.replaceChildren();
-    host.setAttribute("aria-label", label);
-    host.setAttribute("aria-pressed", String(this.tagView));
-    // A tooltip as well as an accessible name: the icon carries no text, so a
-    // pointer user has nothing else to ask.
-    host.title = label;
-    host.classList.toggle("is-active", this.tagView);
-    const icon = doc.win.createSpan();
-    icon.className = "spaces-create-tag-toggle-icon";
-    // A Lucide tag rather than a `#` character, everywhere a tag is drawn in
-    // this panel.
-    setIcon(icon, "tag");
-    host.appendChild(icon);
-    if (chosen === 0) return;
-    const count = doc.win.createSpan();
-    count.className = "spaces-create-tag-toggle-count";
-    count.textContent = chosen.toLocaleString();
-    // The accessible name already carries the number; announcing the digits
-    // again would say it twice.
-    count.setAttribute("aria-hidden", "true");
-    host.appendChild(count);
+    const counts = this.state.folderMode
+      ? { notes: 0, folders: this.state.root === "" ? 0 : 1, tags: 0 }
+      : countPicked(this.state.items);
+    host.textContent = pickedSummary(counts);
   }
 
   /**
    * The tag body: a flat list drawn into the same box the tree uses.
    *
-   * It holds one of two things, and `readPickerBody` decides which: an empty
-   * filter box shows the tags this space already has, so they can be reviewed
-   * and taken off; any text searches the vault's tags, so one can be found and
-   * added. Both are the same list with the same rows and the same gesture, and
-   * the icon and the sigil are two doors into it.
+   * It holds the vault's tags, all of them, with the ones this space already
+   * has marked — the same job the tree does for notes and folders, which is
+   * what makes the two buttons above the window mean the same kind of thing.
+   * An empty filter box is the whole list; text narrows it.
    *
    * Flat rather than nested even though tags nest, because `tagMatches` makes
    * a parent tag cover its children anyway — picking `project` already takes
@@ -1264,18 +1356,15 @@ export class CreateSpacePanel {
    * click through here, and without the number a tag is a name and nothing
    * else. Counted after the cap, never before it (see `countTagRows`).
    */
-  private renderTagBody(host: HTMLElement, view: PickerView): void {
+  private renderTagBody(host: HTMLElement, query: string): void {
     const doc = host.ownerDocument;
-    const reviewing = view.body === "tag-chosen";
     // A flat list of choices, not a tree, and several may be chosen at once.
     // Multi-select is also what makes ONE gesture enough: in a multi-select
     // listbox, activating a selected option deselects it, so a click means
-    // "turn this on or off" in both bodies and the review list needs no
-    // separate remove verb. The `x` on its rows names that gesture; it is not
-    // a second control.
+    // "turn this on or off" here exactly as it does in the tree.
     host.setAttribute("role", "listbox");
     host.setAttribute("aria-multiselectable", "true");
-    host.setAttribute("aria-label", reviewing ? "Tags in this space" : "Choose tags");
+    host.setAttribute("aria-label", "Choose tags");
     // The tree's count means nothing here; leaving it would report a stale
     // number against a list it was never about.
     this.renderOverflowNotice(0);
@@ -1293,37 +1382,21 @@ export class CreateSpacePanel {
     // `SearchResult | null`, and inference off a function-typed argument
     // widens to the constraint, which then loses the `matches` that
     // `renderResults` needs.
-    let hits: TagHit<SearchResult>[];
-    if (reviewing) {
-      if (chosenTags.length === 0) {
-        message(`No tags yet. Type ${TAG_SIGIL} to search this vault's tags.`);
-        return;
-      }
-      // Uncapped and unranked, unlike the search below: these are the space's
-      // own members, and a limit here would hide a member with no other way
-      // left to reach it.
-      hits = chosenTags.map((tag) => ({ tag, match: null }));
-    } else {
-      const found = fuzzyTagCandidates<SearchResult>(
-        this.deps.tags,
-        view.query,
-        prepareFuzzySearch
-      );
-      if (found === null) {
-        // Null is the source saying it cannot list the vault's tags at all,
-        // which is how `nativeKnownTags` reports a missing private `getTags` —
-        // a return, not a throw, and the likelier of the two failures. The way
-        // out is the field in Settings, so say that rather than leaving an
-        // empty box to be read as "this vault has no tags".
-        message("Tags cannot be listed here. Add a tag from Settings, Contents.");
-        return;
-      }
-      if (found.length === 0) {
-        message(view.query.trim() === "" ? "No tags in this vault yet" : "No matching tag");
-        return;
-      }
-      hits = found;
+    const found = fuzzyTagCandidates<SearchResult>(this.deps.tags, query, prepareFuzzySearch);
+    if (found === null) {
+      // Null is the source saying it cannot list the vault's tags at all,
+      // which is how `nativeKnownTags` reports a missing private `getTags` —
+      // a return, not a throw, and the likelier of the two failures. The way
+      // out is the field in Settings, so say that rather than leaving an
+      // empty box to be read as "this vault has no tags".
+      message("Tags cannot be listed here. Add a tag from Settings, Contents.");
+      return;
     }
+    if (found.length === 0) {
+      message(query.trim() === "" ? "No tags in this vault yet" : "No matching tag");
+      return;
+    }
+    const hits: TagHit<SearchResult>[] = found;
 
     // Reached once per render, not once per row: the accessor hands back the
     // engine's current snapshot, and `pathsMatching` is a map lookup on it.
@@ -1342,7 +1415,10 @@ export class CreateSpacePanel {
       const selected = chosen.has(hit.tag);
       el.classList.toggle("is-selected", selected);
       el.setAttribute("aria-selected", String(selected));
-      if (reviewing) el.title = `Remove ${TAG_SIGIL}${hit.tag}`;
+      // The row toggles, so a selected one is offering to come off. Said in a
+      // tooltip rather than in a second control: a real remove button inside a
+      // clickable row gives two targets for one action.
+      if (selected) el.title = `Remove ${TAG_SIGIL}${hit.tag}`;
 
       const label = doc.win.createSpan();
       label.className = "spaces-create-tree-name";
@@ -1369,22 +1445,10 @@ export class CreateSpacePanel {
       count.textContent = tagCountLabel(hit.count);
       el.appendChild(count);
 
-      if (reviewing) {
-        // Decoration for the gesture the row already has, which is why it
-        // takes no focus and carries no label of its own: a real button inside
-        // a clickable row gives two targets for one action and a keyboard stop
-        // that undoes nothing new.
-        const remove = doc.win.createSpan();
-        remove.className = "spaces-create-tag-remove";
-        remove.setAttribute("aria-hidden", "true");
-        setIcon(remove, "x");
-        el.appendChild(remove);
-      }
-
       const choose = (): void => {
         this.state = toggleItem(this.state, { kind: "tag", tag: hit.tag });
         this.clearFault("root");
-        this.renderTagToggle();
+        this.renderSummary();
         this.renderItemTree();
         this.refreshCreateButton();
         this.refreshModeLabels();

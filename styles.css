@@ -293,6 +293,29 @@
 }
 .spaces-create-mode.is-active .spaces-create-theme-icon { color: inherit; }
 
+/* The two buttons that choose what the window below them shows. The same
+   segmented shape as the Curated / Folder pinned pair above, because they are
+   the same kind of control: one of two, exactly one on. */
+.spaces-create-bodies {
+  display: flex;
+  gap: 6px;
+}
+.spaces-create-body {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.spaces-create-body.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.spaces-create-body.is-active .spaces-create-theme-icon { color: inherit; }
+
 /* The item picker's view: fills the space between its button and the pinned
    actions, so the tree gets the whole pane rather than a fixed box. */
 .spaces-create-items {
@@ -313,25 +336,39 @@
    sat two pixels larger than the tree it mirrors. Set on the container so the
    rows, the caret and the empty-state message all follow; the filter field
    above is a sibling, so it keeps Obsidian's input sizing. */
-/* The window and the corner its tag icon sits in. The wrapper draws nothing:
-   no border, no padding, no background. It is a positioning context, so the
-   icon stays in the corner instead of scrolling away with the rows. */
-.spaces-create-tree-wrap {
-  position: relative;
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-}
+/* The window: a column of two, the list and the row pinned under it. The
+   border and the typesetting are the window's; the scrolling belongs to the
+   list alone, so the summary row stays put while the rows move under it. */
 .spaces-create-tree {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 80px;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s, 4px);
-  padding: 4px;
   font-size: var(--nav-item-size);
   font-weight: var(--nav-item-weight);
+}
+.spaces-create-tree-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+/* One row tall, under a divider, and it does not scroll: the list gives up the
+   height for it rather than the window taking more. */
+.spaces-create-summary {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 0.9em;
+  font-weight: var(--font-normal, 400);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .spaces-create-tree-row {
   display: flex;
@@ -382,8 +419,8 @@
   font-size: 0.9em;
 }
 
-/* §: the tag list, drawn in the same box as the tree and reached either by
-   the `#` sigil or by the icon in the box's corner.
+/* §: the tag list, drawn in the same box as the tree and reached by the
+   Tags button above it.
    The row itself is `.spaces-create-tree-row`, so only the differences live
    here: no caret slot to reserve, because nothing in a flat list expands. */
 .spaces-create-tag-row { padding-left: 6px; }
@@ -392,7 +429,7 @@
   align-items: center;
   min-width: 0;
 }
-/* A Lucide tag, the same mark the window's corner carries. Muted so the tag's
+/* A Lucide tag, the same mark the Tags button carries. Muted so the tag's
    name is what the eye lands on, and separate from the name because
    `renderResults` marks the matched characters of the STORED tag. */
 .spaces-create-tag-sigil {
@@ -423,55 +460,6 @@
    about. */
 .spaces-create-tag-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
 
-/* The tag icon in the window's own corner. `clickable-icon` gives it
-   Obsidian's own icon-button sizing, hover and focus ring, so it reads as a
-   control the app put there. */
-.spaces-create-tag-toggle {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 5px;
-  width: auto;
-  height: auto;
-  /* The rows scroll under it, so it needs something to sit on. */
-  background: var(--background-primary);
-  color: var(--text-muted);
-}
-.spaces-create-tag-toggle:hover { color: var(--text-normal); }
-.spaces-create-tag-toggle.is-active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-.spaces-create-tag-toggle-icon { display: flex; align-items: center; }
-.spaces-create-tag-toggle-icon svg { width: 14px; height: 14px; }
-/* Beside the icon rather than on its shoulder: the number is the point, and a
-   badge small enough to perch on a 14px icon is not a number anyone reads. */
-.spaces-create-tag-toggle-count {
-  font-size: 0.8em;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-/* Keeps the longest row clear of the icon above it. Only while the icon is
-   there, so folder mode is not padded for a control it never draws. */
-.spaces-create-tree.has-tag-toggle { padding-right: 30px; }
-/* The `x` on a row in the chosen-tags list. Decoration for the click the row
-   already has, so it is muted until the row is under the pointer. */
-.spaces-create-tag-remove {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  padding-left: 6px;
-  color: var(--text-muted);
-  opacity: 0.5;
-}
-.spaces-create-tag-remove svg { width: 13px; height: 13px; }
-.spaces-create-tree-row:hover .spaces-create-tag-remove { opacity: 1; }
-.spaces-create-tag-row.is-selected .spaces-create-tag-remove { color: inherit; }
 /* The theme button replaces the old swatch row: full width under the name,
    so it reads as an action rather than seven unexplained circles. The brush
    carries the current color (set inline from state), so the button shows the
