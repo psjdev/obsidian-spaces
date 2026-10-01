@@ -1,4 +1,4 @@
-import { Notice, setIcon } from "obsidian";
+import { Menu, Notice, setIcon } from "obsidian";
 import { openIconPicker } from "./IconPickerPopover";
 import { openColorPicker } from "./ColorPickerPopover";
 import type { AnchoredPopover } from "./AnchoredPopover";
@@ -42,7 +42,7 @@ import {
   memberFolderSet,
   memberTagSet,
 } from "../definitions/membership";
-import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
+import { canOfferCollapseAll, countPicked, pickedSummary, readPickerBody } from "./pickerBody";
 import { previewPaths } from "./memberPreview";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
@@ -338,6 +338,13 @@ export class CreateSpacePanel {
   private expandedTags = new Set<string>();
 
   /**
+   * The "Collapse all" menu while it is showing, so `destroy()` can dismiss it.
+   * Obsidian's `Menu` lives on the document body, outside `el`, and would
+   * otherwise outlive a panel torn down by a layout change.
+   */
+  private collapseMenu: Menu | null = null;
+
+  /**
    * Re-aligns when the window changes size, because the panel's top edge moves
    * with the workspace layout above it. Raw `addEventListener` with an
    * explicit removal in `destroy()`: this class is not a `Component`, so it
@@ -553,6 +560,34 @@ export class CreateSpacePanel {
     // this line can throw, so everything this class owns is already torn down
     // by the time this can.
     this.closePicker();
+    this.collapseMenu?.hide();
+    this.collapseMenu = null;
+  }
+
+  /**
+   * Right-click in the picker window: "Collapse all" for the mode showing, or
+   * nothing. Folder mode and the Tags button both resolve through
+   * `readPickerBody`, so the set cleared is always the one the tree on screen
+   * reads. The other mode's set is left alone.
+   */
+  private onPickerContextMenu(e: MouseEvent): void {
+    const tags = readPickerBody(this.pickerMode, this.state.folderMode) === "tags";
+    const expanded = tags ? this.expandedTags : this.expandedFolders;
+    if (!canOfferCollapseAll(expanded.size, this.itemFilter)) return;
+    e.preventDefault();
+    const menu = new Menu();
+    menu.addItem((item) =>
+      item.setTitle("Collapse all").onClick(() => {
+        expanded.clear();
+        this.renderItemTree();
+      })
+    );
+    menu.onHide(() => {
+      if (this.collapseMenu === menu) this.collapseMenu = null;
+    });
+    this.collapseMenu?.hide();
+    this.collapseMenu = menu;
+    menu.showAtMouseEvent(e);
   }
 
   /**
@@ -1008,6 +1043,11 @@ export class CreateSpacePanel {
       scroll.appendChild(rowsEl);
       windowEl.appendChild(scroll);
       this.treeEl = rowsEl;
+      // No removal pair: the listener is on an element this panel owns, and
+      // every render replaces that element and `destroy()` removes it, so the
+      // listener goes with the node. Only the Menu, which sits outside it, is
+      // torn down by hand.
+      windowEl.addEventListener("contextmenu", (e) => this.onPickerContextMenu(e));
 
       // Inside the window and pinned under its list: a choice made in one body
       // is still visible from the other, which is what the row above the
