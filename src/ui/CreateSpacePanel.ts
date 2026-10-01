@@ -29,9 +29,11 @@ import {
   type PickerMode,
 } from "./pickerFilter";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
+import { previewPaths } from "./memberPreview";
 import { fuzzyTagCandidates, type TagHit, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { MemberEntry } from "../types";
 
 import {
   isStillCovering as isStillCoveringPure,
@@ -60,6 +62,17 @@ import { SEL } from "../explorer/selectors";
  * overflow row reports is exact rather than an estimate.
  */
 const MAX_PICKER_ROWS = 200;
+
+/**
+ * How long the sigil stays in the filter box before the box takes it back, in
+ * ms.
+ *
+ * Long enough to read as the box reacting, short enough that it cannot be
+ * mistaken for a character that failed to delete. Nothing waits on it: the
+ * query is sigil-free from the keystroke onwards, so this governs how the box
+ * LOOKS and nothing else.
+ */
+const SIGIL_FLASH_MS = 120;
 
 const DESIGN_TITLE_GAP = 22;
 const TITLE_GAP_TOLERANCE = 6;
@@ -231,6 +244,29 @@ export class CreateSpacePanel {
 
   /** The filter box, kept so the sigil shortcut can retitle its placeholder. */
   private filterEl: HTMLInputElement | null = null;
+
+  /**
+   * The sigil now showing in the filter box but NOT part of the query, or
+   * null when nothing is flashing.
+   *
+   * The box has to show the character for a moment, because a keystroke that
+   * disappears at the instant it is pressed reads as a dropped key rather than
+   * as the window snapping over. It must not be in the query while it shows.
+   *
+   * Held as state rather than stripped by the timer alone, and that is what
+   * makes typing at speed safe: every character after it lands in the box
+   * normally and in the order the keyboard produced it, `itemFilter` is taken
+   * through `queryFrom` so the list never sees the sigil, and the flash ends
+   * by removing exactly the one character it put there.
+   */
+  private sigilFlash: string | null = null;
+
+  /**
+   * Cancels the pending flash, or null. A closure rather than a bare handle so
+   * the `clearTimeout` runs against whatever set it, and so teardown has one
+   * thing to call.
+   */
+  private sigilFlashOff: (() => void) | null = null;
 
   /**
    * The Items and Tags buttons, kept so a mode reached by the sigil can press
@@ -483,6 +519,9 @@ export class CreateSpacePanel {
     this.nameInput = null;
     this.nameRow = null;
     this.createBtn = null;
+    // A handle left running would reach for a filter box that is no longer
+    // in any document.
+    this.cancelSigilFlash();
     // After `el.remove()`, not before: this call is unguarded, and a throw
     // here must not leave our own element still attached, contradicting this
     // method's own "teardown comes off first" ordering above. Nothing above
@@ -706,6 +745,10 @@ export class CreateSpacePanel {
     // A full re-render is the point at which the vault is read again: opening
     // the picker, switching mode, or any state change that rebuilds the panel.
     this.vaultTree = null;
+    // The box the sigil is showing in is about to be discarded, and the one
+    // that replaces it is seeded from `itemFilter`, which never held the
+    // sigil.
+    this.cancelSigilFlash();
     const el = this.el;
     if (!el) return;
     const doc = el.ownerDocument;
@@ -831,7 +874,7 @@ export class CreateSpacePanel {
       ic.className = "spaces-create-theme-icon";
       setIcon(ic, icon);
       const text = doc.win.createSpan();
-      text.textContent = this.modeSummary(folderMode, label);
+      text.textContent = label;
       btn.appendChild(ic);
       btn.appendChild(text);
       btn.addEventListener("click", () => {
@@ -895,7 +938,7 @@ export class CreateSpacePanel {
       filter.value = this.itemFilter;
       filter.dataset.focusKey = "item-filter";
       filter.addEventListener("input", () => {
-        this.itemFilter = filter.value;
+        this.itemFilter = this.queryFrom(filter.value);
         this.renderItemTree();
       });
       filter.addEventListener("keydown", (e) => {
@@ -907,10 +950,12 @@ export class CreateSpacePanel {
           composing: e.isComposing,
         });
         if (mode === null) return;
-        // Consumed: the character presses a button and does not also land in
-        // the box, so the query it was typed ahead of starts from an empty box
-        // with the caret already where it was.
-        e.preventDefault();
+        // NOT prevented, which is the change: the character lands so it can be
+        // seen, and `endSigilFlash` takes it back a moment later. It is still
+        // consumed in the sense that matters — `queryFrom` keeps it out of
+        // `itemFilter`, so the query typed behind it filters from its first
+        // character and ends up in the box without it.
+        this.startSigilFlash(e.key);
         this.setPickerMode(mode);
       });
       this.filterEl = filter;
@@ -991,39 +1036,6 @@ export class CreateSpacePanel {
     // Re-apply after a rebuild: `render()` replaces the very nodes the mark
     // was on, and a fault is cleared by acting on the control, not by redraw.
     this.paintFault();
-  }
-
-  /**
-   * Rewrites the mode buttons' text in place.
-   *
-   * Picking an item redraws only the tree — a full re-render would drop focus
-   * out of the filter field — so the count on Curate would otherwise sit stale
-   * until something else happened to rebuild the panel.
-   */
-  private refreshModeLabels(): void {
-    const el = this.el;
-    if (!el) return;
-    const set = (key: string, folderMode: boolean, label: string): void => {
-      const btn = el.querySelector(`[data-focus-key="${key}"]`);
-      const text = btn?.lastElementChild;
-      if (text instanceof HTMLElement) text.textContent = this.modeSummary(folderMode, label);
-    };
-    set("mode-curate", false, "Curated");
-    set("mode-folder", true, "Folder pinned");
-  }
-
-  /**
-   * What one mode button says.
-   *
-   * Curate appends its count, because "how many did I pick?" is not answerable
-   * from a scrolled list. Pin to Folder appends nothing: a vault path would
-   * blow out a half-width button, and the chosen folder is already highlighted
-   * in the tree below.
-   */
-  private modeSummary(folderMode: boolean, label: string): string {
-    if (folderMode) return label;
-    const n = this.state.items.length;
-    return n === 0 ? label : `${label} · ${n}`;
   }
 
   /**
@@ -1183,7 +1195,6 @@ export class CreateSpacePanel {
         this.renderSummary();
         this.renderItemTree();
         this.refreshCreateButton();
-        this.refreshModeLabels();
       };
       el.addEventListener("click", choose);
       el.addEventListener("keydown", (e) => {
@@ -1263,6 +1274,58 @@ export class CreateSpacePanel {
   }
 
   /**
+   * What a box showing a flashing sigil is actually asking for.
+   *
+   * Stripping the sigil here rather than from the box is the whole trick: the
+   * list narrows by the real query from the first character typed after the
+   * sigil, while the box goes on showing the sigil until the flash ends.
+   */
+  private queryFrom(value: string): string {
+    const sigil = this.sigilFlash;
+    if (sigil === null || !value.startsWith(sigil)) return value;
+    return value.slice(sigil.length);
+  }
+
+  /** Starts the sigil showing, and arms the one thing that takes it back. */
+  private startSigilFlash(sigil: string): void {
+    this.cancelSigilFlash();
+    this.sigilFlash = sigil;
+    const handle = window.setTimeout(() => this.endSigilFlash(), SIGIL_FLASH_MS);
+    this.sigilFlashOff = () => window.clearTimeout(handle);
+  }
+
+  /**
+   * Takes the sigil out of the box, and nothing else.
+   *
+   * Exactly one character, matched against the one that was put there, and
+   * only while the box still starts with it. Someone who backspaced it, or
+   * selected the lot and typed over it, has already dealt with it; removing a
+   * character anyway would eat the first letter of what they typed instead.
+   *
+   * The caret moves back by what was removed, so a flash that ends mid-word
+   * leaves the user typing where they were rather than one place to the right.
+   * `itemFilter` is untouched: it has been sigil-free since the keystroke
+   * landed, so only the box changes and the list does not redraw.
+   */
+  private endSigilFlash(): void {
+    const sigil = this.sigilFlash;
+    this.cancelSigilFlash();
+    const filter = this.filterEl;
+    if (sigil === null || !filter || !filter.value.startsWith(sigil)) return;
+    const caret = filter.selectionStart;
+    filter.value = filter.value.slice(sigil.length);
+    const at = caret === null ? filter.value.length : Math.max(0, caret - sigil.length);
+    filter.setSelectionRange(at, at);
+  }
+
+  /** Drops a pending flash without touching the box. Idempotent. */
+  private cancelSigilFlash(): void {
+    this.sigilFlashOff?.();
+    this.sigilFlashOff = null;
+    this.sigilFlash = null;
+  }
+
+  /**
    * Switches the window over, from either door.
    *
    * The filter text is left exactly as it is. The box narrows whichever body
@@ -1326,10 +1389,33 @@ export class CreateSpacePanel {
   private renderSummary(): void {
     const host = this.summaryEl;
     if (!host) return;
-    const counts = this.state.folderMode
-      ? { notes: 0, folders: this.state.root === "" ? 0 : 1, tags: 0 }
-      : countPicked(this.state.items);
-    host.textContent = pickedSummary(counts);
+    const picked = this.pickedMembers();
+    const counts = countPicked(picked);
+    // Resolved only when something that EXPANDS was picked. A note selects
+    // itself, so the count on the left is already the total, and reaching for
+    // the index or walking the vault to establish that would put both of the
+    // picker's O(vault) costs behind picking a single file.
+    let notes = counts.notes;
+    if (counts.folders > 0 || counts.tags > 0) {
+      // Reached once per draw rather than once per tag, for the reason the tag
+      // rows give: the accessor hands back the engine's current snapshot.
+      const index = this.deps.tagIndex();
+      notes = previewPaths(picked, this.deps.folders, (tag) => index.pathsMatching(tag)).notes;
+    }
+    host.textContent = pickedSummary(counts, notes);
+  }
+
+  /**
+   * What the summary row is reporting on: the curated members, or a folder
+   * space's root alone.
+   *
+   * Expressed as members rather than as counts so the root is resolved by
+   * exactly the rule a curated folder member is, and so both shapes reach
+   * `previewPaths` as the one thing it takes.
+   */
+  private pickedMembers(): readonly MemberEntry[] {
+    if (!this.state.folderMode) return this.state.items;
+    return this.state.root === "" ? [] : [{ kind: "folder", path: this.state.root }];
   }
 
   /**
@@ -1456,7 +1542,6 @@ export class CreateSpacePanel {
         this.renderSummary();
         this.renderItemTree();
         this.refreshCreateButton();
-        this.refreshModeLabels();
       };
       el.addEventListener("click", choose);
       el.addEventListener("keydown", (e) => {

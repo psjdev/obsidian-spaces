@@ -692,6 +692,32 @@ describe("the Items and Tags buttons under the filter box", () => {
     byKey("item-filter").dispatchEvent(e);
     return e;
   };
+  /**
+   * One character arriving at the filter box AS A BROWSER DELIVERS IT: keydown
+   * first, then, only if nothing prevented it, the character in the value and
+   * the `input` event that follows.
+   *
+   * jsdom performs no default action of its own, so `press` alone cannot tell
+   * a keystroke the panel consumed from one it let land. Everything about the
+   * sigil flash is the difference between those two, so it needs this.
+   */
+  const typeChar = (ch: string, init: KeyboardEventInit = {}): KeyboardEvent => {
+    const f = byKey("item-filter") as HTMLInputElement;
+    const e = new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true, ...init });
+    f.dispatchEvent(e);
+    if (e.defaultPrevented) return e;
+    const at = f.selectionStart ?? f.value.length;
+    const to = f.selectionEnd ?? at;
+    f.value = f.value.slice(0, at) + ch + f.value.slice(to);
+    f.setSelectionRange(at + 1, at + 1);
+    f.dispatchEvent(new Event("input", { bubbles: true }));
+    return e;
+  };
+  /** The same, at speed: no timer gets to run between the characters. */
+  const typeFast = (text: string): void => {
+    for (const ch of text) typeChar(ch);
+  };
+  const box = (): HTMLInputElement => byKey("item-filter") as HTMLInputElement;
   const tagRows = (): HTMLElement[] =>
     Array.from(panelEl().querySelectorAll<HTMLElement>("[role='option']"));
   const tagRowFor = (tag: string): HTMLElement => {
@@ -803,12 +829,16 @@ describe("the Items and Tags buttons under the filter box", () => {
     expect(h.submitted[0]?.opts.members).toEqual([{ kind: "tag", tag: "project" }]);
   });
 
-  it("counts a tag on the Curated button, like any other member", () => {
+  it("puts no count on the Curated button, wherever the member came from", () => {
+    // The count moved to the summary row, which can say what a number on a
+    // half-width button never could: what the selection comes to.
     makeHarness();
     openCurated();
+    rowFor("inbox.md").click();
     showTags();
     tagRowFor("project").click();
-    expect(byKey("mode-curate").textContent).toContain("1");
+    expect(byKey("mode-curate").textContent).toBe("Curated");
+    expect(byKey("mode-folder").textContent).toBe("Folder pinned");
   });
 
   it("removes a chosen tag when its row is clicked", () => {
@@ -949,25 +979,37 @@ describe("the Items and Tags buttons under the filter box", () => {
 
   describe("the / and # shortcuts", () => {
     it("switches to tags on a # into an empty box", () => {
-      makeHarness();
-      openCurated();
-      const e = press("#");
-      expect(pressed("body-tags")).toBe("true");
-      expect(tagRows().length).toBe(3);
-      // Consumed: the character pressed a button, so it must not also land in
-      // the box and become the first character of the query.
-      expect(e.defaultPrevented).toBe(true);
-      expect((byKey("item-filter") as HTMLInputElement).value).toBe("");
+      vi.useFakeTimers();
+      try {
+        makeHarness();
+        openCurated();
+        typeChar("#");
+        expect(pressed("body-tags")).toBe("true");
+        expect(tagRows().length).toBe(3);
+        // Taken rather than consumed outright: the box shows the character and
+        // then gives it up, and the query never holds it either way.
+        vi.runAllTimers();
+        expect(box().value).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("switches back to items on a / into an empty box", () => {
-      makeHarness();
-      openCurated();
-      press("#");
-      const e = press("/");
-      expect(pressed("body-items")).toBe("true");
-      expect(rows().length).toBeGreaterThan(0);
-      expect(e.defaultPrevented).toBe(true);
+      vi.useFakeTimers();
+      try {
+        makeHarness();
+        openCurated();
+        typeChar("#");
+        vi.runAllTimers();
+        typeChar("/");
+        expect(pressed("body-items")).toBe("true");
+        expect(rows().length).toBeGreaterThan(0);
+        vi.runAllTimers();
+        expect(box().value).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("leaves both characters alone once the box holds anything", () => {
@@ -998,6 +1040,104 @@ describe("the Items and Tags buttons under the filter box", () => {
       const e = press("#", { ctrlKey: true });
       expect(e.defaultPrevented).toBe(false);
       expect(pressed("body-items")).toBe("true");
+    });
+
+    it("shows the sigil for a moment rather than swallowing the keystroke", () => {
+      vi.useFakeTimers();
+      try {
+        // An empty tag source: the stub refuses to imitate `prepareFuzzySearch`
+        // on purpose, so a non-empty query against real tags throws rather than
+        // ranks. What is under test here is the box, not the ranking.
+        makeHarness({ tags: { knownTags: () => [] } });
+        openCurated();
+        const e = typeChar("#");
+        // Not prevented: a character has to land to be seen at all.
+        expect(e.defaultPrevented).toBe(false);
+        expect(box().value).toBe("#");
+        expect(pressed("body-tags")).toBe("true");
+        vi.runAllTimers();
+        expect(box().value).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps every character typed during the flash, in order", () => {
+      // The hazard the whole flash is built around. `#project` typed at speed
+      // must come out as mode Tags with `project` in the box: not `#project`,
+      // not `roject`, not `project` with the `p` lost to a timer.
+      vi.useFakeTimers();
+      try {
+        makeHarness({ tags: { knownTags: () => [] } });
+        openCurated();
+        typeFast("#project");
+        expect(pressed("body-tags")).toBe("true");
+        expect(box().value).toBe("#project");
+        vi.runAllTimers();
+        expect(box().value).toBe("project");
+        // And the caret stays after what was typed, not back where the sigil
+        // used to be.
+        expect(box().selectionStart).toBe("project".length);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("filters by the query without the sigil while the sigil is still showing", () => {
+      // The flash is how the box LOOKS, not what it asks for. A list narrowed
+      // by `/Pro` would match nothing in this vault at all.
+      vi.useFakeTimers();
+      try {
+        makeHarness();
+        openCurated();
+        typeFast("/Pro");
+        expect(box().value).toBe("/Pro");
+        expect(rows().map((r) => r.dataset.path)).toContain("Projects");
+        expect(rows().map((r) => r.dataset.path)).not.toContain("inbox.md");
+        vi.runAllTimers();
+        expect(box().value).toBe("Pro");
+        expect(rows().map((r) => r.dataset.path)).toContain("Projects");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("takes nothing back when the sigil is deleted before the flash ends", () => {
+      vi.useFakeTimers();
+      try {
+        makeHarness({ tags: { knownTags: () => [] } });
+        openCurated();
+        typeChar("#");
+        box().value = "";
+        box().setSelectionRange(0, 0);
+        box().dispatchEvent(new Event("input", { bubbles: true }));
+        typeFast("ab");
+        vi.runAllTimers();
+        // There is no sigil left to take, and taking a character anyway would
+        // eat the `a`.
+        expect(box().value).toBe("ab");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not let a pending flash outlive the panel", () => {
+      vi.useFakeTimers();
+      try {
+        const h = makeHarness({ tags: { knownTags: () => [] } });
+        openCurated();
+        typeChar("#");
+        // A delta, not an absolute count: jsdom and the panel's own wiring arm
+        // timers of their own, and asserting a total would be asserting
+        // somebody else's. Exactly one comes off, and it is ours.
+        const armed = vi.getTimerCount();
+        h.panel.destroy();
+        expect(vi.getTimerCount()).toBe(armed - 1);
+        // And what is left cannot reach a box that is no longer in a document.
+        expect(() => vi.runAllTimers()).not.toThrow();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -1031,10 +1171,12 @@ describe("the Items and Tags buttons under the filter box", () => {
       openCurated();
       rowFor("inbox.md").click();
       expect(summary()).toBe("1 note");
+      // `Archive` is empty, so the folder adds a selector and no notes. The
+      // tail says so rather than leaving the reader to assume it added some.
       rowFor("Archive").click();
-      expect(summary()).toBe("1 note, 1 folder");
+      expect(summary()).toBe("1 note, 1 folder · 1 note");
       rowFor("inbox.md").click();
-      expect(summary()).toBe("1 folder");
+      expect(summary()).toBe("1 folder · no notes");
     });
 
     it("counts tags alongside them, which is how a tag stays visible from the tree", () => {
@@ -1046,9 +1188,68 @@ describe("the Items and Tags buttons under the filter box", () => {
       showTags();
       tagRowFor("project").click();
       tagRowFor("archive").click();
-      expect(summary()).toBe("1 note, 2 tags");
+      // `inbox.md` by hand, and `#project` carrying it and `plan.md`. Two
+      // notes: the hand-picked one is not counted again for the tag.
+      expect(summary()).toBe("1 note, 2 tags · 2 notes");
       byKey("body-items").click();
-      expect(summary()).toBe("1 note, 2 tags");
+      expect(summary()).toBe("1 note, 2 tags · 2 notes");
+    });
+
+    it("counts the union of what is selected, not the parts added up", () => {
+      // The assertion the whole tail rests on. `Projects` brings `plan.md`;
+      // `#project` brings `plan.md` and `inbox.md`. Two notes, not three: a
+      // note inside a selected folder that also carries a selected tag is one
+      // note.
+      makeHarness();
+      openCurated();
+      rowFor("Projects").click();
+      showTags();
+      tagRowFor("project").click();
+      expect(summary()).toBe("1 folder, 1 tag · 2 notes");
+    });
+
+    it("counts a note picked by hand once when a selected tag carries it too", () => {
+      makeHarness();
+      openCurated();
+      rowFor("inbox.md").click();
+      showTags();
+      tagRowFor("project").click();
+      expect(summary()).toBe("1 note, 1 tag · 2 notes");
+    });
+
+    it("counts everything under a selected folder, not the folder alone", () => {
+      makeHarness();
+      openCurated();
+      rowFor("Projects").click();
+      expect(summary()).toBe("1 folder · 1 note");
+    });
+
+    it("counts the notes a nested tag brings in with its parent", () => {
+      // The index already expands `project/console` into `project`, which is
+      // exactly what the member will resolve to.
+      makeHarness();
+      openCurated();
+      showTags();
+      tagRowFor("project").click();
+      expect(summary()).toBe("1 tag · 2 notes");
+    });
+
+    it("says so when what is selected comes to no notes", () => {
+      makeHarness();
+      openCurated();
+      showTags();
+      tagRowFor("archive").click();
+      expect(summary()).toBe("1 tag · no notes");
+    });
+
+    it("asks the index nothing while only notes are selected", () => {
+      // A note selects itself, so there is nothing to resolve, and the row
+      // must not reach for a snapshot to establish that.
+      const h = makeHarness();
+      openCurated();
+      rowFor("inbox.md").click();
+      expect(h.reached).toBe(0);
+      expect(summary()).toBe("1 note");
     });
 
     it("reports a folder space's root, and nothing it is still carrying", () => {
@@ -1061,7 +1262,7 @@ describe("the Items and Tags buttons under the filter box", () => {
       byKey("mode-folder").click();
       expect(summary()).toBe("Nothing selected");
       rowFor("Archive").click();
-      expect(summary()).toBe("1 folder");
+      expect(summary()).toBe("1 folder · no notes");
     });
   });
 });
