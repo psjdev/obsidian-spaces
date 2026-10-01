@@ -313,8 +313,18 @@
    sat two pixels larger than the tree it mirrors. Set on the container so the
    rows, the caret and the empty-state message all follow; the filter field
    above is a sibling, so it keeps Obsidian's input sizing. */
+/* The window and the corner its tag icon sits in. The wrapper draws nothing:
+   no border, no padding, no background. It is a positioning context, so the
+   icon stays in the corner instead of scrolling away with the rows. */
+.spaces-create-tree-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .spaces-create-tree {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 80px;
   overflow-y: auto;
   border: 1px solid var(--background-modifier-border);
@@ -372,17 +382,27 @@
   font-size: 0.9em;
 }
 
-/* §: the `#` sigil's tag list, drawn in the same box as the tree.
+/* §: the tag list, drawn in the same box as the tree and reached either by
+   the `#` sigil or by the icon in the box's corner.
    The row itself is `.spaces-create-tree-row`, so only the differences live
    here: no caret slot to reserve, because nothing in a flat list expands. */
 .spaces-create-tag-row { padding-left: 6px; }
-/* The `#` is the whole icon. Muted so the tag's name is what the eye lands
-   on, and separate from the name because `renderResults` marks the matched
-   characters of the STORED tag, which has no `#` in it. */
-.spaces-create-tag-sigil {
-  color: var(--text-muted);
-  margin-right: 1px;
+.spaces-create-tag-row .spaces-create-tree-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
+/* A Lucide tag, the same mark the window's corner carries. Muted so the tag's
+   name is what the eye lands on, and separate from the name because
+   `renderResults` marks the matched characters of the STORED tag. */
+.spaces-create-tag-sigil {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.spaces-create-tag-sigil svg { width: 13px; height: 13px; }
 .spaces-create-tag-row.is-selected .spaces-create-tag-sigil { color: inherit; }
 /* How many notes the tag brings in. `margin-left: auto` puts it against the
    right edge so the numbers line up as a column the eye can skim, and the
@@ -403,41 +423,55 @@
    about. */
 .spaces-create-tag-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
 
-/* The chosen tags. A file or a folder is marked in the tree, but a tag has no
-   row anywhere to mark, so it gets a chip instead. */
-.spaces-create-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-/* Collapsed rather than merely childless: the picker column has a 6px gap
-   between its children, which an empty chip row would otherwise double. */
-.spaces-create-chips.is-empty { display: none; }
-.spaces-create-chip {
+/* The tag icon in the window's own corner. `clickable-icon` gives it
+   Obsidian's own icon-button sizing, hover and focus ring, so it reads as a
+   control the app put there. */
+.spaces-create-tag-toggle {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 2px;
-  /* Obsidian's own tag pill, so a chip here looks like the tag it names looks
-     everywhere else in the app. */
-  padding: 1px 6px;
+  gap: 3px;
+  padding: 2px 5px;
+  width: auto;
   height: auto;
-  box-shadow: none;
-  border-radius: var(--tag-radius, 14px);
-  background: var(--tag-background, var(--background-modifier-hover));
-  color: var(--tag-color, var(--text-accent));
-  font-size: var(--tag-size, 0.85em);
-  line-height: 1.5;
+  /* The rows scroll under it, so it needs something to sit on. */
+  background: var(--background-primary);
+  color: var(--text-muted);
 }
-.spaces-create-chip:hover {
-  background: var(--tag-background-hover, var(--background-modifier-hover));
+.spaces-create-tag-toggle:hover { color: var(--text-normal); }
+.spaces-create-tag-toggle.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
-.spaces-create-chip-x {
+.spaces-create-tag-toggle-icon { display: flex; align-items: center; }
+.spaces-create-tag-toggle-icon svg { width: 14px; height: 14px; }
+/* Beside the icon rather than on its shoulder: the number is the point, and a
+   badge small enough to perch on a 14px icon is not a number anyone reads. */
+.spaces-create-tag-toggle-count {
+  font-size: 0.8em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+/* Keeps the longest row clear of the icon above it. Only while the icon is
+   there, so folder mode is not padded for a control it never draws. */
+.spaces-create-tree.has-tag-toggle { padding-right: 30px; }
+/* The `x` on a row in the chosen-tags list. Decoration for the click the row
+   already has, so it is muted until the row is under the pointer. */
+.spaces-create-tag-remove {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  opacity: 0.6;
+  padding-left: 6px;
+  color: var(--text-muted);
+  opacity: 0.5;
 }
-.spaces-create-chip-x svg { width: 12px; height: 12px; }
-.spaces-create-chip:hover .spaces-create-chip-x { opacity: 1; }
+.spaces-create-tag-remove svg { width: 13px; height: 13px; }
+.spaces-create-tree-row:hover .spaces-create-tag-remove { opacity: 1; }
+.spaces-create-tag-row.is-selected .spaces-create-tag-remove { color: inherit; }
 /* The theme button replaces the old swatch row: full width under the name,
    so it reads as an action rather than seven unexplained circles. The brush
    carries the current color (set inline from state), so the button shows the

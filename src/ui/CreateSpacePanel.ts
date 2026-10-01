@@ -21,8 +21,9 @@ import type { FormFault } from "./createSpaceForm";
 import { alignmentGap } from "./ribbonAlign";
 import { iconColorFor } from "./spaceIconColor";
 import { ancestorsOf, buildVaultTree, visibleRows, type VaultNode } from "./vaultTree";
-import { readPickerFilter, TAG_SIGIL } from "./pickerFilter";
-import { fuzzyTagCandidates, type TagSource } from "./tagCandidates";
+import { TAG_SIGIL } from "./pickerFilter";
+import { leaveTagView, readPickerBody, tagToggleLabel, type PickerView } from "./pickerBody";
+import { fuzzyTagCandidates, type TagHit, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
 
@@ -216,14 +217,21 @@ export class CreateSpacePanel {
   private treeEl: HTMLElement | null = null;
 
   /**
-   * Where the chosen tags are drawn, redrawn in place by `renderTagChips()`.
-   *
-   * Tags need a home of their own because they are the one member kind the
-   * tree cannot show: a file or a folder is a row that can be marked selected,
-   * a tag is not anywhere in the vault's shape. Without this, a tag picked
-   * behind the `#` sigil vanished the moment the sigil was backspaced away.
+   * The tag icon in the explorer window's own top corner, kept so
+   * `renderTagToggle()` can redraw its count in place: picking a tag must not
+   * rebuild the window under the pointer that just clicked in it.
    */
-  private chipsEl: HTMLElement | null = null;
+  private tagToggleEl: HTMLElement | null = null;
+
+  /**
+   * Whether the explorer window is showing tags rather than the vault.
+   *
+   * Held here rather than read back out of the filter text, because the icon
+   * is the second way in and it leaves the filter box untouched. The sigil
+   * still forces tags on top of this, so the flag is one input to
+   * `readPickerBody` rather than the answer.
+   */
+  private tagView = false;
 
   /**
    * The vault as a tree, kept while the picker stays open.
@@ -827,6 +835,10 @@ export class CreateSpacePanel {
           this.state = setFolderMode(this.state, folderMode);
           this.itemsOpen = true;
         }
+        // The window is rebuilt for the mode being opened, and folder mode has
+        // no tags at all, so it reopens on the vault rather than on whatever
+        // the last curated session left it showing.
+        this.tagView = false;
         this.render();
       });
       return btn;
@@ -866,14 +878,6 @@ export class CreateSpacePanel {
       });
       view.appendChild(filter);
 
-      // Above the filter, not below it: the chips say what the space HAS,
-      // which does not change as you type, while everything below the filter
-      // is a view of what you are looking for.
-      const chipsEl = doc.win.createDiv();
-      chipsEl.className = "spaces-create-chips";
-      view.insertBefore(chipsEl, filter);
-      this.chipsEl = chipsEl;
-
       // Rows live in their own child so redrawing them cannot disturb the box
       // around them. The role belongs HERE rather than on the box: ARIA
       // requires treeitems to be owned by the tree, and with an unroled div in
@@ -883,15 +887,46 @@ export class CreateSpacePanel {
       const rowsEl = doc.win.createDiv();
       rowsEl.className = "spaces-create-tree-rows";
       treeEl.appendChild(rowsEl);
-      view.appendChild(treeEl);
       this.treeEl = rowsEl;
 
+      // A positioning context around the window, not a second window: the
+      // wrapper has no border, no padding and no background, and exists only
+      // so the tag icon can sit in the window's own corner instead of
+      // scrolling away with the rows inside it.
+      const wrap = doc.win.createDiv();
+      wrap.className = "spaces-create-tree-wrap";
+      wrap.appendChild(treeEl);
+      // Folder mode is offered no icon, for the reason it is offered no sigil:
+      // a folder space is a window onto one root, and a tag is not one.
+      if (!this.state.folderMode) {
+        const toggle = doc.win.createEl("button");
+        toggle.type = "button";
+        toggle.className = "spaces-create-tag-toggle clickable-icon";
+        toggle.dataset.focusKey = "tag-toggle";
+        toggle.addEventListener("click", () => {
+          // Pressing off drops a sigil the box may still be carrying, or the
+          // text would hold the window in tag mode against the control that
+          // has just said to leave it.
+          if (this.tagView) {
+            this.itemFilter = leaveTagView(this.itemFilter);
+            filter.value = this.itemFilter;
+          }
+          this.tagView = !this.tagView;
+          this.renderTagToggle();
+          this.renderItemTree();
+        });
+        wrap.appendChild(toggle);
+        this.tagToggleEl = toggle;
+        treeEl.classList.add("has-tag-toggle");
+      }
+      view.appendChild(wrap);
+
       el.appendChild(view);
-      this.renderTagChips();
+      this.renderTagToggle();
       this.renderItemTree();
     } else {
       this.treeEl = null;
-      this.chipsEl = null;
+      this.tagToggleEl = null;
     }
 
 
@@ -988,22 +1023,23 @@ export class CreateSpacePanel {
   }
 
   /**
-   * Draws whichever body the filter text asks for.
+   * Draws whichever body the filter text and the tag icon ask for.
    *
-   * The sigil is read by `readPickerFilter`, not tested here, so the rule sits
-   * in a pure module with the tree's own rules rather than in the panel that
+   * Which one that is lives in `readPickerBody`, not here, so the rule can be
+   * read and tested without a DOM rather than inferred from the panel that
    * happens to be this prototype's drawing.
    *
    * Folder mode never reaches the tag body: a folder space is a window onto
    * one root, and a tag is not one. Someone who types `#` there gets the tree
-   * filtering on a literal `#`, which is what it did before the sigil existed.
+   * filtering on a literal `#`, which is what it did before the sigil existed,
+   * and the icon is not drawn for that mode at all.
    */
   private renderItemTree(): void {
     const host = this.treeEl;
     if (!host) return;
-    const picker = readPickerFilter(this.itemFilter);
-    if (picker.mode === "tag" && !this.state.folderMode) {
-      this.renderTagRows(host, picker.query);
+    const view = readPickerBody(this.itemFilter, this.tagView);
+    if (view.body !== "tree" && !this.state.folderMode) {
+      this.renderTagBody(host, view);
       return;
     }
     const doc = host.ownerDocument;
@@ -1141,7 +1177,71 @@ export class CreateSpacePanel {
   }
 
   /**
-   * The tag body: a flat, ranked list, drawn into the same box the tree uses.
+   * The tags this space currently holds, in the order they were chosen.
+   *
+   * Folder mode reports none. It keeps `items` so switching back costs nothing
+   * (`setFolderMode`), but `toCreateOptions` submits the root alone, so
+   * showing them would advertise members the space will not have.
+   */
+  private chosenTags(): string[] {
+    if (this.state.folderMode) return [];
+    return this.state.items.flatMap((i) => (i.kind === "tag" ? [i.tag] : []));
+  }
+
+  /**
+   * The tag icon in the explorer window's own corner, and the count riding on
+   * it.
+   *
+   * The icon exists because the `#` sigil is undiscoverable: nothing on screen
+   * can teach a character you have to already know to type. It is drawn inside
+   * the window rather than above it, which is the whole constraint this
+   * prototype is built under.
+   *
+   * The count is the only thing the tree body now says about tags, the row of
+   * chips above it having gone. A number rather than a dot, because a dot says
+   * that something is there and the window could already say that much by
+   * having an icon at all.
+   *
+   * Redrawn in place rather than through `render()`, so picking a tag does not
+   * rebuild the window under the pointer that just clicked inside it.
+   */
+  private renderTagToggle(): void {
+    const host = this.tagToggleEl;
+    if (!host) return;
+    const doc = host.ownerDocument;
+    const chosen = this.chosenTags().length;
+    const label = tagToggleLabel(this.tagView, chosen);
+    host.replaceChildren();
+    host.setAttribute("aria-label", label);
+    host.setAttribute("aria-pressed", String(this.tagView));
+    // A tooltip as well as an accessible name: the icon carries no text, so a
+    // pointer user has nothing else to ask.
+    host.title = label;
+    host.classList.toggle("is-active", this.tagView);
+    const icon = doc.win.createSpan();
+    icon.className = "spaces-create-tag-toggle-icon";
+    // A Lucide tag rather than a `#` character, everywhere a tag is drawn in
+    // this panel.
+    setIcon(icon, "tag");
+    host.appendChild(icon);
+    if (chosen === 0) return;
+    const count = doc.win.createSpan();
+    count.className = "spaces-create-tag-toggle-count";
+    count.textContent = chosen.toLocaleString();
+    // The accessible name already carries the number; announcing the digits
+    // again would say it twice.
+    count.setAttribute("aria-hidden", "true");
+    host.appendChild(count);
+  }
+
+  /**
+   * The tag body: a flat list drawn into the same box the tree uses.
+   *
+   * It holds one of two things, and `readPickerBody` decides which: an empty
+   * filter box shows the tags this space already has, so they can be reviewed
+   * and taken off; any text searches the vault's tags, so one can be found and
+   * added. Both are the same list with the same rows and the same gesture, and
+   * the icon and the sigil are two doors into it.
    *
    * Flat rather than nested even though tags nest, because `tagMatches` makes
    * a parent tag cover its children anyway — picking `project` already takes
@@ -1164,40 +1264,65 @@ export class CreateSpacePanel {
    * click through here, and without the number a tag is a name and nothing
    * else. Counted after the cap, never before it (see `countTagRows`).
    */
-  private renderTagRows(host: HTMLElement, query: string): void {
+  private renderTagBody(host: HTMLElement, view: PickerView): void {
     const doc = host.ownerDocument;
+    const reviewing = view.body === "tag-chosen";
     // A flat list of choices, not a tree, and several may be chosen at once.
+    // Multi-select is also what makes ONE gesture enough: in a multi-select
+    // listbox, activating a selected option deselects it, so a click means
+    // "turn this on or off" in both bodies and the review list needs no
+    // separate remove verb. The `x` on its rows names that gesture; it is not
+    // a second control.
     host.setAttribute("role", "listbox");
     host.setAttribute("aria-multiselectable", "true");
-    host.setAttribute("aria-label", "Choose tags");
+    host.setAttribute("aria-label", reviewing ? "Tags in this space" : "Choose tags");
     // The tree's count means nothing here; leaving it would report a stale
     // number against a list it was never about.
     this.renderOverflowNotice(0);
     host.replaceChildren();
 
-    // Named explicitly rather than inferred: `prepareFuzzySearch` returns
-    // `SearchResult | null`, and inference off a function-typed argument
-    // widens to the constraint, which then loses the `matches` that
-    // `renderResults` needs.
-    const hits = fuzzyTagCandidates<SearchResult>(this.deps.tags, query, prepareFuzzySearch);
     const message = (text: string): void => {
       const empty = doc.win.createDiv();
       empty.className = "spaces-create-tree-empty";
       empty.textContent = text;
       host.appendChild(empty);
     };
-    if (hits === null) {
-      // Null is the source saying it cannot list the vault's tags at all,
-      // which is how `nativeKnownTags` reports a missing private `getTags` —
-      // a return, not a throw, and the likelier of the two failures. The way
-      // out is the field in Settings, so say that rather than leaving an
-      // empty box to be read as "this vault has no tags".
-      message("Tags cannot be listed here. Add a tag from Settings, Contents.");
-      return;
-    }
-    if (hits.length === 0) {
-      message(query.trim() === "" ? "No tags in this vault yet" : "No matching tag");
-      return;
+
+    const chosenTags = this.chosenTags();
+    // Named explicitly rather than inferred: `prepareFuzzySearch` returns
+    // `SearchResult | null`, and inference off a function-typed argument
+    // widens to the constraint, which then loses the `matches` that
+    // `renderResults` needs.
+    let hits: TagHit<SearchResult>[];
+    if (reviewing) {
+      if (chosenTags.length === 0) {
+        message(`No tags yet. Type ${TAG_SIGIL} to search this vault's tags.`);
+        return;
+      }
+      // Uncapped and unranked, unlike the search below: these are the space's
+      // own members, and a limit here would hide a member with no other way
+      // left to reach it.
+      hits = chosenTags.map((tag) => ({ tag, match: null }));
+    } else {
+      const found = fuzzyTagCandidates<SearchResult>(
+        this.deps.tags,
+        view.query,
+        prepareFuzzySearch
+      );
+      if (found === null) {
+        // Null is the source saying it cannot list the vault's tags at all,
+        // which is how `nativeKnownTags` reports a missing private `getTags` —
+        // a return, not a throw, and the likelier of the two failures. The way
+        // out is the field in Settings, so say that rather than leaving an
+        // empty box to be read as "this vault has no tags".
+        message("Tags cannot be listed here. Add a tag from Settings, Contents.");
+        return;
+      }
+      if (found.length === 0) {
+        message(view.query.trim() === "" ? "No tags in this vault yet" : "No matching tag");
+        return;
+      }
+      hits = found;
     }
 
     // Reached once per render, not once per row: the accessor hands back the
@@ -1205,7 +1330,7 @@ export class CreateSpacePanel {
     const index = this.deps.tagIndex();
     const counted = countTagRows(hits, (tag) => index.pathsMatching(tag).length);
 
-    const chosen = new Set(this.state.items.flatMap((i) => (i.kind === "tag" ? [i.tag] : [])));
+    const chosen = new Set(chosenTags);
     for (const hit of counted) {
       const el = doc.win.createDiv();
       // Both classes: the tree's row rules are the layout, and the tag class
@@ -1217,17 +1342,20 @@ export class CreateSpacePanel {
       const selected = chosen.has(hit.tag);
       el.classList.toggle("is-selected", selected);
       el.setAttribute("aria-selected", String(selected));
+      if (reviewing) el.title = `Remove ${TAG_SIGIL}${hit.tag}`;
 
       const label = doc.win.createSpan();
       label.className = "spaces-create-tree-name";
       const sigil = doc.win.createSpan();
       sigil.className = "spaces-create-tag-sigil";
-      sigil.textContent = TAG_SIGIL;
+      // A Lucide tag, not a `#`: the same mark the window's corner carries, so
+      // one shape means "tag" everywhere in this panel.
+      setIcon(sigil, "tag");
       label.appendChild(sigil);
       const name = doc.win.createSpan();
-      // The sigil is a sibling rather than part of the highlighted text: the
-      // match positions are against the STORED tag, which has no `#`, and
-      // prefixing the text would put every one of them a character out.
+      // The icon is a sibling rather than part of the highlighted text: the
+      // match positions are against the STORED tag, and anything prefixed to
+      // it would put every one of them out by that much.
       if (hit.match) renderResults(name, hit.tag, hit.match);
       else name.textContent = hit.tag;
       label.appendChild(name);
@@ -1241,10 +1369,22 @@ export class CreateSpacePanel {
       count.textContent = tagCountLabel(hit.count);
       el.appendChild(count);
 
+      if (reviewing) {
+        // Decoration for the gesture the row already has, which is why it
+        // takes no focus and carries no label of its own: a real button inside
+        // a clickable row gives two targets for one action and a keyboard stop
+        // that undoes nothing new.
+        const remove = doc.win.createSpan();
+        remove.className = "spaces-create-tag-remove";
+        remove.setAttribute("aria-hidden", "true");
+        setIcon(remove, "x");
+        el.appendChild(remove);
+      }
+
       const choose = (): void => {
         this.state = toggleItem(this.state, { kind: "tag", tag: hit.tag });
         this.clearFault("root");
-        this.renderTagChips();
+        this.renderTagToggle();
         this.renderItemTree();
         this.refreshCreateButton();
         this.refreshModeLabels();
@@ -1258,53 +1398,6 @@ export class CreateSpacePanel {
         choose();
       });
       host.appendChild(el);
-    }
-  }
-
-  /**
-   * The chosen tags, as removable chips.
-   *
-   * The tree marks a chosen file or folder in place, so those need no chip.
-   * A tag has no row to mark, and the `#` list it was picked from disappears
-   * the moment the sigil is backspaced away — without this, the only evidence
-   * of a chosen tag would be the number on the Curated button.
-   *
-   * Folder mode draws none. It remembers `items` so switching back costs
-   * nothing (`setFolderMode`), but `toCreateOptions` submits the root alone,
-   * so showing them would advertise members the space will not have.
-   */
-  private renderTagChips(): void {
-    const host = this.chipsEl;
-    if (!host) return;
-    host.replaceChildren();
-    const tags = this.state.folderMode
-      ? []
-      : this.state.items.flatMap((i) => (i.kind === "tag" ? [i.tag] : []));
-    // Hidden rather than empty, so the gap the flex column puts around it
-    // does not open up under a picker holding no tags.
-    host.classList.toggle("is-empty", tags.length === 0);
-    for (const tag of tags) {
-      const chip = host.ownerDocument.win.createEl("button");
-      chip.type = "button";
-      chip.className = "spaces-create-chip";
-      chip.dataset.tag = tag;
-      chip.setAttribute("aria-label", `Remove ${TAG_SIGIL}${tag}`);
-      const text = host.ownerDocument.win.createSpan();
-      text.textContent = `${TAG_SIGIL}${tag}`;
-      chip.appendChild(text);
-      const cross = host.ownerDocument.win.createSpan();
-      cross.className = "spaces-create-chip-x";
-      setIcon(cross, "x");
-      chip.appendChild(cross);
-      chip.addEventListener("click", () => {
-        this.state = toggleItem(this.state, { kind: "tag", tag });
-        this.renderTagChips();
-        // The `#` list may be on screen with this tag marked selected.
-        this.renderItemTree();
-        this.refreshCreateButton();
-        this.refreshModeLabels();
-      });
-      host.appendChild(chip);
     }
   }
 

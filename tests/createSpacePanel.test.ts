@@ -678,7 +678,8 @@ describe("the # sigil in the filter box", () => {
    * assertion can be written against a fake algorithm. The ranking itself is
    * tested where the scorer is injected, in `fuzzyTagCandidates.test.ts`; what
    * is left for this file is the WIRING, and a bare `#` exercises all of it —
-   * the mode switch, the rows, the pick, the chip and the way back.
+   * the mode switch, the rows, the pick, the count on the icon and the way
+   * back.
    */
   const filterFor = (text: string): void => {
     const f = byKey("item-filter") as HTMLInputElement;
@@ -692,8 +693,7 @@ describe("the # sigil in the filter box", () => {
     if (!row) throw new Error(`no tag row for ${tag}; have ${tagRows().map((r) => r.dataset.tag)}`);
     return row;
   };
-  const chips = (): HTMLElement[] =>
-    Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-chip"));
+  const tagToggle = (): HTMLElement => byKey("tag-toggle");
 
   const openCurated = (): void => {
     byKey("create").click();
@@ -764,35 +764,34 @@ describe("the # sigil in the filter box", () => {
     expect(tagRowFor("project").getAttribute("aria-selected")).toBe("false");
   });
 
-  it("keeps a chosen tag on screen once the tag list is gone", () => {
+  it("says a tag was chosen once the tag list is gone", () => {
     // The tree marks a chosen file in place; a tag has no row anywhere to
-    // mark, so without the chip the only trace of it would be a number.
+    // mark. The row of chips that used to carry it is gone, so the count on
+    // the window's icon is the whole of what is left to say so.
     makeHarness();
     openCurated();
     filterFor("#");
     tagRowFor("project").click();
     filterFor("");
-    expect(chips().map((c) => c.textContent)).toEqual(["#project"]);
+    expect(panelEl().querySelector("[role='tree']")).not.toBeNull();
+    expect(tagToggle().textContent).toBe("1");
+    expect(tagToggle().getAttribute("aria-label")).toBe("Show tags, 1 chosen");
   });
 
-  it("removes a tag from its chip", () => {
-    const h = makeHarness();
+  it("says nothing on the icon while no tag is chosen", () => {
+    // A badge reading zero is chrome the tree body did not ask for, which is
+    // the whole charge against the row this replaced.
+    makeHarness();
     openCurated();
-    typeName("Work");
-    filterFor("#");
-    tagRowFor("project").click();
-    filterFor("");
-    chips()[0]?.click();
-    expect(chips()).toEqual([]);
-    byKey("create").click();
-    expect(h.submitted[0]?.opts.members).toEqual([]);
+    expect(tagToggle().textContent).toBe("");
+    expect(tagToggle().getAttribute("aria-label")).toBe("Show tags");
   });
 
-  it("leaves file and folder members to the tree, with no chip of their own", () => {
+  it("leaves file and folder members to the tree, with no count of their own", () => {
     makeHarness();
     openCurated();
     rowFor("inbox.md").click();
-    expect(chips()).toEqual([]);
+    expect(tagToggle().textContent).toBe("");
     expect(rowFor("inbox.md").getAttribute("aria-selected")).toBe("true");
   });
 
@@ -889,5 +888,149 @@ describe("the # sigil in the filter box", () => {
     const row = tagRowFor("archive");
     row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(tagRowFor("archive").getAttribute("aria-selected")).toBe("true");
+  });
+
+  describe("the tag icon in the window's corner", () => {
+    it("sits inside the explorer window, not beside it", () => {
+      // The whole constraint this prototype is built under: the pane keeps the
+      // two mode buttons and the one window, and anything new goes in the
+      // window's own corner.
+      makeHarness();
+      openCurated();
+      const window_ = panelEl().querySelector(".spaces-create-tree-wrap");
+      expect(window_?.contains(tagToggle())).toBe(true);
+    });
+
+    it("swaps the window over to tags, and back", () => {
+      // The sigil is undiscoverable, so the icon is the door someone can see.
+      makeHarness();
+      openCurated();
+      expect(panelEl().querySelector("[role='tree']")).not.toBeNull();
+      tagToggle().click();
+      expect(panelEl().querySelector("[role='tree']")).toBeNull();
+      expect(panelEl().querySelector("[role='listbox']")).not.toBeNull();
+      tagToggle().click();
+      expect(panelEl().querySelector("[role='tree']")).not.toBeNull();
+      expect(rows().length).toBeGreaterThan(0);
+    });
+
+    it("says which of the two it is showing", () => {
+      makeHarness();
+      openCurated();
+      expect(tagToggle().getAttribute("aria-pressed")).toBe("false");
+      tagToggle().click();
+      expect(tagToggle().getAttribute("aria-pressed")).toBe("true");
+      expect(tagToggle().getAttribute("aria-label")).toBe("Show files and folders");
+    });
+
+    it("tells you how to search when nothing has been chosen yet", () => {
+      // The resting body is the review list, which is empty before anything is
+      // picked. An empty box there would read as a broken view rather than as
+      // a space with no tags in it.
+      makeHarness();
+      openCurated();
+      tagToggle().click();
+      const empty = panelEl().querySelector(".spaces-create-tree-empty");
+      expect(empty?.textContent).toBe("No tags yet. Type # to search this vault's tags.");
+    });
+
+    it("rests on the tags already chosen, with their counts", () => {
+      // The answer to "there should be a better way to let someone see which
+      // tags are selected": they live in the window instead of above it.
+      makeHarness();
+      openCurated();
+      filterFor("#");
+      tagRowFor("project").click();
+      tagRowFor("archive").click();
+      filterFor("");
+      tagToggle().click();
+      expect(tagRows().map((r) => r.dataset.tag)).toEqual(["project", "archive"]);
+      expect(tagRowFor("project").querySelector(".spaces-create-tag-count")?.textContent).toBe(
+        "2 notes"
+      );
+      // Every row here is a member, so every row reads as chosen.
+      expect(tagRows().map((r) => r.getAttribute("aria-selected"))).toEqual(["true", "true"]);
+    });
+
+    it("removes a chosen tag when its row is clicked", () => {
+      // One gesture, both bodies: in a multi-select listbox, activating a
+      // selected option deselects it, so the review list needs no second verb
+      // and the row's `x` is a label for the click rather than a control.
+      const h = makeHarness();
+      openCurated();
+      typeName("Work");
+      filterFor("#");
+      tagRowFor("project").click();
+      filterFor("");
+      tagToggle().click();
+      expect(tagRowFor("project").title).toBe("Remove #project");
+      tagRowFor("project").click();
+      expect(tagRows()).toEqual([]);
+      expect(tagToggle().textContent).toBe("");
+      byKey("create").click();
+      expect(h.submitted[0]?.opts.members).toEqual([]);
+    });
+
+    it("removes with the keyboard too", () => {
+      makeHarness();
+      openCurated();
+      filterFor("#");
+      tagRowFor("archive").click();
+      filterFor("");
+      tagToggle().click();
+      tagRowFor("archive").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+      );
+      expect(tagRows()).toEqual([]);
+    });
+
+    it("searches the vault as soon as the box has text, with no sigil", () => {
+      // The icon has already said "tags", so asking for the sigil as well
+      // would be a second way of saying it. This vault has no tag matching
+      // "inbox", which reaches the search without asking the stub to score.
+      makeHarness({ tags: { knownTags: () => [] } });
+      openCurated();
+      tagToggle().click();
+      filterFor("inbox");
+      expect(panelEl().querySelector("[role='listbox']")).not.toBeNull();
+      expect(panelEl().querySelector(".spaces-create-tree-empty")?.textContent).toBe(
+        "No matching tag"
+      );
+      filterFor("");
+      expect(panelEl().querySelector(".spaces-create-tree-empty")?.textContent).toMatch(/No tags/);
+    });
+
+    it("drops a sigil the box is still carrying when it is pressed off", () => {
+      // Otherwise the text holds the window in tag mode against the control
+      // that has just said to leave it, and the icon looks dead.
+      makeHarness({ tags: { knownTags: () => [] } });
+      openCurated();
+      filterFor("#inbox");
+      expect(panelEl().querySelector("[role='listbox']")).not.toBeNull();
+      tagToggle().click();
+      tagToggle().click();
+      expect((byKey("item-filter") as HTMLInputElement).value).toBe("inbox");
+      expect(panelEl().querySelector("[role='tree']")).not.toBeNull();
+      expect(rows().map((r) => r.dataset.path)).toEqual(["inbox.md"]);
+    });
+
+    it("is not offered in folder mode", () => {
+      // A folder space is a window onto one root, and a tag is not one, which
+      // is the same reason the sigil is ignored there.
+      makeHarness();
+      byKey("create").click();
+      byKey("mode-folder").click();
+      expect(panelEl().querySelector("[data-focus-key='tag-toggle']")).toBeNull();
+    });
+
+    it("asks the index nothing until tags are on screen", () => {
+      const h = makeHarness();
+      openCurated();
+      expect(h.reached).toBe(0);
+      tagToggle().click();
+      // Nothing chosen, so there is no row to count and no reason to look.
+      expect(h.reached).toBe(0);
+      expect(h.counted).toEqual([]);
+    });
   });
 });
