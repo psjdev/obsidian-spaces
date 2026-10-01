@@ -870,14 +870,14 @@ export class CreateSpacePanel {
       // Folder mode is offered neither button, for the reason it is offered no
       // sigil: a folder space is a window onto one root, and a tag is not one.
       this.pickerModeEls.clear();
+      let bodies: HTMLElement | null = null;
       if (!this.state.folderMode) {
-        const bodies = doc.win.createDiv();
+        bodies = doc.win.createDiv();
         bodies.className = "spaces-create-bodies";
         bodies.setAttribute("role", "group");
         bodies.setAttribute("aria-label", "What the window below shows");
         bodies.appendChild(this.bodyBtn(doc, "items", "Items", "folder-tree", ITEMS_SIGIL));
         bodies.appendChild(this.bodyBtn(doc, "tags", "Tags", "tag", TAG_SIGIL));
-        view.appendChild(bodies);
       }
 
       const windowEl = doc.win.createDiv();
@@ -915,6 +915,11 @@ export class CreateSpacePanel {
       });
       this.filterEl = filter;
       view.appendChild(filter);
+      // Under the box they act on, between it and the list they switch. A
+      // sibling of the window rather than a child: the filter is a sibling
+      // too, so the buttons stay in the same column as the box, and the window
+      // keeps exactly two children (the scrolling list and the pinned row).
+      if (bodies) view.appendChild(bodies);
 
       // Rows live in their own child so redrawing them cannot disturb the box
       // around them. The role belongs HERE rather than on the box: ARIA

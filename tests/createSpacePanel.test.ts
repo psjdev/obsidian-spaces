@@ -668,7 +668,7 @@ describe("the picker reads the vault once per session", () => {
   });
 });
 
-describe("the Items and Tags buttons above the window", () => {
+describe("the Items and Tags buttons under the filter box", () => {
   /**
    * Every test that reaches the tag list reaches it with an EMPTY filter box.
    *
@@ -708,7 +708,7 @@ describe("the Items and Tags buttons above the window", () => {
   };
   const showTags = (): void => byKey("body-tags").click();
 
-  it("sit above the window rather than inside it", () => {
+  it("sit under the filter box and above the window, not inside it", () => {
     // The relaxation this prototype is built on: the pane gets two more
     // buttons, and in exchange nothing has to be guessed at or typed blind.
     makeHarness();
@@ -718,6 +718,9 @@ describe("the Items and Tags buttons above the window", () => {
     expect(window_?.contains(byKey("body-tags"))).toBe(false);
     const items = panelEl().querySelector(".spaces-create-items");
     expect(items?.contains(byKey("body-tags"))).toBe(true);
+    const group = panelEl().querySelector(".spaces-create-bodies");
+    expect(group?.previousElementSibling).toBe(byKey("item-filter"));
+    expect(group?.nextElementSibling).toBe(window_);
   });
 
   it("opens on Items", () => {
