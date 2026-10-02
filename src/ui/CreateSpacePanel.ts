@@ -335,7 +335,7 @@ export class CreateSpacePanel {
   private sigilFlashOff: (() => void) | null = null;
 
   /**
-   * The Items and Tags buttons, kept so a mode reached by the sigil can press
+   * The Vault and Tags buttons, kept so a mode reached by the sigil can press
    * the right one without redrawing the pair.
    */
   private pickerModeEls = new Map<PickerMode, HTMLElement>();
@@ -996,7 +996,7 @@ export class CreateSpacePanel {
         bodies.className = "spaces-create-bodies";
         bodies.setAttribute("role", "group");
         bodies.setAttribute("aria-label", "What the window below shows");
-        bodies.appendChild(this.bodyBtn(doc, "items", "Items", "folder-tree", ITEMS_SIGIL));
+        bodies.appendChild(this.bodyBtn(doc, "items", "Vault", "folder-tree", ITEMS_SIGIL));
         bodies.appendChild(this.bodyBtn(doc, "tags", "Tags", "tag", TAG_SIGIL));
       }
 
@@ -1048,8 +1048,11 @@ export class CreateSpacePanel {
       // requires treeitems to be owned by the tree, and with an unroled div in
       // between assistive tech reported a tree of zero items and a pile of
       // orphaned rows. Both bodies are trees now, but they differ on
-      // `aria-multiselectable` and on the label, so `renderPickerBody` still
-      // sets the lot rather than leaving a stale one behind after a switch.
+      // `aria-multiselectable` and on the label, so each body sets both on every
+      // draw rather than leaving a stale one behind after a switch. The empty
+      // message is NOT a child of this box: it is drawn as its sibling inside the
+      // scrolling list (`setEmptyMessage`), because a tree whose child is not a
+      // treeitem is the orphan problem this comment describes.
       const rowsEl = doc.win.createDiv();
       rowsEl.className = "spaces-create-tree-rows";
       // The list scrolls, the window does not. That is what lets the summary
@@ -1067,7 +1070,9 @@ export class CreateSpacePanel {
       const summary = doc.win.createDiv();
       summary.className = "spaces-create-summary";
       // Announced when it changes, because the thing that changed it may have
-      // been a click in a list the user is not reading.
+      // been a click in a list the user is not reading. It is the only element
+      // in the panel with this role: the overflow notice that once had its own
+      // is a treeitem row now, and the empty-state message has none.
       summary.setAttribute("role", "status");
       windowEl.appendChild(summary);
       this.summaryEl = summary;
@@ -1141,11 +1146,35 @@ export class CreateSpacePanel {
   private renderPickerBody(revealSelection = false): void {
     const host = this.treeEl;
     if (!host) return;
+    // Every draw starts with no message, so a body that has rows never inherits
+    // the previous draw's "No match". A body with nothing to show sets its own.
+    this.setEmptyMessage(host, null);
     if (readPickerBody(this.pickerMode, this.state.folderMode) === "tags") {
       this.renderTagBody(host, this.itemFilter);
       return;
     }
     this.renderItemBody(host, revealSelection);
+  }
+
+  /**
+   * Shows, replaces or removes the picker's empty-state message.
+   *
+   * It is a sibling of `host`, not a child. `host` is the `role="tree"` box, and
+   * a child of a tree that is not a treeitem is reported by assistive tech as a
+   * stray node in a tree it does not belong to. The message sits right after the
+   * tree, inside the same scrolling list, so it reads and scrolls where the
+   * rows would have been. At most one exists: any earlier one is removed first.
+   * Pass null to remove it.
+   */
+  private setEmptyMessage(host: HTMLElement, text: string | null): void {
+    host.parentElement
+      ?.querySelectorAll(":scope > .spaces-create-tree-empty")
+      .forEach((el) => el.remove());
+    if (text === null) return;
+    const empty = host.ownerDocument.win.createDiv();
+    empty.className = "spaces-create-tree-empty";
+    empty.textContent = text;
+    host.after(empty);
   }
 
   /**
@@ -1190,10 +1219,18 @@ export class CreateSpacePanel {
     // Set every time rather than once at build: the box is the SAME element in
     // both modes, so coming back from the tag list has to undo what that left
     // behind. A `role="tree"` still carrying `aria-multiselectable` reads as a
-    // multi-select tree, which this is not in folder mode.
+    // multi-select tree, which this is not in folder mode, and one without it
+    // reads as single-select, which this is not in curated mode.
     host.setAttribute("role", "tree");
-    host.removeAttribute("aria-multiselectable");
-    host.setAttribute("aria-label", this.state.folderMode ? "Choose a folder" : "Choose items");
+    // Curated mode holds any number of notes and folders; folder mode holds one
+    // root. Removing the attribute in both said single-select for a tree that
+    // is not, in the mode where it is not.
+    if (this.state.folderMode) host.removeAttribute("aria-multiselectable");
+    else host.setAttribute("aria-multiselectable", "true");
+    host.setAttribute(
+      "aria-label",
+      this.state.folderMode ? "Choose a folder" : "Choose notes and folders"
+    );
     const src = this.deps.folders;
     const tree = (this.vaultTree ??= buildVaultTree(
       src
@@ -1225,13 +1262,12 @@ export class CreateSpacePanel {
 
     host.replaceChildren();
     if (rows.length === 0) {
-      const empty = doc.win.createDiv();
-      empty.className = "spaces-create-tree-empty";
       // Distinguishes "your filter matched nothing" from "there is nothing
       // here" — identical as an empty box, different things to do about it.
-      empty.textContent =
-        this.itemFilter.trim() === "" ? "Nothing in this vault yet" : "No match";
-      host.appendChild(empty);
+      this.setEmptyMessage(
+        host,
+        this.itemFilter.trim() === "" ? "Nothing in this vault yet" : "No match"
+      );
       return;
     }
 
@@ -1255,7 +1291,7 @@ export class CreateSpacePanel {
         coveringFolders === null ? null : coveringFolderIn(coveringFolders, row.path),
       coveredTitle: (by) =>
         `Already included by the selected folder ${by}. ` +
-        "Deselect that folder to pick items under it one at a time.",
+        "Deselect that folder to pick notes and folders under it one at a time.",
       budgetClosedTitle: () =>
         "There is no room to show what is inside this folder. " +
         (this.itemFilter.trim() !== "" ? "Narrow the filter to make room." : "Close other folders to make room."),
@@ -1570,6 +1606,14 @@ export class CreateSpacePanel {
     this.paintPickerModes();
     this.renderPlaceholder();
     this.renderPickerBody();
+    // The buttons are `aria-pressed`, which a screen reader says when focus is
+    // on them, but the sigil switches from the filter box with focus staying
+    // there, and the tree's own label changes without being announced. The
+    // summary is the one live region, so the switch is written into it. The
+    // next draw of the summary (a pick) replaces the sentence.
+    this.renderSummary(
+      mode === "tags" ? "Showing tags" : "Showing notes and folders"
+    );
   }
 
   /** Marks the button whose body is on screen, for the eye and for ARIA. */
@@ -1613,8 +1657,12 @@ export class CreateSpacePanel {
    *
    * Redrawn in place rather than through `render()`, so picking does not
    * rebuild the window under the pointer that just clicked inside it.
+   *
+   * `announce` is a lead sentence for the draw that follows a switch of body,
+   * prefixed to the figures. Only `setPickerMode` passes it; every other draw
+   * leaves it out and so replaces the sentence.
    */
-  private renderSummary(): void {
+  private renderSummary(announce?: string): void {
     const host = this.summaryEl;
     if (!host) return;
     const picked = this.pickedMembers();
@@ -1629,7 +1677,8 @@ export class CreateSpacePanel {
       index ??= this.deps.tagIndex();
       return index.pathsMatching(tag);
     }).notes;
-    host.textContent = pickedSummary(counts, notes);
+    const summary = pickedSummary(counts, notes);
+    host.textContent = announce === undefined ? summary : `${announce}. ${summary}`;
   }
 
   /**
@@ -1689,7 +1738,7 @@ export class CreateSpacePanel {
    */
   private renderTagBody(host: HTMLElement, query: string): void {
     const doc = host.ownerDocument;
-    // A tree, like the body the Items button shows, because tags nest. Still
+    // A tree, like the body the Vault button shows, because tags nest. Still
     // multi-select, and multi-select is what makes ONE gesture enough:
     // activating a selected row deselects it, so a click means "turn this on
     // or off" here exactly as it does in the item tree.
@@ -1698,12 +1747,7 @@ export class CreateSpacePanel {
     host.setAttribute("aria-label", "Choose tags");
     host.replaceChildren();
 
-    const message = (text: string): void => {
-      const empty = doc.win.createDiv();
-      empty.className = "spaces-create-tree-empty";
-      empty.textContent = text;
-      host.appendChild(empty);
-    };
+    const message = (text: string): void => this.setEmptyMessage(host, text);
 
     // Every tag, uncapped: a cap here would drop whole branches rather than
     // the rows at the bottom of what is drawn.
