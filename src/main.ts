@@ -1709,7 +1709,9 @@ export default class SpacesPlugin extends Plugin {
         buildPreview(
           this.controller.vaultIndex(),
           compileIgnore(this.defs.get().settings.globalIgnore),
-          this.controller.tagIndex()
+          // Reached per lookup, so a selection with no tag member never asks
+          // the controller for the index at all.
+          { pathsMatching: (tag) => this.controller.tagIndex().pathsMatching(tag) }
         )(members),
       // The engine's own index, for resolving a stored member to a live path.
       vaultIndex: () => this.controller.vaultIndex(),

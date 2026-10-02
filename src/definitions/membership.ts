@@ -43,11 +43,22 @@ export function coveringFolder(
 }
 
 /**
- * Sets `memberFolderSet` built from LIVE paths, which `coveringFolderIn`
- * must compare exactly. A set is just strings, so the only way to tell a live
- * one from a folded one is to remember which it made.
+ * The folder members, with the rule `coveringFolderIn` must use on them.
+ *
+ * The mode travels WITH the set rather than being remembered elsewhere or
+ * passed separately to the lookup. A copy, a filter or a cache of `folders`
+ * would otherwise lose it and silently fall back to folding, which is the
+ * defect this exists to prevent; carried in the value, a copy keeps it, and a
+ * bare `Set` handed to `coveringFolderIn` is a compile error.
  */
-const liveFolderSets = new WeakSet<ReadonlySet<string>>();
+export interface FolderSet {
+  folders: ReadonlySet<string>;
+  /**
+   * True when `folders` holds LIVE paths and the lookup must compare exactly.
+   * False when it holds folded spellings and the lookup folds each ancestor.
+   */
+  exact: boolean;
+}
 
 /**
  * The folder members, ready for `coveringFolderIn`.
@@ -72,38 +83,32 @@ const liveFolderSets = new WeakSet<ReadonlySet<string>>();
 export function memberFolderSet(
   members: readonly MemberEntry[],
   vault?: Pick<VaultIndex, "exists" | "childrenOf">
-): Set<string> {
-  const out = new Set<string>();
+): FolderSet {
+  const folders = new Set<string>();
   for (const m of members) {
     if (m.kind !== "folder") continue;
     if (vault === undefined) {
-      out.add(canonicalPath(m.path));
+      folders.add(canonicalPath(m.path));
       continue;
     }
     const live = resolveLivePath(vault, m.path);
-    if (live !== null) out.add(live);
+    if (live !== null) folders.add(live);
   }
-  if (vault !== undefined) liveFolderSets.add(out);
-  return out;
+  return { folders, exact: vault !== undefined };
 }
 
 /**
  * `coveringFolder` against an already-built folder set.
  *
  * The LIVE ancestor is returned, not the stored spelling, because that is
- * what the caller is labelling. A set from `memberFolderSet(members, vault)`
- * is compared exactly; one built without a vault holds folded spellings, so
- * each ancestor is folded to match it.
+ * what the caller is labelling. An exact set is compared exactly; a folded one
+ * holds folded spellings, so each ancestor is folded to match it.
  */
-export function coveringFolderIn(
-  folders: ReadonlySet<string>,
-  path: string
-): string | null {
-  const exact = liveFolderSets.has(folders);
+export function coveringFolderIn(set: FolderSet, path: string): string | null {
   const ancestors = ancestorsOf(path);
   for (let i = ancestors.length - 1; i >= 0; i--) {
-    const key = exact ? ancestors[i] : canonicalPath(ancestors[i]);
-    if (folders.has(key)) return ancestors[i];
+    const key = set.exact ? ancestors[i] : canonicalPath(ancestors[i]);
+    if (set.folders.has(key)) return ancestors[i];
   }
   return null;
 }

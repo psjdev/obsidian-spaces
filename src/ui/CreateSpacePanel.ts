@@ -154,6 +154,11 @@ export interface CreateSpacePanelDeps {
    * asks which folder covers a row. `folders` cannot answer that: it lists
    * paths and kinds, and has no way to ask what is directly under a folder.
    * A function for the reason `tagIndex` is one.
+   *
+   * The rows come from `folders`, the live vault, while coverage comes from
+   * this index, the engine's snapshot. For up to the coalescer's window a
+   * freshly created folder can therefore be drawn but not yet resolve, and
+   * covers nothing until the snapshot catches up. Bounded and self-correcting.
    */
   vaultIndex: () => VaultIndex;
   /**

@@ -79,4 +79,45 @@ describe("the create panel's preview runs the engine's own resolution", () => {
     const want = includedPaths(vault, ["Projects", "Top.md"], ignore, new Set()).included;
     expect([...got.paths].sort()).toEqual([...want].sort());
   });
+
+  it("counts two spellings of one note once, as a recompute does", () => {
+    // A case-sensitive filesystem can hold both. resolveMembers keys its
+    // de-duplication on the folded path, so the first spelling wins and the
+    // second never reaches the engine.
+    const vault = vaultOf([
+      ["Docs", "folder"],
+      ["Docs/a.md", "file"],
+      ["docs", "folder"],
+      ["docs/a.md", "file"],
+    ]);
+    const p = buildPreview(vault, compileIgnore([]), tagIndex({ t: ["docs/a.md"] }));
+    expect(
+      p([
+        { kind: "file", path: "Docs/a.md" },
+        { kind: "file", path: "docs/a.md" },
+      ]).notes
+    ).toBe(1);
+    expect(
+      p([
+        { kind: "file", path: "Docs/a.md" },
+        { kind: "tag", tag: "t" },
+      ]).notes
+    ).toBe(1);
+  });
+
+  it("counts two spellings of one folder member once, as a recompute does", () => {
+    const vault = vaultOf([
+      ["Docs", "folder"],
+      ["Docs/a.md", "file"],
+      ["docs", "folder"],
+      ["docs/b.md", "file"],
+    ]);
+    const p = buildPreview(vault, compileIgnore([]), tagIndex({}));
+    expect(
+      p([
+        { kind: "folder", path: "Docs" },
+        { kind: "folder", path: "docs" },
+      ]).notes
+    ).toBe(1);
+  });
 });
