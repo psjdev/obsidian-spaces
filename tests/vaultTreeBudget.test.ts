@@ -85,7 +85,8 @@ describe("the picker's row budget", () => {
     // Three roots use the whole budget, so Afat's children get no slot at all
     // and neither does a marker. Drawing Afat expanded with nothing under it
     // would tell a screen reader the branch is open and empty, which is false.
-    // It is drawn closed instead: true, and clicking it reallocates the budget.
+    // It is drawn closed and flagged `budgetClosed` instead, so the panel can
+    // draw a leaf that says why rather than a caret that does nothing.
     const tree = vaultWithFatBranch(5);
     const rows = visibleRows(tree, {
       expanded: new Set(["Afat"]),
@@ -95,7 +96,12 @@ describe("the picker's row budget", () => {
     });
     expect(rows).toHaveLength(3);
     expect(rows.some((r) => r.kind === "overflow")).toBe(false);
-    expect(rows[0]).toMatchObject({ path: "Afat", hasChildren: true, expanded: false });
+    expect(rows[0]).toMatchObject({
+      path: "Afat",
+      hasChildren: true,
+      expanded: false,
+      budgetClosed: true,
+    });
   });
 
   it("holds the budget on one folder of 199 folders, filtered or opened by hand", () => {
@@ -212,6 +218,10 @@ describe("the picker's row budget, over generated trees", () => {
       //    than one level above the deepest row drawn.
       for (const r of drawn) {
         const ref = reference.find((x) => x.path === r.path);
+        // Flagged exactly when the budget, not the user, kept it closed.
+        expect(Boolean(r.budgetClosed), `${where}, flag on ${r.path}`).toBe(
+          Boolean(ref?.expanded && !r.expanded)
+        );
         if (ref?.expanded && !r.expanded) {
           expect(maxDepth, `${where}, closed ${r.path}`).toBeLessThanOrEqual(r.depth + 1);
         }

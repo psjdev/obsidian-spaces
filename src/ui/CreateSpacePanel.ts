@@ -1169,7 +1169,7 @@ export class CreateSpacePanel {
       // Both states, not just the true one: a treeitem with no `aria-selected`
       // reads as "not selectable" rather than "not selected".
       el.setAttribute("aria-selected", String(row.selected));
-      if (row.hasChildren) el.setAttribute("aria-expanded", String(row.expanded));
+      if (row.hasChildren && !row.budgetClosed) el.setAttribute("aria-expanded", String(row.expanded));
       // Everything under a selected folder is already in the space, at every
       // depth, and the folder is the row directly above its children, so the
       // tint states a fact about the tree on screen. Picked wins over covered:
@@ -1201,9 +1201,19 @@ export class CreateSpacePanel {
         );
       }
 
+      if (row.budgetClosed) {
+        // A leaf that says why, like the covered row above: the state is
+        // visible and the title carries the reason. It may share a title with
+        // the covered one, so the two are joined rather than one overwriting.
+        const why =
+          "There is no room to show what is inside this folder. " +
+          "Narrow the filter or close other folders to make room.";
+        el.title = el.title === "" ? why : `${el.title} ${why}`;
+      }
+
       const caret = doc.win.createSpan();
       caret.className = "spaces-create-tree-caret";
-      if (row.hasChildren) {
+      if (row.hasChildren && !row.budgetClosed) {
         setIcon(caret, row.expanded ? "chevron-down" : "chevron-right");
         // Hidden from assistive tech rather than labelled as a button: it
         // takes no focus, and the row's `aria-expanded` already carries the
@@ -1232,7 +1242,7 @@ export class CreateSpacePanel {
       el.appendChild(label);
 
       const setExpanded = (open: boolean): void => {
-        if (!row.hasChildren) return;
+        if (!row.hasChildren || row.budgetClosed) return;
         if (open) this.expandedFolders.add(row.path);
         else this.expandedFolders.delete(row.path);
         this.renderItemTree();
@@ -1263,7 +1273,7 @@ export class CreateSpacePanel {
         // Arrows browse, Enter and Space pick — the same split the caret and
         // the row body draw for the mouse, so expanding never selects.
         if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-          if (!row.hasChildren) return;
+          if (!row.hasChildren || row.budgetClosed) return;
           e.preventDefault();
           setExpanded(e.key === "ArrowRight");
           return;
@@ -1598,14 +1608,17 @@ export class CreateSpacePanel {
     // Reached once per draw, not once per row: the accessor hands back the
     // engine's current snapshot, and `pathsMatching` is a map lookup on it.
     const index = this.deps.tagIndex();
-    // Overflow rows have no tag, so they carry an empty one that `countOf`
-    // never looks up, and ride through in order alongside the tag rows.
-    const counted = countTagRows(
-      rows.map((row) => ({ ...row, tag: row.kind === "overflow" ? "" : row.path })),
-      (tag) => (tag === "" ? 0 : index.pathsMatching(tag).length)
+    // Only tag rows are counted: an overflow row is not a tag, so it never
+    // reaches the counter, and the results are looked up by path as the loop
+    // meets each row.
+    const counts = new Map(
+      countTagRows(
+        rows.flatMap((row) => (row.kind === "overflow" ? [] : [{ ...row, tag: row.path }])),
+        (tag) => index.pathsMatching(tag).length
+      ).map((row) => [row.path, row.count])
     );
 
-    for (const row of counted) {
+    for (const row of rows) {
       if (row.kind === "overflow") {
         const el = doc.win.createDiv();
         el.className = "spaces-create-tree-row is-overflow";
@@ -1620,19 +1633,20 @@ export class CreateSpacePanel {
         host.appendChild(el);
         continue;
       }
+      const tag = row.path;
       const el = doc.win.createDiv();
       // Both classes: the tree's row rules are the layout, and the tag class
       // carries only what differs.
       el.className = "spaces-create-tree-row spaces-create-tag-row";
       el.setAttribute("role", "treeitem");
       el.tabIndex = 0;
-      el.dataset.tag = row.tag;
+      el.dataset.tag = tag;
       // The caret's slot is reserved even on a childless row, so names stay in
       // one column instead of jittering by level.
       el.style.paddingLeft = `${row.depth * 14}px`;
       el.classList.toggle("is-selected", row.selected);
       el.setAttribute("aria-selected", String(row.selected));
-      if (row.hasChildren) el.setAttribute("aria-expanded", String(row.expanded));
+      if (row.hasChildren && !row.budgetClosed) el.setAttribute("aria-expanded", String(row.expanded));
       // A selected tag covers its children through `tagMatches`, and here the
       // parent is the row directly above them, so the tint states a fact about
       // the tree on screen. That is the whole difference from the item tree,
@@ -1644,7 +1658,7 @@ export class CreateSpacePanel {
       // Picked wins over covered: a tag chosen by hand is a member in its own
       // right and still removable, and reading it as inherited would hide the
       // entry it is.
-      const coveringTag = row.selected ? null : coveringTagIn(chosen, row.tag);
+      const coveringTag = row.selected ? null : coveringTagIn(chosen, tag);
       el.classList.toggle("is-inherited", coveringTag !== null);
       if (coveringTag !== null) {
         // `aria-disabled` rather than the tint alone, for the reason the item
@@ -1662,12 +1676,23 @@ export class CreateSpacePanel {
         // The row toggles, so a selected one is offering to come off. Said in
         // a tooltip rather than in a second control: a real remove button
         // inside a clickable row gives two targets for one action.
-        el.title = `Remove ${TAG_SIGIL}${row.tag}`;
+        el.title = `Remove ${TAG_SIGIL}${tag}`;
+      }
+
+      if (row.budgetClosed) {
+        // A leaf that says why, like the covered row above: the state is
+        // visible and the title carries the reason. It may share a title with
+        // the covered or removable one, so they are joined rather than one
+        // overwriting.
+        const why =
+          "There is no room to show what is inside this tag. " +
+          "Narrow the filter or close other tags to make room.";
+        el.title = el.title === "" ? why : `${el.title} ${why}`;
       }
 
       const caret = doc.win.createSpan();
       caret.className = "spaces-create-tree-caret";
-      if (row.hasChildren) {
+      if (row.hasChildren && !row.budgetClosed) {
         setIcon(caret, row.expanded ? "chevron-down" : "chevron-right");
         // Hidden from assistive tech rather than labelled as a button: it
         // takes no focus, and the row's `aria-expanded` already carries the
@@ -1678,8 +1703,8 @@ export class CreateSpacePanel {
           // too, which is what lets someone look inside a branch a selected
           // parent already takes.
           e.stopPropagation();
-          if (this.expandedTags.has(row.tag)) this.expandedTags.delete(row.tag);
-          else this.expandedTags.add(row.tag);
+          if (this.expandedTags.has(tag)) this.expandedTags.delete(tag);
+          else this.expandedTags.add(tag);
           this.renderItemTree();
         });
       }
@@ -1712,15 +1737,15 @@ export class CreateSpacePanel {
       // count: a note tagged only `project/atlas` is in the figure for both.
       const count = doc.win.createSpan();
       count.className = "spaces-create-tag-count";
-      count.textContent = tagCountLabel(row.count);
+      count.textContent = tagCountLabel(counts.get(tag) ?? 0);
       el.appendChild(count);
 
       const setExpanded = (open: boolean): void => {
-        if (!row.hasChildren) return;
-        if (open) this.expandedTags.add(row.tag);
-        else this.expandedTags.delete(row.tag);
+        if (!row.hasChildren || row.budgetClosed) return;
+        if (open) this.expandedTags.add(tag);
+        else this.expandedTags.delete(tag);
         this.renderItemTree();
-        const again = host.querySelector<HTMLElement>(`[data-tag="${CSS.escape(row.tag)}"]`);
+        const again = host.querySelector<HTMLElement>(`[data-tag="${CSS.escape(tag)}"]`);
         again?.focus();
       };
 
@@ -1732,7 +1757,7 @@ export class CreateSpacePanel {
         // An invented intermediate is as selectable as any other row. Nobody
         // may have tagged a note `area`, but `area` matches everything beneath
         // it, which is exactly what picking it means.
-        this.state = toggleItem(this.state, { kind: "tag", tag: row.tag });
+        this.state = toggleItem(this.state, { kind: "tag", tag: tag });
         this.clearFault("root");
         this.renderSummary();
         this.renderItemTree();
@@ -1743,7 +1768,7 @@ export class CreateSpacePanel {
         // Arrows browse, Enter and Space pick — the same split the caret and
         // the row body draw for the mouse, so expanding never selects.
         if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-          if (!row.hasChildren) return;
+          if (!row.hasChildren || row.budgetClosed) return;
           e.preventDefault();
           setExpanded(e.key === "ArrowRight");
           return;

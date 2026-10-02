@@ -62,6 +62,14 @@ export interface Row<K extends string = NodeKind> {
   hasChildren: boolean;
   /** Effective expansion, which a filter can force — see `visibleRows`. */
   expanded: boolean;
+  /**
+   * The row has children and was meant to be open, by the user or by a filter,
+   * but the budget had nothing left for them. Distinct from a row the user
+   * closed: that caret works, and this one would not, because allocation is
+   * breadth-first and opening a deeper parent frees nothing above it. The
+   * panel draws it as a leaf that says why.
+   */
+  budgetClosed?: true;
   selected: boolean;
 }
 
@@ -204,11 +212,14 @@ export type PickerRow<K extends string = NodeKind> = Row<K> | OverflowRow;
  * that is cut hands over one slot less than its share and spends it on the
  * marker, and the total never exceeds the budget. A parent that cannot be
  * given a child AND its marker, or whose level the budget never reached, is
- * returned CLOSED (`expanded: false`) even if the user or the filter asked for
- * it open. Drawing it open with nothing beneath would tell a screen reader the
- * branch is empty; a closed caret is true, and clicking it reallocates the
- * budget. The one exception to "closed" is the root level, which has no parent
- * row to close and so always keeps its marker.
+ * returned closed (`expanded: false`) and flagged `budgetClosed`, even if the
+ * user or the filter asked for it open. Drawing it open with nothing beneath
+ * would tell a screen reader the branch is empty. It is not offered as a
+ * caret either: allocation is breadth-first, so opening a deeper parent adds
+ * demand and frees nothing, and the click would do nothing. Closing other open
+ * branches or narrowing the filter is what makes room, and the panel says so.
+ * The root level has no parent row to close, so it is cut like any other level
+ * and keeps its marker; that marker is paid for, spending `(left - 1) + 1`.
  *
  * Without a filter this is a plain walk: a node's children appear only if the
  * node is in `expanded`.
@@ -311,7 +322,7 @@ export function visibleRows<K extends string = NodeKind>(
         // A cut parent needs a child AND its marker, two slots. A share of
         // one buys only the marker, which would be a branch drawn open with
         // nothing in it. The root level has no parent row to close, so it
-        // keeps its marker; any other parent is left closed and unpaid.
+        // keeps its marker; any other parent is left closed, spending nothing.
         if (share < 2 && l.depth > 0) return;
         const take = Math.max(0, share - 1);
         for (let k = 0; k < take; k++) survivors.add(l.nodes[k]);
@@ -356,10 +367,12 @@ export function visibleRows<K extends string = NodeKind>(
       const hasChildren = kids.length > 0;
       // Closed when the budget never reached its children, however much the
       // user or the filter wanted it open: an open row with nothing beneath it
-      // would tell a screen reader the branch is empty. A closed caret is true,
-      // and clicking it reallocates the budget.
-      const expanded =
-        hasChildren && opened.has(node.path) && (query !== "" || opts.expanded.has(node.path));
+      // would tell a screen reader the branch is empty. It is also flagged, so
+      // the panel does not offer a caret that could do nothing. A row the user
+      // closed is not flagged; its caret works.
+      const wantsOpen = hasChildren && (query !== "" || opts.expanded.has(node.path));
+      const expanded = wantsOpen && opened.has(node.path);
+      const budgetClosed = wantsOpen && !expanded;
       const selfMatches = query !== "" && matches(node);
       rows.push({
         path: node.path,
@@ -368,6 +381,7 @@ export function visibleRows<K extends string = NodeKind>(
         depth,
         hasChildren,
         expanded,
+        ...(budgetClosed ? { budgetClosed: true as const } : {}),
         selected: opts.selected.has(node.path),
       });
       if (expanded) {

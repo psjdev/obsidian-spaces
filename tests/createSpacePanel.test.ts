@@ -682,6 +682,42 @@ describe("the picker's row cap", () => {
     expect(panelEl().querySelector(".spaces-create-tree-more")).toBeNull();
   });
 
+  it("draws a parent the budget could not open as a leaf with a reason, not a dead caret", () => {
+    // One folder of 199 subfolders, filtered so everything wants to be open:
+    // the first two levels use the whole budget, so none of the 199 can show
+    // what is inside it. Expanding one adds demand at a deeper level and frees
+    // nothing, so a caret there would look clickable and do nothing.
+    const WIDE: Record<string, NodeKind> = { Notes: "folder" };
+    for (let i = 0; i < 199; i++) {
+      WIDE[`Notes/d${i}`] = "folder";
+      WIDE[`Notes/d${i}/note.md`] = "file";
+    }
+    makeHarness({
+      folders: { allPaths: () => Object.keys(WIDE), kindOf: (p: string) => WIDE[p] ?? null },
+    });
+    byKey("mode-curate").click();
+    typeNote();
+    const closed = rowFor("Notes/d0");
+    expect(closed.querySelector(".spaces-create-tree-caret svg")).toBeNull();
+    expect(closed.hasAttribute("aria-expanded")).toBe(false);
+    expect(closed.getAttribute("title")).toMatch(/no room/i);
+    expect(closed.getAttribute("title")).not.toMatch(/[—–]|colour|items?|files?/i);
+    // The folder above them is open and unaffected.
+    expect(rowFor("Notes").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps a working caret on a parent the user closed themselves", () => {
+    // The other half of the distinction: a collapsed row is not budget-closed,
+    // and its caret does open it.
+    makeHarness();
+    byKey("mode-curate").click();
+    const row = rowFor("Projects");
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(row.hasAttribute("title")).toBe(false);
+    row.querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    expect(rowFor("Projects").getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("says nothing when everything fits", () => {
     makeHarness();
     byKey("mode-curate").click();
