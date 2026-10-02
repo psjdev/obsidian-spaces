@@ -181,3 +181,21 @@ describe("styles.css — the elsewhere group's boundary", () => {
     expect(rules.some((r) => title.matches(r.selector))).toBe(false);
   });
 });
+
+describe("picker row states", () => {
+  it("the covered and selected row states do not share a background", () => {
+    const rule = (sel: string): string => {
+      const m = CSS.match(new RegExp(`${sel.replace(/[.\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`));
+      return m?.[1] ?? "";
+    };
+    const covered = rule(".spaces-create-tree-row.is-inherited");
+    const selected = rule(".spaces-create-tree-row.is-selected");
+    expect(covered).not.toBe("");
+    expect(selected).not.toBe("");
+    // The real assertion is the CDP check (e2e/tint-collision.mjs); this one
+    // stops the two rules being edited back into agreement without anyone
+    // noticing.
+    expect(covered).not.toContain("background:");
+    expect(selected).toContain("background:");
+  });
+});
