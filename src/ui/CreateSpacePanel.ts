@@ -1751,16 +1751,26 @@ export class CreateSpacePanel {
 
     // Every tag, uncapped: a cap here would drop whole branches rather than
     // the rows at the bottom of what is drawn.
-    const all = storedTags(this.deps.tags);
-    if (all === null) {
-      // Null is the source saying it cannot list the vault's tags at all,
-      // which is how `nativeKnownTags` reports a missing private `getTags` —
-      // a return, not a throw, and the likelier of the two failures. The way
+    //
+    // The union of what the vault reports and what is already chosen. The
+    // vault's list is re-read on every draw, so a tag whose last note was
+    // deleted vanished from it while staying in the member list: no row, no way
+    // to deselect, and the summary still counting it. `knownTags` returning
+    // null does the same to every chosen tag at once, and null is how
+    // `nativeKnownTags` reports a missing private `getTags`.
+    const chosen = this.chosenTags();
+    const known = storedTags(this.deps.tags);
+    if (known === null && chosen.size === 0) {
+      // Null is the source saying it cannot list the vault's tags at all, a
+      // return and not a throw, and the likelier of the two failures. The way
       // out is the field in Settings, so say that rather than leaving an
-      // empty box to be read as "this vault has no tags".
+      // empty box to be read as "this vault has no tags". Said only when
+      // nothing is chosen: with a tag chosen there are rows to draw, and the
+      // chosen ones must stay deselectable.
       message("Tags cannot be listed here. Add a tag from Settings, Contents.");
       return;
     }
+    const all = [...new Set([...(known ?? []), ...chosen])].sort();
     if (all.length === 0) {
       // Still split on the query, as the flat list was: a vault with no tags
       // and a box with text in it is a search that found nothing, and telling
@@ -1770,7 +1780,6 @@ export class CreateSpacePanel {
       return;
     }
 
-    const chosen = this.chosenTags();
     // Rebuilt per draw rather than cached like `vaultTree`: the whole list is
     // hundreds of short strings where the vault is tens of thousands of paths,
     // and a tag appears the moment it is typed into a note.
