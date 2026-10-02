@@ -1655,15 +1655,10 @@ export class CreateSpacePanel {
     this.paintPickerModes();
     this.renderPlaceholder();
     this.renderPickerBody();
-    // The buttons are `aria-pressed`, which a screen reader says when focus is
-    // on them, but the sigil switches from the filter box with focus staying
-    // there, and the tree's own label changes without being announced. The
-    // summary is the one live region, so the switch is written into it. The
-    // next draw of the summary (a pick) replaces the lead sentence; the figures
-    // after it are drawn every time, so the figures are not lost.
-    this.renderSummary(
-      mode === "tags" ? "Showing tags" : "Showing notes and folders"
-    );
+    // Nothing is written to the summary row: it shows the figures and the
+    // figures do not change with the body, so a switch is silent in the live
+    // region. The buttons are `aria-pressed`, which a screen reader says when
+    // focus is on them; a sigil typed in the filter box has no such cue.
   }
 
   /** Marks the button whose body is on screen, for the eye and for ARIA. */
@@ -1707,12 +1702,8 @@ export class CreateSpacePanel {
    *
    * Redrawn in place rather than through `render()`, so picking does not
    * rebuild the window under the pointer that just clicked inside it.
-   *
-   * `announce` is a lead sentence for the draw that follows a switch of body,
-   * prefixed to the figures. Only `setPickerMode` passes it; every other draw
-   * leaves it out and so replaces the lead sentence.
    */
-  private renderSummary(announce?: string): void {
+  private renderSummary(): void {
     const host = this.summaryEl;
     if (!host) return;
     const picked = this.pickedMembers();
@@ -1721,7 +1712,7 @@ export class CreateSpacePanel {
     // draw, by the engine's own membership rule through `deps.preview`.
     const notes = this.deps.preview(picked).notes;
     const summary = pickedSummary(counts, notes);
-    host.textContent = announce === undefined ? summary : `${announce}. ${summary}`;
+    host.textContent = summary;
   }
 
   /**

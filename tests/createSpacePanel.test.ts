@@ -1423,9 +1423,9 @@ describe("the Vault and Tags buttons under the filter box", () => {
       // `Archive` is empty, so the folder adds a selector and no notes. The
       // figure stays at the one note picked by hand.
       rowFor("Archive").click();
-      expect(summary()).toBe("1 note, 1 folder");
+      expect(summary()).toBe("1 note • 1 folder");
       rowFor("inbox.md").click();
-      expect(summary()).toBe("no notes, 1 folder");
+      expect(summary()).toBe("no notes • 1 folder");
     });
 
     it("counts tags alongside them, which is how a tag stays visible from the tree", () => {
@@ -1439,10 +1439,10 @@ describe("the Vault and Tags buttons under the filter box", () => {
       tagRowFor("archive").click();
       // `inbox.md` by hand, and `#project` carrying it and `plan.md`. Two
       // notes: the hand-picked one is not counted again for the tag.
-      expect(summary()).toBe("2 notes, 2 tags");
+      expect(summary()).toBe("2 notes • 2 tags");
       byKey("body-items").click();
-      // The switch is announced in this same row, ahead of the figures.
-      expect(summary()).toBe("Showing notes and folders. 2 notes, 2 tags");
+      // Switching body leaves the figures as they were.
+      expect(summary()).toBe("2 notes • 2 tags");
     });
 
     it("counts the union of what is selected, not the parts added up", () => {
@@ -1455,7 +1455,7 @@ describe("the Vault and Tags buttons under the filter box", () => {
       rowFor("Projects").click();
       showTags();
       tagRowFor("project").click();
-      expect(summary()).toBe("2 notes, 1 folder, 1 tag");
+      expect(summary()).toBe("2 notes • 1 folder • 1 tag");
     });
 
     it("counts a note picked by hand once when a selected tag carries it too", () => {
@@ -1464,7 +1464,7 @@ describe("the Vault and Tags buttons under the filter box", () => {
       rowFor("inbox.md").click();
       showTags();
       tagRowFor("project").click();
-      expect(summary()).toBe("2 notes, 1 tag");
+      expect(summary()).toBe("2 notes • 1 tag");
     });
 
     it("counts the notes under a selected folder, and not its subfolders", () => {
@@ -1473,7 +1473,7 @@ describe("the Vault and Tags buttons under the filter box", () => {
       makeHarness();
       openCurated();
       rowFor("Projects").click();
-      expect(summary()).toBe("1 note, 1 folder");
+      expect(summary()).toBe("1 note • 1 folder");
     });
 
     it("counts the notes a nested tag brings in with its parent", () => {
@@ -1483,7 +1483,7 @@ describe("the Vault and Tags buttons under the filter box", () => {
       openCurated();
       showTags();
       tagRowFor("project").click();
-      expect(summary()).toBe("2 notes, 1 tag");
+      expect(summary()).toBe("2 notes • 1 tag");
     });
 
     it("says so when what is selected comes to no notes", () => {
@@ -1491,7 +1491,7 @@ describe("the Vault and Tags buttons under the filter box", () => {
       openCurated();
       showTags();
       tagRowFor("archive").click();
-      expect(summary()).toBe("no notes, 1 tag");
+      expect(summary()).toBe("no notes • 1 tag");
     });
 
     it("asks the index nothing while no tag is selected", () => {
@@ -1514,7 +1514,7 @@ describe("the Vault and Tags buttons under the filter box", () => {
       byKey("mode-folder").click();
       expect(summary()).toBe("Nothing selected");
       rowFor("Archive").click();
-      expect(summary()).toBe("no notes, 1 folder");
+      expect(summary()).toBe("no notes • 1 folder");
     });
   });
 });
@@ -1609,7 +1609,7 @@ describe("rows a selected folder already covers", () => {
     row.focus();
     row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(rowFor("Projects/Work").getAttribute("aria-selected")).toBe("false");
-    expect(summaryText()).toBe("1 note, 1 folder");
+    expect(summaryText()).toBe("1 note • 1 folder");
   });
 
   it("reads as covered, not picked, when the note was picked before its folder", async () => {
@@ -1652,10 +1652,10 @@ describe("rows a selected folder already covers", () => {
     makeHarness();
     byKey("mode-curate").click();
     rowFor("Projects").click();
-    expect(summaryText()).toBe("1 note, 1 folder");
+    expect(summaryText()).toBe("1 note • 1 folder");
     expand("Projects");
     expand("Projects/Work");
-    expect(summaryText()).toBe("1 note, 1 folder");
+    expect(summaryText()).toBe("1 note • 1 folder");
   });
 });
 
@@ -1687,9 +1687,8 @@ describe("rows a selected tag covers", () => {
     typeName("Tag and note");
     byKey("mode-curate").click();
     pickTag("project");
-    // `pickTag` ends on a body switch, which leads the row with its
-    // announcement; the figures after it are what a click must not move.
-    const before = summaryText().replace(/^Showing [^.]*\. /, "");
+    // The figures after `pickTag` are what a click must not move.
+    const before = summaryText();
 
     rowFor("inbox.md").click();
 
@@ -1726,7 +1725,7 @@ describe("rows a selected tag covers", () => {
     makeHarness();
     byKey("mode-curate").click();
     pickTag("project");
-    expect(summaryText()).toBe("Showing notes and folders. 2 notes, 1 tag");
+    expect(summaryText()).toBe("2 notes • 1 tag");
   });
 });
 

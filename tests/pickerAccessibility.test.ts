@@ -87,21 +87,17 @@ describe("what the picker announces", () => {
     expect(panelEl().querySelectorAll('[role="status"]')).toHaveLength(1);
   });
 
-  it("announces a switch of body in the one live region", () => {
+  it("shows only the figures after a switch of body, with no lead sentence", () => {
+    // The switch is deliberately not announced in the live region: the owner
+    // asked for the row to carry the numbers and nothing else.
     makeHarness();
     byKey("mode-curate").click();
     byKey("body-tags").click();
-    expect(summaryText()).toMatch(/^Showing tags\./);
-    byKey("body-items").click();
-    expect(summaryText()).toMatch(/^Showing notes and folders\./);
-  });
-
-  it("does not repeat the switch announcement after a pick", () => {
-    makeHarness();
-    byKey("mode-curate").click();
-    byKey("body-tags").click();
+    expect(summaryText()).toBe("Nothing selected");
     panelEl().querySelector<HTMLElement>("[data-tag='archive']")?.click();
+    byKey("body-items").click();
     expect(summaryText()).not.toMatch(/Showing/);
+    expect(summaryText()).toMatch(/^(\d+ notes?|no notes)/);
   });
 
   it("the overflow row is inert: disabled, unselected, and not in the tab order", () => {

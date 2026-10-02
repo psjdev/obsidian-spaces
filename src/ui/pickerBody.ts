@@ -81,7 +81,7 @@ export function countPicked(items: readonly MemberEntry[]): PickedCounts {
  * the words each tag row already uses for exactly this quantity, down to
  * "no notes" for none, and it groups digits by locale.
  *
- * A kind of selector with nothing in it is left out. "253 notes, 0 folders,
+ * A kind of selector with nothing in it is left out. "253 notes • 0 folders •
  * 0 tags" spends two thirds of a one-line row on things that are not there.
  *
  * Nothing chosen is still a sentence. An empty row would read as a row that
@@ -102,5 +102,5 @@ export function pickedSummary(picked: PickedCounts, notes: number): string {
   // The members picked, not `notes`: a note picked by hand that has since left
   // the vault resolves to no notes, and that is still a selection.
   if (picked.notes + picked.folders + picked.tags === 0) return "Nothing selected";
-  return [tagCountLabel(notes), ...selectors].join(", ");
+  return [tagCountLabel(notes), ...selectors].join(" • ");
 }
