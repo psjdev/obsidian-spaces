@@ -1211,7 +1211,10 @@ describe("the Items and Tags buttons under the filter box", () => {
       expect(child.title).toBe("Remove #area/health");
     });
 
-    it("reads as picked rather than covered when it is both", () => {
+    it("reads as covered, not picked, when the child was picked before its parent", () => {
+      // This case used to assert that both stayed stored and the child read as
+      // picked. That was the click-order defect: toggleItem now absorbs a child
+      // into a parent picked after it, so the child is only ever covered.
       nested();
       openCurated();
       showTags();
@@ -1219,10 +1222,9 @@ describe("the Items and Tags buttons under the filter box", () => {
       tagRowFor("area/health").click();
       tagRowFor("area").click();
       const child = tagRowFor("area/health");
-      expect(child.classList.contains("is-selected")).toBe(true);
-      expect(child.classList.contains("is-inherited")).toBe(false);
-      expect(child.hasAttribute("aria-disabled")).toBe(false);
-      expect(child.title).toBe("Remove #area/health");
+      expect(child.classList.contains("is-selected")).toBe(false);
+      expect(child.classList.contains("is-inherited")).toBe(true);
+      expect(child.getAttribute("aria-disabled")).toBe("true");
     });
 
     it("brings a deep match's ancestors with it, opened to it", () => {
@@ -1642,9 +1644,11 @@ describe("rows a selected folder already covers", () => {
     expect(summaryText()).toBe("1 note, 1 folder");
   });
 
-  it("reads as picked rather than covered when it is both", async () => {
-    // The stronger state is the true one: the entry exists, the user made it,
-    // and they must be able to click it off again.
+  it("reads as covered, not picked, when the note was picked before its folder", async () => {
+    // This case used to assert that both stayed stored and the note read as
+    // picked, which was the click-order defect. toggleItem now absorbs the
+    // note into a folder picked after it, so the stored space is the same as
+    // if the folder had been clicked first.
     const h = makeHarness();
     typeName("Both");
     byKey("mode-curate").click();
@@ -1654,13 +1658,10 @@ describe("rows a selected folder already covers", () => {
     rowFor("Projects").click();
 
     const row = rowFor("Projects/Work/plan.md");
-    expect(row.classList.contains("is-selected")).toBe(true);
-    expect(covered("Projects/Work/plan.md")).toBe(false);
-    expect(row.hasAttribute("aria-disabled")).toBe(false);
-
-    row.click();
-    expect(rowFor("Projects/Work/plan.md").getAttribute("aria-selected")).toBe("false");
+    expect(row.classList.contains("is-selected")).toBe(false);
     expect(covered("Projects/Work/plan.md")).toBe(true);
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+
     byKey("create").click();
     await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
     expect(h.submitted[0].opts.members).toEqual([{ path: "Projects", kind: "folder" }]);
