@@ -92,3 +92,15 @@ describe("a caret click", () => {
     expect(document.activeElement).toBe(before);
   });
 });
+
+describe("a tag caret click", () => {
+  it("leaves focus where it was", () => {
+    makeHarness();
+    byKey("mode-curate").click();
+    byKey("body-tags").click();
+    tagRowFor("archive").focus();
+    tagRowFor("project").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    expect(tagRowFor("project/console")).toBeTruthy();
+    expect(document.activeElement).toBe(tagRowFor("archive"));
+  });
+});

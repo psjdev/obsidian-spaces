@@ -213,9 +213,10 @@ const isOverflowRow = (row: PickerRow<string>): row is OverflowRow => row.kind =
  * Everything not on this list is the same for both and lives in the renderer,
  * which is the point: a row-level fix is made once. Each member is here
  * because the two bodies genuinely disagree about it, and each adapter closes
- * over what its own draw built (the covering set, the tag counts). Nothing is
- * shared between the two bodies; `expanded` is the one thing that outlives a
- * draw, being the panel's own state for that body.
+ * over what its own draw built (the covering set, the tag counts). Of what the
+ * adapters close over, `expanded` is the one thing that outlives a draw, being
+ * the panel's own state for that body. Form state (`this.state`) outlives a
+ * draw too, and both bodies read it while `choose` writes it.
  */
 interface RowAdapter<K extends string> {
   /** The `data-` attribute a row is found by, which is also its focus key. */
@@ -1155,9 +1156,8 @@ export class CreateSpacePanel {
    * and not the other; both now come through here.
    *
    * `focusKey` names the row to refocus. Left out, it is whichever row holds
-   * focus now, which is what a caret click wants: a pointer gesture
-   * should not move focus, and nothing is refocused when focus was not on a
-   * row.
+   * focus now, which is what a caret click wants: a pointer gesture should not
+   * move focus, and nothing is refocused when focus was not on a row.
    */
   private redrawKeepingFocus(focusKey?: string): void {
     const key = focusKey ?? this.focusedRowKey();
@@ -1299,8 +1299,9 @@ export class CreateSpacePanel {
    * so a fix to any of them is made in one place. What the adapter supplies is
    * what genuinely differs: the key a row is found by, what covers it, the
    * wording of its titles, the name cell, and what picking changes in state.
-   * Nothing is shared between the two bodies; the adapter closes over whatever
-   * its own draw built, and only `expanded` is state that outlives the draw.
+   * Each adapter closes over what its own draw built. Of what the adapters
+   * close over, `expanded` is the one thing that outlives a draw. Form state
+   * (`this.state`) also does, and both bodies read it and `choose` writes it.
    */
   private renderTreeRow<K extends string>(
     host: HTMLElement,
