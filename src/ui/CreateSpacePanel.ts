@@ -46,7 +46,7 @@ import {
   memberTagSet,
 } from "../definitions/membership";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
-import { previewPaths } from "./memberPreview";
+import type { Preview } from "./previewSeam";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -138,6 +138,15 @@ export interface CreateSpacePanelDeps {
    * twice, once for this panel and once for the engine that already has one.
    */
   tagIndex: () => TagIndex;
+  /**
+   * What the space would contain if created now, answered by the engine
+   * rather than by this panel.
+   *
+   * A function rather than a value, for the reason `tagIndex` documents: the
+   * answer is a snapshot that every metadata change replaces, and a captured
+   * one would count against the vault as it was when the panel opened.
+   */
+  preview: (members: readonly MemberEntry[]) => Preview;
   /**
    * The user's saved custom colors, and the way to persist a new one — the
    * theme button opens the same color popover the space strip uses, and that
@@ -1617,15 +1626,8 @@ export class CreateSpacePanel {
     const picked = this.pickedMembers();
     const counts = countPicked(picked);
     // The total is the whole row's lead figure, so it is resolved on every
-    // draw. The index is reached lazily, once per draw and only if a tag was
-    // picked: the accessor hands back the engine's current snapshot, and a
-    // selection of notes and folders has no use for it. `previewPaths` reads
-    // the vault listing only if a folder was picked.
-    let index: ReturnType<typeof this.deps.tagIndex> | null = null;
-    const notes = previewPaths(picked, this.deps.folders, (tag) => {
-      index ??= this.deps.tagIndex();
-      return index.pathsMatching(tag);
-    }).notes;
+    // draw, by the engine's own membership rule through `deps.preview`.
+    const notes = this.deps.preview(picked).notes;
     host.textContent = pickedSummary(counts, notes);
   }
 
@@ -1635,7 +1637,7 @@ export class CreateSpacePanel {
    *
    * Expressed as members rather than as counts so the root is resolved by
    * exactly the rule a curated folder member is, and so both shapes reach
-   * `previewPaths` as the one thing it takes.
+   * `deps.preview` as the one thing it takes.
    */
   private pickedMembers(): readonly MemberEntry[] {
     if (!this.state.folderMode) return this.state.items;

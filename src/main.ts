@@ -52,7 +52,8 @@ import { armIntent, matchIntent, type CreationIntent } from "./actions/creationI
 import { canOfferCreateSpaceFromFolder } from "./actions/createSpaceMenu";
 import { inheritedFromFolder } from "./actions/membershipMenu";
 import { pathMembers, watchesMetadata } from "./definitions/membership";
-import { canonicalPath } from "./visibility/glob";
+import { canonicalPath, compileIgnore } from "./visibility/glob";
+import { buildPreview } from "./ui/previewSeam";
 import { PublicApi } from "./api/PublicApi";
 import { MissingRootNotice } from "./ui/MissingRootNotice";
 import { SpacesSettingTab, type EffectiveRestoreState } from "./ui/SettingsTab";
@@ -1701,6 +1702,15 @@ export default class SpacesPlugin extends Plugin {
       // for a while would otherwise count against the vault as it was when it
       // opened.
       tagIndex: () => this.controller.tagIndex(),
+      // What the space would hold, from the engine rather than from the panel.
+      // Rebuilt per call so the vault, the ignore rules and the tag index are
+      // all read fresh; the panel can stay open across any of them changing.
+      preview: (members) =>
+        buildPreview(
+          this.controller.vaultIndex(),
+          compileIgnore(this.defs.get().settings.globalIgnore),
+          this.controller.tagIndex()
+        )(members),
       // The rotation, or the neutral swatch, per the user's setting.
       // Read here rather than captured, so flipping the toggle takes effect on
       // the next open of this panel without a reload.

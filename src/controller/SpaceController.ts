@@ -119,6 +119,11 @@ export class SpaceController {
     return this.tags;
   }
 
+  /** The vault index this controller computes against. */
+  vaultIndex(): VaultIndex {
+    return this.vault;
+  }
+
   activeSpace(): SpaceDefinition | null {
     const sel = this.runtime.getSelection();
     if (sel.kind === "all") return null;

@@ -9,6 +9,9 @@
 import { CreateSpacePanel, type CreateSpacePanelDeps } from "../../src/ui/CreateSpacePanel";
 import type { CreateSpaceOptions } from "../../src/actions/spaceLifecycle";
 import type { NodeKind } from "../../src/ui/vaultTree";
+import { buildPreview } from "../../src/ui/previewSeam";
+import { createTreeVaultIndex } from "../../src/visibility/VaultIndex";
+import { compileIgnore } from "../../src/visibility/glob";
 
 /** A small vault: two folders, one nested, and two notes. */
 export const VAULT: Record<string, NodeKind> = {
@@ -68,6 +71,18 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
         },
       };
     },
+    // The real seam over the harness vault, so the summary row counts through
+    // the engine exactly as it does in the app. The index is reached once per
+    // call and only when a tag member is present, which is what the panel
+    // used to do itself and what `reached` asserts.
+    preview: (members) =>
+      buildPreview(
+        createTreeVaultIndex(new Map(Object.entries(VAULT))),
+        compileIgnore([]),
+        {
+          pathsMatching: (tag) => deps.tagIndex().pathsMatching(tag),
+        }
+      )(members),
     customColors: [],
     useThemeIconColor: () => false,
     saveCustomColors: async (customs) => {
