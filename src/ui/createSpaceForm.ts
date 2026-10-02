@@ -1,6 +1,8 @@
 import type { CreateSpaceOptions } from "../actions/spaceLifecycle";
 import type { MemberEntry } from "../types";
 import { MAX_SPACE_NAME_LENGTH } from "../definitions/schema";
+import { canonicalPath } from "../visibility/glob";
+import { normalizeTag, tagMatches } from "../visibility/tagMatch";
 
 /**
  * Re-exported so `CreateSpacePanel.ts` — which already imports form rules
@@ -231,10 +233,39 @@ function sameEntry(a: MemberEntry, b: MemberEntry): boolean {
   return a.path === b.path;
 }
 
+/** Does `outer` already bring `inner` into the space on its own? */
+function covers(outer: MemberEntry, inner: MemberEntry): boolean {
+  if (outer.kind === "tag") {
+    return inner.kind === "tag" && tagMatches(normalizeTag(outer.tag), normalizeTag(inner.tag));
+  }
+  if (outer.kind !== "folder" || inner.kind === "tag") return false;
+  const parent = canonicalPath(outer.path);
+  const child = canonicalPath(inner.path);
+  // The trailing slash, so `Projects` does not swallow `Projects Archive`.
+  return child !== parent && child.startsWith(`${parent}/`);
+}
+
+/**
+ * Add or remove one picked member, keeping the list MINIMAL: no member is
+ * ever covered by another.
+ *
+ * Without this the stored list depended on the order of the clicks. Picking a
+ * folder and then a note inside it refused the note, while picking the note
+ * and then the folder stored both, and the space carried a member the picker
+ * was built to prevent. The covered-row guard in the panel could only ever
+ * catch one of those two orders, because it reads the list as it stands.
+ *
+ * Minimality in the one write path makes the order irrelevant instead, which
+ * is also what collapses `coveringTagIn`'s outermost-versus-innermost
+ * question: at most one ancestor can be in the list at all.
+ */
 export function toggleItem(s: CreateFormState, entry: MemberEntry): CreateFormState {
   const without = s.items.filter((i) => !sameEntry(i, entry));
   if (without.length !== s.items.length) return { ...s, items: without };
-  return { ...s, items: [...s.items, entry] };
+  // Already brought in by something picked. Adding it would store a member
+  // that changes nothing about what the space holds.
+  if (s.items.some((i) => covers(i, entry))) return s;
+  return { ...s, items: [...s.items.filter((i) => !covers(entry, i)), entry] };
 }
 
 const basename = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
