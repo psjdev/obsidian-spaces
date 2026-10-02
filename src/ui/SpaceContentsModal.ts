@@ -165,9 +165,8 @@ export class SpaceContentsModal extends Modal {
   private renderEmpty(containerEl: HTMLElement): void {
     containerEl.createEl("p", {
       text:
-        "This space has no members yet, so it shows nothing of its own. " +
-        "Right-click a file or folder in the explorer and choose “Add to space”, " +
-        "or add a tag above.",
+        "This space is empty. Right-click a note or folder in the explorer and " +
+        "choose “Add to space”, or add a tag above.",
     });
   }
 
@@ -263,8 +262,8 @@ export class SpaceContentsModal extends Modal {
         : row.status === "redundant"
           ? `Redundant. Already covered by ${row.coveredBy}.`
           : row.kind === "folder"
-            ? "Folder. Its contents are members too."
-            : "File.";
+            ? "Folder. Everything inside it is in the space too."
+            : "Note.";
 
     const setting = new Setting(containerEl)
       .setName(row.path)

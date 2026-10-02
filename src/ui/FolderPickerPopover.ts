@@ -121,7 +121,7 @@ export function openFolderPickerPopover(deps: FolderPickerPopoverDeps): Anchored
       clear.textContent = "Clear";
       clear.setAttribute(
         "aria-label",
-        "Clear the folder — the space stays folder pinned, with no folder chosen"
+        "Clear the folder. The space stays folder pinned, with no folder chosen."
       );
       clear.addEventListener("click", () => commit(""));
 

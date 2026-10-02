@@ -27,27 +27,6 @@ import {
   type BlurCommittedField,
 } from "./settingsEdits";
 
-/**
- * Where to send someone who wants to support the plugin, or `""` for
- * nowhere.
- *
- * Empty renders NO header at all, rather than a dead link or a placeholder —
- * an affordance that does nothing is worse than an absent one. Point it at
- * Ko-fi, Buy Me a Coffee, GitHub Sponsors or anything else; all of them are
- * just a URL, and the choice changes nothing here.
- *
- * Empty is what ships. Obsidian's developer policies treat a support prompt
- * inside the plugin's own interface as something a README has to disclose, and
- * `manifest.json`'s `fundingUrl` already does the same job the way Obsidian
- * intends: a Support link on the community-list entry, no code, and nothing
- * asking for money inside the settings tab. The renderer below stays because
- * the decision is a URL, not a rewrite.
- *
- * Whoever sets it must name an address `fundingUrl` also names.
- * `tests/manifest.test.ts` asserts exactly that, because the failure that
- * matters is a settings link the listing never offers.
- */
-export const SUPPORT_URL = "";
 
 /**
  * Whether something outside spaces's own toggle is standing in the way of
@@ -400,10 +379,11 @@ export class SpacesSettingTab extends PluginSettingTab {
         heading: "File tree",
         items: [
           {
-            name: "Show files you open that are not in this space",
+            name: "Show notes you open that are not in this space",
             desc:
-              "A file you open appears dimmed and italic even when it is not a member, " +
-              "so you can see it and add it to the space. Turn this off to show only members.",
+              "A note you open appears dimmed and italic even when it is not in this space, " +
+              "so you can see it and add it. Turn this off to show only this space's own " +
+              "notes and folders.",
             control: { type: "toggle", key: "revealVisitors" },
           },
           {
@@ -430,7 +410,7 @@ export class SpacesSettingTab extends PluginSettingTab {
         heading: "Reordering",
         items: [
           {
-            name: "Allow reordering of space items",
+            name: "Allow reordering a space's notes and folders",
             desc: this.describe(
               "Drag rows in the file explorer to arrange them, remembered separately " +
                 "for each space and for All. Turn this off to sort the tree normally; " +
@@ -558,7 +538,7 @@ export class SpacesSettingTab extends PluginSettingTab {
       const line = warn.createDiv();
       line.appendText(`Line ${s.index + 1}: `);
       line.createEl("code", { text: s.pattern.trim() || "(blank)" });
-      line.appendText(` — ${ignoreSkipMessage(s.reason)}`);
+      line.appendText(`. ${ignoreSkipMessage(s.reason)}`);
     }
   }
 
