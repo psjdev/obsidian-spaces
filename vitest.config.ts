@@ -26,7 +26,7 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     environmentMatchGlobs: [
       ["tests/explorerAdapter.test.ts", "jsdom"],
-      ["tests/panelCoverage.test.ts", "jsdom"],
+      ["tests/panelMount.test.ts", "jsdom"],
       ["tests/dragOrdering.test.ts", "jsdom"],
       ["tests/anchoredPopover.test.ts", "jsdom"],
       ["tests/filterAndOrderFolder.test.ts", "jsdom"],

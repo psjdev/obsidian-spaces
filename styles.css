@@ -458,14 +458,6 @@
 }
 .spaces-create-tree-icon svg { width: 14px; height: 14px; }
 .spaces-create-tree-row.is-selected .spaces-create-tree-icon { color: inherit; }
-/* Sits below the rows, inside the scroll box but outside the tree itself. A
-   status line, not a row: it is not selectable and takes no focus. */
-.spaces-create-tree-more {
-  padding: 4px;
-  color: var(--text-muted);
-  font-size: 0.9em;
-  border-top: 1px solid var(--background-modifier-border);
-}
 .spaces-create-tree-empty {
   padding: 8px 4px;
   color: var(--text-muted);
@@ -499,8 +491,7 @@
 /* How many notes the tag brings in. `margin-left: auto` puts it against the
    right edge so the numbers line up as a column the eye can skim, and the
    name keeps the whole of the space left of it. Muted and a size down,
-   because it is a hint beside the name rather than a second name: the same
-   treatment `.spaces-create-tree-more` already gives a status line here. */
+   because it is a hint beside the name rather than a second name. */
 .spaces-create-tag-count {
   margin-left: auto;
   padding-left: 8px;

@@ -421,20 +421,3 @@ export function visibleRows<K extends string = NodeKind>(
   emit(shownChildren(tree, false), 0, "", false);
   return rows;
 }
-
-/**
- * Every ancestor of `path`, so the panel can open a pre-filled selection into
- * view — the right-click "Create space from this folder" entry lands with a
- * root already chosen, and a tree that showed it collapsed would hide it.
- */
-export function ancestorsOf(path: string): string[] {
-  const segments = path.split("/").filter((s) => s !== "");
-  const out: string[] = [];
-  let prefix = "";
-  // The last segment is the node itself, not an ancestor.
-  for (const segment of segments.slice(0, -1)) {
-    prefix = prefix === "" ? segment : `${prefix}/${segment}`;
-    out.push(prefix);
-  }
-  return out;
-}

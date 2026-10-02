@@ -4,7 +4,7 @@
  * hardest and, until this file, was the only part with no tests at all.
  *
  * Every pure helper it leans on is covered elsewhere (`createSpaceForm`,
- * `vaultTree`, `ribbonAlign`, `panelCoverage`). What was missing is the wiring
+ * `vaultTree`, `ribbonAlign`, `panelMount`). What was missing is the wiring
  * BETWEEN them: `itemsOpen` against `state.folderMode`, what a mode button's
  * pressed state actually reports, what a collapse keeps, and where focus lands
  * when a Create is refused. Three consecutive rounds of live user reports were
@@ -564,7 +564,6 @@ describe("the picker's row cap", () => {
     expect(panelEl().querySelector(".spaces-create-summary")?.textContent).toBe(summaryBefore);
     expect(rows().map((r) => r.dataset.path)).toEqual(pathsBefore);
     expect(overflowRows()[0]).toBe(more);
-    expect(panelEl().querySelector(".spaces-create-tree-more")).toBeNull();
   });
 
   it("draws a parent the budget could not open as a leaf with a reason, not a dead caret", () => {
@@ -697,16 +696,10 @@ describe("the picker reads the vault once per session", () => {
 
 describe("the Vault and Tags buttons under the filter box", () => {
   /**
-   * Every test that reaches the tag list reaches it with an EMPTY filter box.
-   *
-   * That is not a narrow case, it is the only one reachable: a non-empty tag
-   * query builds an Obsidian fuzzy scorer, and the stub refuses to imitate
-   * `prepareFuzzySearch` on purpose (see its docstring) so that no ranking
-   * assertion can be written against a fake algorithm. The ranking itself is
-   * tested where the scorer is injected, in `fuzzyTagCandidates.test.ts`; what
-   * is left for this file is the WIRING, and an empty box now exercises all of
-   * it — the two buttons, the sigils that press them, the rows, the pick and
-   * the summary row underneath.
+   * The tag filter is a substring match over the tag tree, covered directly in
+   * `vaultTreeFilter.test.ts`. What is left for this block is the WIRING: the
+   * two buttons, the sigils that press them, the rows, the pick and the
+   * summary row underneath.
    */
   const filterFor = (text: string): void => {
     const f = byKey("item-filter") as HTMLInputElement;

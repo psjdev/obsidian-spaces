@@ -46,8 +46,8 @@ describe("countTagRows", () => {
   });
 
   it("carries the rest of the row through untouched", () => {
-    // The picker's rows arrive from `fuzzyTagCandidates` carrying a `match`
-    // that `renderResults` needs. Dropping it here would cost the highlight.
+    // Rows are generic over what they carry besides `tag`, and the count is
+    // added beside it. Spreading the row, not rebuilding it, is what keeps `match`.
     const match = { score: -1, matches: [[0, 4]] };
     expect(countTagRows([{ tag: "proj", match }], () => 2)).toEqual([
       { tag: "proj", match, count: 2 },

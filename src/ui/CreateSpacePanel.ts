@@ -21,7 +21,6 @@ import type { FormFault } from "./createSpaceForm";
 import { alignmentGap } from "./ribbonAlign";
 import { iconColorFor } from "./spaceIconColor";
 import {
-  ancestorsOf,
   buildVaultTree,
   isBranchByChildren,
   isBranchByKind,
@@ -47,7 +46,7 @@ import {
 } from "../definitions/membership";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
 import type { Preview } from "./previewSeam";
-import type { VaultIndex } from "../visibility/VaultIndex";
+import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -56,7 +55,7 @@ import type { MemberEntry } from "../types";
 import {
   isStillCovering as isStillCoveringPure,
   resyncInertSiblings as resyncInertSiblingsPure,
-} from "./panelCoverage";
+} from "./panelMount";
 import { SEL } from "../explorer/selectors";
 
 /**
@@ -158,7 +157,11 @@ export interface CreateSpacePanelDeps {
    * The rows come from `folders`, the live vault, while coverage comes from
    * this index, the engine's snapshot. For up to the coalescer's window a
    * freshly created folder can therefore be drawn but not yet resolve, and
-   * covers nothing until the snapshot catches up. Bounded and self-correcting.
+   * covers nothing until the snapshot catches up. The preview count lags the
+   * same way: `deps.preview` reads this index too, and `includedPaths` drops a
+   * seed the snapshot does not hold, so a freshly created folder or note that
+   * is picked contributes nothing to the summary's note total, and neither do
+   * the notes under a new folder. Bounded and self-correcting.
    */
   vaultIndex: () => VaultIndex;
   /**
@@ -510,8 +513,8 @@ export class CreateSpacePanel {
    * `container` is whatever `bindExplorer()` finds under `parent` right now —
    * no second query here.
    *
-   * The comparison lives in `panelCoverage.ts`, a plain-DOM module, so it is
-   * directly testable — see `tests/panelCoverage.test.ts`.
+   * The comparison lives in `panelMount.ts`, a plain-DOM module, so it is
+   * directly testable — see `tests/panelMount.test.ts`.
    */
   isStillCovering(parent: HTMLElement, container: HTMLElement | null): boolean {
     return isStillCoveringPure(this.el, this.mountedContainer, parent, container);
@@ -1077,7 +1080,6 @@ export class CreateSpacePanel {
       // scrolling list (`setEmptyMessage`), because a tree whose child is not a
       // treeitem is the orphan problem this comment describes.
       const rowsEl = doc.win.createDiv();
-      rowsEl.className = "spaces-create-tree-rows";
       // The list scrolls, the window does not. That is what lets the summary
       // row below sit still: the list gives up the height instead of the
       // window taking more.
@@ -1583,8 +1585,13 @@ export class CreateSpacePanel {
   private startSigilFlash(sigil: string): void {
     this.cancelSigilFlash();
     this.sigilFlash = sigil;
-    const handle = window.setTimeout(() => this.endSigilFlash(), SIGIL_FLASH_MS);
-    this.sigilFlashOff = () => window.clearTimeout(handle);
+    // The timer belongs to the window the panel is drawn in, as the drawing code
+    // does. `this.doc` is set in `mount()` and cleared in `destroy()`, and this
+    // runs from the filter box's key handler, which exists between the two; the
+    // `window` fallback satisfies the type and is not expected to be reached.
+    const win = this.doc?.win ?? window;
+    const handle = win.setTimeout(() => this.endSigilFlash(), SIGIL_FLASH_MS);
+    this.sigilFlashOff = () => win.clearTimeout(handle);
   }
 
   /**
@@ -1639,7 +1646,8 @@ export class CreateSpacePanel {
     // on them, but the sigil switches from the filter box with focus staying
     // there, and the tree's own label changes without being announced. The
     // summary is the one live region, so the switch is written into it. The
-    // next draw of the summary (a pick) replaces the sentence.
+    // next draw of the summary (a pick) replaces the lead sentence; the figures
+    // after it are drawn every time, so the figures are not lost.
     this.renderSummary(
       mode === "tags" ? "Showing tags" : "Showing notes and folders"
     );
@@ -1689,7 +1697,7 @@ export class CreateSpacePanel {
    *
    * `announce` is a lead sentence for the draw that follows a switch of body,
    * prefixed to the figures. Only `setPickerMode` passes it; every other draw
-   * leaves it out and so replaces the sentence.
+   * leaves it out and so replaces the lead sentence.
    */
   private renderSummary(announce?: string): void {
     const host = this.summaryEl;

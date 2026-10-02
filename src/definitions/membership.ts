@@ -52,12 +52,12 @@ export function coveringFolder(
  * bare `Set` handed to `coveringFolderIn` is a compile error.
  */
 export interface FolderSet {
-  folders: ReadonlySet<string>;
+  readonly folders: ReadonlySet<string>;
   /**
    * True when `folders` holds LIVE paths and the lookup must compare exactly.
    * False when it holds folded spellings and the lookup folds each ancestor.
    */
-  exact: boolean;
+  readonly exact: boolean;
 }
 
 /**
@@ -149,12 +149,8 @@ export function memberTagSet(members: readonly MemberEntry[]): Set<string> {
  * are its `/`-separated prefixes, exactly as a path's are, so `ancestorsOf`
  * answers for both and this is `coveringFolderIn` with a different fold.
  *
- * The OUTERMOST is returned, not the innermost. The folder side walks inwards
- * because the nearest folder member is the one a user would recognise as the
- * container on screen; here the ancestors are themselves rows in the same
- * tree, and the outermost is the one whose coverage is not itself covered —
- * deselect that and every row under it is free in one gesture, where naming an
- * inner one would send the user back for the outer one straight after.
+ * In a list written through `toggleItem`, which keeps it minimal, at most one
+ * ancestor can be a member, so there is only ever one answer to give.
  */
 export function coveringTagIn(
   tags: ReadonlySet<string>,

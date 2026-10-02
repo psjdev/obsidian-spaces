@@ -11,7 +11,7 @@ import type { NodeKind } from "../src/ui/vaultTree";
 beforeEach(resetPanelDom);
 
 const rowsHost = (): HTMLElement => {
-  const el = panelEl().querySelector<HTMLElement>(".spaces-create-tree-rows");
+  const el = panelEl().querySelector<HTMLElement>("[role=tree]");
   if (!el) throw new Error("no tree");
   return el;
 };

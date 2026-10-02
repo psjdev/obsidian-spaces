@@ -1,6 +1,7 @@
 /**
- * `CreateSpacePanel`'s two container/sibling
- * identity rules, extracted so they can be tested directly against real
+ * The create panel's mount and sibling-inerting rules: the two container and
+ * sibling identity rules `CreateSpacePanel` applies when it covers a file
+ * explorer container, extracted so they can be tested directly against real
  * DOM nodes.
  *
  * Both are plain DOM logic — neither touches anything Obsidian-specific —

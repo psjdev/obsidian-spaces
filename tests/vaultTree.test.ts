@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { ancestorsOf } from "../src/visibility/VaultIndex";
 import {
-  ancestorsOf,
   buildVaultTree,
   isBranchByChildren,
   isBranchByKind,
