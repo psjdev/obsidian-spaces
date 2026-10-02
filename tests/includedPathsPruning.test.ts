@@ -71,7 +71,11 @@ const SHAPES: [string, number, number, number][] = [
   ["one note per leaf", 5, 3, 1],
 ];
 
-const IGNORES = [[], ["**/*.md"], ["**/n0.md"], ["d0_0/**"]];
+// `**/d1_0` and `**/d2_0` match a folder WITHOUT matching its contents (the
+// patterns are anchored), so an intermediate folder is dropped on its own while
+// everything beneath it stays included. That is the shape that separates "any
+// descendant" from "a direct child" in the prune.
+const IGNORES = [[], ["**/*.md"], ["**/n0.md"], ["d0_0/**"], ["**/d1_0"], ["**/d2_0", "**/n1.md"]];
 
 describe("step 3b agrees with the fixpoint oracle", () => {
   for (const [name, b, d, n] of SHAPES) {
@@ -89,6 +93,39 @@ describe("step 3b agrees with the fixpoint oracle", () => {
     }
   }
 
+  it("keeps a folder whose only child was dropped but whose grandchild survived", () => {
+    const vault = createTreeVaultIndex(
+      new Map<string, MemberKind>([
+        ["S", "folder"],
+        ["S/A", "folder"],
+        ["S/A/B", "folder"],
+        ["S/A/B/c.md", "file"],
+      ])
+    );
+    const ignore = compileIgnore(["S/A/B"]);
+    const seeds = new Set(["S"]);
+    const expected = referencePrune(vault, expand(vault, seeds, ignore, new Set()), seeds);
+    expect(expected.has("S/A")).toBe(true);
+    const actual = includedPaths(vault, ["S"], ignore, new Set()).included;
+    expect([...actual].sort()).toEqual([...expected].sort());
+  });
+
+  for (const [name, b, d, n] of SHAPES) {
+    it(`${name}, intermediate folders excluded`, () => {
+      const kinds = synth(b, d, n);
+      const vault = createTreeVaultIndex(kinds);
+      const roots = [...kinds.keys()].filter((p) => !p.includes("/") && kinds.get(p) === "folder");
+      const seeds = new Set(roots);
+      const ignore = compileIgnore([]);
+      const excluded = new Set(
+        [...kinds.keys()].filter((p) => kinds.get(p) === "folder" && p.includes("/")).filter((_, i) => i % 3 === 0).map(canonicalPath)
+      );
+      const expected = referencePrune(vault, expand(vault, seeds, ignore, excluded), seeds);
+      const actual = includedPaths(vault, roots, ignore, excluded).included;
+      expect([...actual].sort()).toEqual([...expected].sort());
+    });
+  }
+
   it("spares a folder the user left empty", () => {
     const kinds = synth(3, 2, 2);
     const vault = createTreeVaultIndex(kinds);
@@ -104,5 +141,16 @@ describe("step 3b agrees with the fixpoint oracle", () => {
     const before = expand(vault, new Set(roots), compileIgnore([]), new Set());
     const after = includedPaths(vault, roots, compileIgnore([]), new Set()).included;
     expect(after.size).toBe(before.size);
+  });
+
+  it("still runs the prune when something is excluded", () => {
+    const kinds = synth(2, 2, 1);
+    const vault = createTreeVaultIndex(kinds);
+    const roots = [...kinds.keys()].filter((p) => !p.includes("/") && kinds.get(p) === "folder");
+    // Excluding the only note of a leaf folder empties it, so it must go.
+    const r = includedPaths(vault, roots, compileIgnore([]), new Set(["d0_0/d1_0/n0.md"]));
+    expect(r.included.has("d0_0/d1_0/n0.md")).toBe(false);
+    expect(r.included.has("d0_0/d1_0")).toBe(false);
+    expect(r.inherited.has("d0_0/d1_0")).toBe(false);
   });
 });

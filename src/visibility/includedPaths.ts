@@ -30,6 +30,8 @@ export function includedPaths(
 ): IncludedPaths {
   // 1. seeds bypass globalIgnore entirely
   const seeds = new Set<string>();
+  // Belt and braces against a future `resolveLivePath`, not a behaviour
+  // change: today every seed is already a live path that exists.
   for (const p of seedPaths) if (vault.exists(p)) seeds.add(p);
 
   // 2. expand folder seeds, applying ignore to inherited descendants only
@@ -60,14 +62,35 @@ export function includedPaths(
   // empty `globalIgnore`, so this is the common case, and it is the whole
   // step rather than a fast path through it.
   if (filtered) {
-    // Deepest first, so a folder's children are already decided when it is
-    // reached and one look at its DIRECT children is enough. The previous
-    // version asked `descendantsOf` per folder inside a fixpoint, which is
-    // O(folders x subtree x levels-emptied): 376 ms on a 97,655-path vault
-    // with ignore rules, against 83 ms for this.
+    // Deepest first, so everything below a folder is already decided when it
+    // is reached. The previous version asked `descendantsOf` per folder
+    // inside a fixpoint, which is O(folders x subtree x levels-emptied):
+    // 376 ms on a 97,655-path vault with ignore rules, against 83 ms for this.
+    //
+    // "Carries an included descendant" is not the same as "has an included
+    // child". Ignore patterns are anchored, so one can drop an intermediate
+    // folder without dropping what is inside it: S/A/B ignored, S/A/B/c.md
+    // kept. S/A then has no included child but still has an included
+    // descendant, and the fixpoint kept it. So `carries` recurses through
+    // folders that are NOT in `included` as well. It is memoised, so each
+    // folder is answered once and the whole pass stays linear.
     //
     // Bucketed rather than sorted. At 11,110 folders with nothing to remove,
     // a comparison sort costs more than the whole fixpoint did.
+    const carry = new Map<string, boolean>();
+    const carries = (p: string): boolean => {
+      const known = carry.get(p);
+      if (known !== undefined) return known;
+      let any = false;
+      for (const k of vault.childrenOf(p)) {
+        if (included.has(k) || (vault.kindOf(k) === "folder" && carries(k))) {
+          any = true;
+          break;
+        }
+      }
+      carry.set(p, any);
+      return any;
+    };
     const byDepth: string[][] = [];
     for (const p of included) {
       if (vault.kindOf(p) !== "folder") continue;
@@ -78,16 +101,9 @@ export function includedPaths(
     for (let d = byDepth.length - 1; d >= 0; d--) {
       for (const p of byDepth[d] ?? []) {
         if (seeds.has(p)) continue;
-        const kids = vault.childrenOf(p);
-        if (kids.length === 0) continue;
-        let keep = false;
-        for (const k of kids) {
-          if (included.has(k)) {
-            keep = true;
-            break;
-          }
-        }
-        if (!keep) included.delete(p);
+        // A folder with no children in the vault was left empty by the user.
+        if (vault.childrenOf(p).length === 0) continue;
+        if (!carries(p)) included.delete(p);
       }
     }
     // Step 3b can remove a folder from `included` after step 2 recorded it as
