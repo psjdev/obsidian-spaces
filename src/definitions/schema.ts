@@ -277,6 +277,21 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
  * can open it again. That is why the incoming version is never consulted
  * here — considering it would quietly remove that recovery path.
  */
+/*
+ * Scope, so the next person to add a SETTING sees this before they need it:
+ * this reads `spaces` and nothing else, so only a tag member or an exclusion
+ * can raise the stamp. A release that adds a setting and no new member kind
+ * still writes version 1, an older install accepts the document, and
+ * `validateDefinitions` rebuilds `settings` from its fixed key list and drops
+ * the key it does not know. On two devices through Sync that erases the
+ * setting silently.
+ *
+ * Left as is on purpose while the plugin is pre-1.0, where the contract is
+ * that things move. If it matters later, the cheapest fix is to carry the
+ * unrecognised remainder of `settings` through the validator rather than to
+ * widen this function: a downgrade then loses nothing without anyone having
+ * to remember to gate each new key.
+ */
 export function schemaVersionFor(spaces: readonly SpaceDefinition[]): number {
   const usesV2 = spaces.some(
     (s) => s.members.some((m) => m.kind === "tag") || (s.exclude?.length ?? 0) > 0

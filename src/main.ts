@@ -251,6 +251,10 @@ export default class SpacesPlugin extends Plugin {
    * startup `onload` runs before the layout is ready, so the seed is false
    * exactly when the cache really is cold, and true exactly when the plugin
    * was started into a running app whose cache is already warm.
+   *
+   * The listener is registered in `onload` too, and that placement is load
+   * bearing: `resolved` fires before `onLayoutReady`, so registering any
+   * later misses it. See the registration for the measurement.
    */
   private metadataResolved = false;
 
@@ -393,6 +397,32 @@ export default class SpacesPlugin extends Plugin {
     // Read HERE and nowhere later: during app startup this is false, and by
     // the time anything else could ask it would be true. See the field.
     this.metadataResolved = this.app.workspace.layoutReady;
+    // Registered in `onload`, NOT in `startSteps`, because `resolved` fires
+    // before `onLayoutReady` and a listener installed there misses it.
+    //
+    // Measured, not reasoned: a probe plugin registering this listener from
+    // its own `onload` on a 408-note vault recorded `onload` at 0 ms,
+    // `resolved` at 96 ms with `layoutReady` still false, and `onLayoutReady`
+    // at 156 ms. Registering 60 ms late meant the event never arrived, and
+    // `metadataResolved` was still false minutes after startup — so every
+    // cold start left a tag space fallen open, showing the whole vault, until
+    // the user happened to edit a file and `resolved` fired again. The guard
+    // meant to close in a tenth of a second never closed at all.
+    //
+    // The gap this opens is real and is handled in `onMetadataEvent`: the
+    // controller is built in `start()`, at `onLayoutReady`, which the same
+    // measurement puts 60 ms AFTER this event. So the handler can run before
+    // there is a controller to notify, and it returns early when there is
+    // not. Setting the flag is the whole job here; `start()` computes the
+    // first snapshot itself and reads the flag when it does.
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        // The one place readiness is ever granted. From here a tag space
+        // matching nothing means nothing matches, not that nobody has looked.
+        this.metadataResolved = true;
+        this.onMetadataEvent();
+      })
+    );
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -766,16 +796,6 @@ export default class SpacesPlugin extends Plugin {
     );
     // A note's tags are not vault structure, so no vault event reports them.
     this.registerEvent(this.app.metadataCache.on("changed", () => this.onMetadataEvent()));
-    // The cache is not populated at load. Without this a tag space stays
-    // fallen open until something else happens to it.
-    this.registerEvent(
-      this.app.metadataCache.on("resolved", () => {
-        // The one place readiness is ever granted. From here a tag space
-        // matching nothing means nothing matches, not that nobody has looked.
-        this.metadataResolved = true;
-        this.onMetadataEvent();
-      })
-    );
 
     // The coalescing window is a live timer, so it must not outlive the
     // plugin. `register` runs this on unload with the rest of the teardown.
@@ -1391,6 +1411,14 @@ export default class SpacesPlugin extends Plugin {
    *    this fires on every save.
    */
   private onMetadataEvent(): void {
+    // The `resolved` listener is registered in `onload`, because the event
+    // fires before `onLayoutReady`, and `start()` builds the controller AT
+    // `onLayoutReady`. Measured on a 408-note vault: `resolved` at 96 ms,
+    // `onLayoutReady` at 156 ms. So this can be reached with no controller,
+    // and the field's `!` says otherwise only because it is assigned later.
+    // Nothing is lost by returning: `start()` computes the first snapshot and
+    // reads `metadataResolved`, which the listener has already set.
+    if ((this.controller as SpaceController | undefined) === undefined) return;
     this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
     if (!watchesMetadata(this.controller.activeSpace())) return;
     // No membership work to run first, only the coalesced tail. Submitting an
