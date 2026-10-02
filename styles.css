@@ -392,24 +392,55 @@
   outline: none;
   box-shadow: inset 0 0 0 2px var(--text-accent);
 }
-/* In the space because a selected folder above it is, not because anyone
-   picked it. The accent washed down to 10%, the strength
-   `.spaces-drop-parent` already uses for the same kind of statement: a
-   consequence of something else the user did. `.is-selected` below out-ranks
-   it in the cascade and adds accent text and a heavier weight to its own
-   background, so the two cannot read alike at a glance.
+/* Covered by something already picked: a consequence, not a choice.
+   Marked on the leading edge rather than filled, because the fill is what
+   `.is-selected` uses. Both had a 10% accent background, one hardcoded and
+   one via `--background-modifier-active-hover`, which stock Obsidian defines
+   as the same 10% accent mix, so the two states rendered identically and only
+   text color and weight told them apart. A theme narrowing `--text-accent`
+   toward `--text-normal` removed the color difference.
 
-   After `:hover`, so the wash survives the pointer passing over it, and
-   `cursor: default` because the click is a no-op. A row that looks clickable
-   and does nothing is worse than one that says so. */
+   An inset box-shadow, not a border: the row's indent is a computed
+   `padding-left`, so a border would shift every covered row out of its column
+   against its uncovered siblings.
+
+   `cursor: default` because the click is a no-op, and no hover fill for the
+   same reason: the row used to suppress it with its own background, and
+   without this it would light up under the pointer while saying it is inert.
+   A row that looks clickable and does nothing is worse than one that says so.
+   `:not(.is-selected)` so a row that is both keeps the selected fill.
+
+   The focus ring is the same inset box-shadow property, so the plain
+   `:focus-visible` rule above loses to this one at equal specificity. The
+   combined rule stacks both: covered rows stay in the tab order so a keyboard
+   user can reach the title explaining why they are inert, and they need a
+   ring. */
 .spaces-create-tree-row.is-inherited {
-  background: color-mix(in oklch, var(--interactive-accent) 10%, transparent);
+  box-shadow: inset 2px 0 0 0 var(--interactive-accent);
+  color: var(--text-muted);
   cursor: default;
+}
+.spaces-create-tree-row.is-inherited:focus-visible {
+  box-shadow:
+    inset 2px 0 0 0 var(--interactive-accent),
+    inset 0 0 0 2px var(--text-accent);
+}
+.spaces-create-tree-row.is-inherited:not(.is-selected):hover,
+.spaces-create-tree-row.is-overflow:hover {
+  background: transparent;
 }
 .spaces-create-tree-row.is-selected {
   background: var(--background-modifier-active-hover, var(--background-modifier-hover));
   color: var(--text-accent);
   font-weight: 600;
+}
+/* Stands in for rows the budget could not draw. Reads as a note, not a row to
+   act on. Sets no box-shadow, so the base `:focus-visible` ring applies
+   unchanged if it ever takes focus. */
+.spaces-create-tree-row.is-overflow {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: default;
 }
 /* Reserved even on a childless row, so names stay in one column. */
 .spaces-create-tree-caret {
@@ -444,7 +475,7 @@
 /* §: the tag tree, drawn in the same box as the item tree and reached by the
    Tags button above it.
    The row itself is `.spaces-create-tree-row` -- including its caret slot, its
-   indent and the `.is-inherited` wash a covering parent gives it -- so only
+   indent and the leading-edge `.is-inherited` mark a covering parent gives it -- so only
    the differences live here: the tag mark and the note count. No
    `padding-left` of its own, because the panel sets one per row from the
    depth and the two would be the same rule written twice. */

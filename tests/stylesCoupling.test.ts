@@ -42,6 +42,7 @@ const CSS = readFileSync(resolve(process.cwd(), "styles.css"), "utf8");
 interface Rule {
   media: string;
   selector: string;
+  style: CSSStyleDeclaration;
 }
 
 let rules: Rule[] = [];
@@ -57,11 +58,11 @@ beforeAll(() => {
     if (rule instanceof CSSMediaRule) {
       for (const inner of Array.from(rule.cssRules)) {
         if (inner instanceof CSSStyleRule) {
-          out.push({ media: rule.conditionText ?? rule.media.mediaText, selector: inner.selectorText });
+          out.push({ media: rule.conditionText ?? rule.media.mediaText, selector: inner.selectorText, style: inner.style });
         }
       }
     } else if (rule instanceof CSSStyleRule) {
-      out.push({ media: "", selector: rule.selectorText });
+      out.push({ media: "", selector: rule.selectorText, style: rule.style });
     }
   }
   rules = out;
@@ -179,5 +180,34 @@ describe("styles.css — the elsewhere group's boundary", () => {
     wrapper.appendChild(title);
     expect(rules.some((r) => wrapper.matches(r.selector))).toBe(true);
     expect(rules.some((r) => title.matches(r.selector))).toBe(false);
+  });
+});
+
+describe("picker row states", () => {
+  it("a covered row has an edge mark and no background of any kind", () => {
+    const row = document.createElement("div");
+    row.className = "spaces-create-tree-row is-inherited";
+    const matching = rules.filter((r) => row.matches(r.selector));
+    expect(matching.length).toBeGreaterThan(0);
+    // Every rule that can reach the element, not one named selector: a
+    // background arriving through any other rule would collide with
+    // `.is-selected` just the same. The real assertion is the CDP check
+    // (e2e/tint-collision.mjs).
+    for (const r of matching) {
+      for (let k = 0; k < r.style.length; k++) {
+        expect(r.style[k], r.selector).not.toMatch(/^background/);
+      }
+    }
+    expect(matching.some((r) => r.style.getPropertyValue("box-shadow") !== "")).toBe(true);
+  });
+
+  it("a covered row keeps a focus ring beside its edge mark", () => {
+    const row = document.createElement("div");
+    row.className = "spaces-create-tree-row is-inherited";
+    const focus = rules.filter((r) => r.selector.includes("is-inherited") && r.selector.includes(":focus-visible"));
+    expect(focus.length).toBeGreaterThan(0);
+    const shadow = focus.map((r) => r.style.getPropertyValue("box-shadow")).join(" ");
+    expect(shadow).toContain("--interactive-accent");
+    expect(shadow).toContain("--text-accent");
   });
 });
