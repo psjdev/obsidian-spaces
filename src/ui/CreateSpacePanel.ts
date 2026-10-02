@@ -212,11 +212,13 @@ const isOverflowRow = (row: PickerRow<string>): row is OverflowRow => row.kind =
  *
  * Everything not on this list is the same for both and lives in the renderer,
  * which is the point: a row-level fix is made once. Each member is here
- * because the two bodies genuinely disagree about it, and each adapter closes
- * over what its own draw built (the covering set, the tag counts). Of what the
- * adapters close over, `expanded` is the one thing that outlives a draw, being
- * the panel's own state for that body. Form state (`this.state`) outlives a
- * draw too, and both bodies read it while `choose` writes it.
+ * because the two bodies genuinely disagree about it.
+ *
+ * Each adapter closes over what its own draw built (the covering set, the tag
+ * counts, the query). It also reaches panel state that outlives a draw:
+ * `expanded`, which a caret and the arrow keys edit, and `this.state`, which
+ * both bodies read and `choose` writes. The item body also reads
+ * `this.itemFilter`.
  */
 interface RowAdapter<K extends string> {
   /** The `data-` attribute a row is found by, which is also its focus key. */
@@ -1299,9 +1301,11 @@ export class CreateSpacePanel {
    * so a fix to any of them is made in one place. What the adapter supplies is
    * what genuinely differs: the key a row is found by, what covers it, the
    * wording of its titles, the name cell, and what picking changes in state.
-   * Each adapter closes over what its own draw built. Of what the adapters
-   * close over, `expanded` is the one thing that outlives a draw. Form state
-   * (`this.state`) also does, and both bodies read it and `choose` writes it.
+   * Each adapter closes over what its own draw built (the covering set, the tag
+   * counts, the query). It also reaches panel state that outlives a draw:
+   * `expanded`, which a caret and the arrow keys edit, and `this.state`, which
+   * both bodies read and `choose` writes. The item body also reads
+   * `this.itemFilter`.
    */
   private renderTreeRow<K extends string>(
     host: HTMLElement,
