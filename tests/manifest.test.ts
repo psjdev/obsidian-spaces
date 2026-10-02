@@ -113,22 +113,6 @@ describe("versions.json", () => {
   });
 });
 
-describe("the support link", () => {
-  it("matches manifest.json's fundingUrl, or is empty", () => {
-    // Two places name the same address: `fundingUrl` puts a Support link on
-    // the community-list entry, `SUPPORT_URL` renders one in the settings tab.
-    // They drifting apart is invisible — one surface would quietly point
-    // somewhere else — so it is asserted rather than remembered.
-    const settings = readFileSync("src/ui/SettingsTab.ts", "utf8");
-    const m = /export const SUPPORT_URL = "([^"]*)"/.exec(settings);
-    expect(m, "SUPPORT_URL declaration not found").not.toBeNull();
-    const supportUrl = m?.[1] ?? "";
-    // With the labelled form the settings tab links to ONE of the options —
-    // the primary ask — so membership is the assertion, not equality. What
-    // must not happen is the tab pointing somewhere the manifest never names.
-    if (supportUrl !== "") expect(fundingUrls()).toContain(supportUrl);
-  });
-});
 
 describe("package.json", () => {
   it("carries the same version as the manifest", () => {

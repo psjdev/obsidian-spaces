@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { isStillCovering, resyncInertSiblings } from "../src/ui/panelCoverage";
+import { isStillCovering, resyncInertSiblings } from "../src/ui/panelMount";
 
 /**
  * `isStillCovering` and `resyncInertSiblings` are the only two rules in the

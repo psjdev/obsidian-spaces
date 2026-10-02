@@ -44,6 +44,12 @@ interface Harness {
   plugin: SpacesPlugin;
   /** What `app.workspace.getActiveFile()` answers. */
   setActiveFile(path: string | null): void;
+  /**
+   * Stands a minimal controller in front of the plugin, answering this one
+   * reason for this one path. `start()` never runs here, so there is no real
+   * controller; the commands that consult the snapshot need one that answers.
+   */
+  setSnapshotReason(path: string, reason: string): void;
   /** How many times `ensureOrderingPatched` looked for the explorer leaf. */
   leafLookups(): number;
 }
@@ -84,6 +90,16 @@ function makeHarness(): Harness {
       const file = new TFile();
       file.path = path;
       active = file;
+    },
+    setSnapshotReason(path, reason) {
+      plugin["controller"] = {
+        currentSnapshot: () => ({
+          decisionFor: (p: string) =>
+            p === path
+              ? { visible: true, reason, canRemoveMembership: reason === "exact-member" }
+              : { visible: false, reason: "hidden-nonmember", canRemoveMembership: false },
+        }),
+      } as unknown as SpacesPlugin["controller"];
     },
     leafLookups: () => lookups,
   };
@@ -177,6 +193,30 @@ describe("add-active-file-to-space", () => {
     expect(invoke(h.plugin, ID, true)).toBe(false);
   });
 
+  it("is unavailable for a file the space holds through a TAG member", () => {
+    // The command decided "already held" from the stored path members plus
+    // `inheritedFromFolder`, neither of which knows what a tag is, so it was
+    // offered for a note the space already contains and taking it wrote a
+    // redundant exact member. The snapshot is the resolved membership, tag
+    // expansion included, and it is what the tree was drawn from.
+    h.plugin["runtime"].setSelection({ kind: "space", id: "research" });
+    h.setActiveFile("Anywhere/Tagged.md");
+    expect(invoke(h.plugin, ID, true)).toBe(true);
+    h.setSnapshotReason("Anywhere/Tagged.md", "exact-member");
+    expect(invoke(h.plugin, ID, true)).toBe(false);
+  });
+
+  it("is still offered for a file the snapshot only shows as a VISITOR", () => {
+    // The file in question is the OPEN one, so in any space that does not
+    // hold it it is a visitor — and visitors are VISIBLE. A check on
+    // `visible` rather than on the reason would grey this command out for
+    // exactly the files it exists to offer.
+    h.plugin["runtime"].setSelection({ kind: "space", id: "research" });
+    h.setActiveFile("Papers/Draft.md");
+    h.setSnapshotReason("Papers/Draft.md", "visitor");
+    expect(invoke(h.plugin, ID, true)).toBe(true);
+  });
+
   it("adds the active file to the active space", async () => {
     h.plugin["runtime"].setSelection({ kind: "space", id: "research" });
     h.setActiveFile("Papers/Draft.md");
@@ -188,7 +228,9 @@ describe("add-active-file-to-space", () => {
     // Written as a file, not a folder: the kind decides whether descendants
     // inherit membership.
     const stored = h.plugin["defs"].get().spaces[0].members;
-    expect(stored.find((m) => m.path === "Papers/Draft.md")?.kind).toBe("file");
+    expect(stored.find((m) => m.kind !== "tag" && m.path === "Papers/Draft.md")?.kind).toBe(
+      "file"
+    );
   });
 });
 
@@ -236,6 +278,46 @@ describe("pause-filtering", () => {
     invoke(h.plugin, "pause-filtering", false);
     h.plugin["ensureOrderingPatched"]();
     expect(h.leafLookups()).toBeGreaterThan(before);
+  });
+
+  it("gates the reorder drag, so a drop while paused writes nothing", () => {
+    // `setFilteringPaused` releases the sort seam but leaves `DragOrdering`
+    // bound to the explorer. With the gesture still enabled a same-parent drop
+    // was claimed and wrote a new order, against a tree that is no longer
+    // ordered by us: nothing moved on screen and `data.json` grew anyway.
+    // `orderingScope.ts` names that failure in its header.
+    expect(h.plugin["dragDeps"]().enabled()).toBe(true);
+    invoke(h.plugin, "pause-filtering", false);
+    expect(h.plugin["dragDeps"]().enabled()).toBe(false);
+    invoke(h.plugin, "pause-filtering", false);
+    expect(h.plugin["dragDeps"]().enabled()).toBe(true);
+  });
+
+  it("clears the dimming while paused, and puts it back on resume", () => {
+    // The pause promises the whole vault. The adapter paints
+    // `spaces-scaffold`/`spaces-visitor` from the ACTIVE space's snapshot, and
+    // those words describe nothing in an unfiltered tree -- so the user was
+    // told the filter was off while rows stayed greyed and italicised for no
+    // visible reason.
+    const applied: (object | null)[] = [];
+    const snap = { visiblePaths: () => new Set<string>(), decisionFor: () => undefined };
+    h.plugin["controller"] = {
+      currentSnapshot: () => snap,
+    } as unknown as SpacesPlugin["controller"];
+    h.plugin["adapter"] = {
+      apply: (s: object | null) => {
+        applied.push(s);
+        return 0;
+      },
+    } as unknown as SpacesPlugin["adapter"];
+
+    invoke(h.plugin, "pause-filtering", false);
+    expect(applied).toEqual([null]);
+    invoke(h.plugin, "pause-filtering", false);
+    // Not merely "called again": the snapshot itself, or the dimming stays off
+    // for the rest of the session. Nothing else re-seeds the adapter -- its own
+    // MutationObserver re-reads whatever `apply` last stored.
+    expect(applied[1]).toBe(snap);
   });
 
   it("still reports membership while paused — the data is unchanged", () => {

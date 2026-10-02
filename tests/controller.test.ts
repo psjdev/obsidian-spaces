@@ -3,7 +3,9 @@ import { SpaceController } from "../src/controller/SpaceController";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildFakeVault } from "./helpers/fakeVault";
-import { SCHEMA_VERSION } from "../src/types";
+import { createLazyTagIndex, createMapTagIndex } from "../src/visibility/TagIndex";
+import { tagIndexOf } from "./helpers/tagIndex";
+import { SCHEMA_VERSION, type MemberEntry } from "../src/types";
 import type { SwitchOutcome } from "../src/types";
 import { createSpace } from "../src/actions/spaceLifecycle";
 
@@ -41,10 +43,16 @@ async function build() {
   const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
   runtime.load();
   const apply = vi.fn();
-  const controller = new SpaceController(store, runtime, vault, {
-    apply,
-    livePaths: () => new Set<string>(),
-  });
+  const controller = new SpaceController(
+    store,
+    runtime,
+    vault,
+    {
+      apply,
+      livePaths: () => new Set<string>(),
+    },
+    createMapTagIndex(new Map())
+  );
   return { controller, apply, store, runtime };
 }
 
@@ -135,6 +143,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
       {
         transition: async (from, to): Promise<SwitchOutcome> => {
           calls.push({ from, to });
@@ -165,6 +174,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           seenDuring = rt.getSelection();
@@ -206,6 +216,7 @@ describe("SpaceController", () => {
         },
         livePaths: () => new Set<string>(),
       },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
       }
@@ -244,6 +255,7 @@ describe("SpaceController", () => {
         },
         livePaths: () => new Set<string>(),
       },
+      createMapTagIndex(new Map()),
       { transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }) }
     );
 
@@ -279,6 +291,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           throw new Error("boom");
@@ -311,6 +324,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
         onOutcome: () => {
@@ -348,6 +362,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           await gate;
@@ -400,6 +415,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
       { transition: () => gate }
     );
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -443,6 +459,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply, livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           // changeLayout() replaced the workspace: the revealed file is gone
@@ -505,6 +522,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           // Simulates the restore reopening the dismissed path and main.ts's
@@ -546,6 +564,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           controller.onFileOpened("Recipes.md");
@@ -576,7 +595,8 @@ describe("SpaceController", () => {
       store,
       rt,
       vault,
-      { apply: vi.fn(), livePaths: () => live }
+      { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map())
     );
     await controller.switchTo({ kind: "space", id: "research" });
     expect(controller.currentSnapshot()!.decisionFor("Recipes.md").visible).toBe(true);
@@ -599,7 +619,8 @@ describe("SpaceController", () => {
       store,
       rt,
       vault,
-      { apply: vi.fn(), livePaths: () => new Set(["Recipes.md"]) }
+      { apply: vi.fn(), livePaths: () => new Set(["Recipes.md"]) },
+      createMapTagIndex(new Map())
     );
     await controller.switchTo({ kind: "space", id: "research" });
     const snap = controller.currentSnapshot()!;
@@ -621,7 +642,8 @@ describe("SpaceController", () => {
       store,
       rt,
       vault,
-      { apply: vi.fn(), livePaths: () => new Set(["Recipes.md"]) }
+      { apply: vi.fn(), livePaths: () => new Set(["Recipes.md"]) },
+      createMapTagIndex(new Map())
     );
     await controller.switchTo({ kind: "space", id: "research" });
     expect(controller.currentSnapshot()!.decisionFor("Recipes.md").visible).toBe(true);
@@ -661,6 +683,7 @@ describe("SpaceController", () => {
       rt,
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Each restore replaces the workspace with the target's own tabs.
@@ -697,6 +720,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -717,7 +741,9 @@ describe("SpaceController", () => {
     expect(controller.currentSnapshot()!.decisionFor("Recipes.md").reason).toBe("exact-member");
 
     await store.mutate((d) => {
-      d.spaces[0].members = d.spaces[0].members.filter((m) => m.path !== "Recipes.md");
+      d.spaces[0].members = d.spaces[0].members.filter(
+        (m) => m.kind === "tag" || m.path !== "Recipes.md"
+      );
     });
     controller.refresh();
     // "Remove from space" must actually remove the row: no leaf backs it.
@@ -780,6 +806,7 @@ describe("SpaceController", () => {
       rt,
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Ledger's restore closes it; Research's keeps it.
@@ -850,6 +877,7 @@ describe("SpaceController", () => {
       rt,
       vaultWithMember,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Research's restore keeps Recipes.md's tab (it is a member and
@@ -899,6 +927,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -917,7 +946,9 @@ describe("SpaceController", () => {
     });
     controller.refresh();
     await store.mutate((d) => {
-      d.spaces[0].members = d.spaces[0].members.filter((m) => m.path !== "Recipes.md");
+      d.spaces[0].members = d.spaces[0].members.filter(
+        (m) => m.kind === "tag" || m.path !== "Recipes.md"
+      );
     });
     controller.refresh();
 
@@ -949,6 +980,7 @@ describe("SpaceController", () => {
         rt,
         vault,
         { apply: vi.fn(), livePaths: () => live },
+        createMapTagIndex(new Map()),
         withLayout
           ? {
               transition: async (): Promise<SwitchOutcome> => {
@@ -994,7 +1026,8 @@ describe("SpaceController", () => {
       store,
       rt,
       vault,
-      { apply: vi.fn(), livePaths: () => live }
+      { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map())
     );
     await controller.switchTo({ kind: "space", id: "research" });
     controller.onActiveFileChanged("Recipes.md");
@@ -1036,7 +1069,8 @@ describe("SpaceController", () => {
       store,
       rt,
       vault,
-      { apply: vi.fn(), livePaths: () => live }
+      { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map())
     );
     await controller.switchTo({ kind: "space", id: "research" });
     controller.dismissRevealed("Recipes.md");
@@ -1071,6 +1105,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -1104,6 +1139,7 @@ describe("SpaceController", () => {
       rt,
       vault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -1142,7 +1178,8 @@ describe("SpaceController", () => {
       store,
       rt,
       vault,
-      { apply: vi.fn(), livePaths: () => live }
+      { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map())
     );
     await controller.switchTo({ kind: "space", id: "research" });
     controller.onActiveFileChanged("Recipes.md");
@@ -1194,6 +1231,7 @@ describe("SpaceController", () => {
       rt,
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Each space's OWN restore opens its own visitor tab — never via
@@ -1264,6 +1302,7 @@ describe("SpaceController", () => {
       rt,
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // NEITHER space's own restore ever opens Visitor1.md — each
@@ -1306,6 +1345,7 @@ describe("SpaceController", () => {
       rt,
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
+      createMapTagIndex(new Map()),
       {
         transition: async (): Promise<SwitchOutcome> => {
           // spaceA's own restore closes Deliberate.md's tab and opens its own.
@@ -1359,10 +1399,16 @@ describe("SpaceController", () => {
     await store.load();
     const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
     runtime.load();
-    const controller = new SpaceController(store, runtime, seedVault, {
-      apply: vi.fn(),
-      livePaths: () => new Set<string>(),
-    });
+    const controller = new SpaceController(
+      store,
+      runtime,
+      seedVault,
+      {
+        apply: vi.fn(),
+        livePaths: () => new Set<string>(),
+      },
+      createMapTagIndex(new Map())
+    );
 
     const id = await createSpace(store, "Projects Space", {
       members: [{ path: "Projects", kind: "folder" }],
@@ -1546,5 +1592,63 @@ describe("SpaceController", () => {
       expect(snap!.visiblePaths().size).toBeGreaterThan(0);
       expect(snap!.decisionFor("Papers/A.md").visible).toBe(true);
     });
+  });
+});
+
+/**
+ * What a recompute is allowed to COST when nothing in the space depends on a
+ * note's contents.
+ *
+ * `createObsidianTagIndex` walks every markdown file in the vault and reads
+ * each one's metadata cache. The coalescer replaces the tag index on every
+ * burst of vault events, so an eagerly built one charged that walk to every
+ * user on every burst, including everyone who has never put a tag in a space.
+ */
+describe("SpaceController tag index laziness", () => {
+  async function buildWith(members: MemberEntry[]) {
+    let stored: unknown = {
+      schemaVersion: SCHEMA_VERSION,
+      settings: { globalIgnore: [], restoreLayouts: false },
+      spaces: [
+        { id: "research", name: "Research", icon: "microscope", color: "#4ecdc4", members },
+      ],
+    };
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await store.load();
+    const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    runtime.load();
+    let builds = 0;
+    const controller = new SpaceController(
+      store,
+      runtime,
+      vault,
+      { apply: vi.fn(), livePaths: () => new Set<string>() },
+      createLazyTagIndex(() => {
+        builds++;
+        return tagIndexOf(new Map([["Recipes.md", ["project"]]]));
+      })
+    );
+    return { controller, builds: () => builds };
+  }
+
+  it("never builds it for a space of files and folders", async () => {
+    const { controller, builds } = await buildWith([{ path: "Papers", kind: "folder" }]);
+    await controller.switchTo({ kind: "space", id: "research" });
+    controller.refresh();
+    expect(controller.currentSnapshot()?.decisionFor("Papers/A.md").visible).toBe(true);
+    expect(builds()).toBe(0);
+  });
+
+  it("builds it, once, for a space holding a tag member", async () => {
+    const { controller, builds } = await buildWith([{ kind: "tag", tag: "project" }]);
+    await controller.switchTo({ kind: "space", id: "research" });
+    controller.refresh();
+    expect(controller.currentSnapshot()?.decisionFor("Recipes.md").visible).toBe(true);
+    expect(builds()).toBe(1);
   });
 });

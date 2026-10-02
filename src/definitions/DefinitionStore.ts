@@ -208,9 +208,9 @@ export class DefinitionStore {
         // tells the caller its action did not happen, the Notice tells the
         // user, because most of the 25 call sites do not catch.
         const message =
-          `Spaces: not saving — ${DATA_FILE} in the spaces plugin folder ` +
+          `Spaces: not saving. ${DATA_FILE} in the spaces plugin folder ` +
           `could not be read (${this.loadFailure}). Your spaces are still in ` +
-          `that file; fix or move it, then reload the plugin.`;
+          `that file. Fix or move it, then reload the plugin.`;
         this.warn(message);
         throw new Error(message);
       }
@@ -274,7 +274,7 @@ export class DefinitionStore {
     if (this.saveFailureWarned) return;
     this.saveFailureWarned = true;
     this.warn(
-      `Spaces: your change may not have been saved — ${DATA_FILE} on disk ` +
+      `Spaces: your change may not have been saved. ${DATA_FILE} on disk ` +
         `does not match what was just written. Check that the plugin folder ` +
         `is writable and not locked by a sync client.`
     );

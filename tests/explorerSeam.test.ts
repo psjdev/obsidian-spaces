@@ -27,6 +27,7 @@ import SpacesPlugin from "../src/main";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { isPatched } from "../src/layout/nativeExplorerSort";
 import { CLS } from "../src/explorer/selectors";
 import { buildFakeVault } from "./helpers/fakeVault";
@@ -134,10 +135,16 @@ async function makeHarness(
     set: (k, v) => void runtimeBacking.set(k, v),
   });
   const live = new Set<string>();
-  plugin["controller"] = new SpaceController(plugin["defs"], plugin["runtime"], VAULT, {
-    apply: (snap) => plugin["adapter"].apply(snap),
-    livePaths: () => new Set(live),
-  });
+  plugin["controller"] = new SpaceController(
+    plugin["defs"],
+    plugin["runtime"],
+    VAULT,
+    {
+      apply: (snap) => plugin["adapter"].apply(snap),
+      livePaths: () => new Set(live),
+    },
+    createMapTagIndex(new Map())
+  );
   plugin["switcher"] = {
     mount: () => undefined,
     render: () => undefined,

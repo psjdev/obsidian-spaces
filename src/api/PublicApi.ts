@@ -1,4 +1,5 @@
 import { inheritedFromFolder } from "../actions/membershipMenu";
+import { pathMembers } from "../definitions/membership";
 import { canonicalPath } from "../visibility/glob";
 import type {
   ActiveSelection,
@@ -117,19 +118,35 @@ export class PublicApi {
       return space ? summarise(space) : null;
     },
     listSpaces: () => this.allSpaces().map(summarise),
+    // The contract, and why it is narrow rather than wrong, is on
+    // `SpacesApi.isMember` in `types.ts`. Three rules, in this order.
     isMember: (path, spaceId) => {
       const space = spaceId === undefined ? this.activeSpace() : this.spaceById(spaceId);
       if (!space) return false;
-      if (space.members.some((m) => canonicalPath(m.path) === canonicalPath(path))) return true;
-      // Membership is not ownership. A path under a member FOLDER is a member
-      // without a stored entry of its own, and answering from `members` alone
-      // would call it a non-member.
-      return inheritedFromFolder(space, path) !== null;
+      // 1. An exact member wins outright, exclusion included: a hand-added
+      // member is a SEED, and the engine's exclusion set is consulted only
+      // when expanding folder seeds, so an excluded exact member is still
+      // shown. Removing a hand-added note removes the member rather than
+      // writing an exclusion, so this state is only reachable by hand.
+      if (pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(path))) return true;
+      // 2. Membership is not ownership. A path under a member FOLDER is a
+      // member without a stored entry of its own, and answering from
+      // `members` alone would call it a non-member...
+      if (inheritedFromFolder(space, path) === null) return false;
+      // 3. ...but an exclusion is exactly how the user says "not that one",
+      // and the engine drops it when expanding the folder. Answering true
+      // here would have this surface contradict the tree on the one case the
+      // user went out of their way to state.
+      const excluded = space.exclude ?? [];
+      return !excluded.some((e) => canonicalPath(e) === canonicalPath(path));
     },
-    memberPaths: (spaceId) =>
-      (spaceId === undefined ? this.activeSpace() : this.spaceById(spaceId))?.members.map(
-        (m) => m.path
-      ) ?? [],
+    // Tag members carry no path and are dropped by `pathMembers`. Stated on
+    // the declared surface in `types.ts`, because "the exact stored member
+    // paths" is honest but no longer complete on its own.
+    memberPaths: (spaceId) => {
+      const space = spaceId === undefined ? this.activeSpace() : this.spaceById(spaceId);
+      return space ? pathMembers(space).map((m) => m.path) : [];
+    },
     onSpaceChange: (listener) => {
       this.listeners.add(listener);
       let subscribed = true;

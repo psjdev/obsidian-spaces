@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import {
   decorate,
   type DecorateContext,
@@ -8,6 +9,9 @@ import {
   type VisibilityDecisionLike,
 } from "../src/actions/membershipMenu";
 import type { SpaceDefinition } from "../src/types";
+
+/** No note in this fake vault carries a tag; these cases are all about paths. */
+const noTags = createMapTagIndex(new Map());
 
 /**
  * Obsidian's own Shift+click range selection walks its
@@ -102,8 +106,9 @@ function ctxWith(
       activeSpace: () => s,
       currentSnapshot: () => ({ decisionFor }),
     },
-    // Only *All* reads this; the active-space branches ignore it.
+    // Only *All* reads these two; the active-space branches ignore them.
     spaces: () => (s ? [s] : []),
+    tags: () => noTags,
   };
 }
 
@@ -232,6 +237,47 @@ describe("decorate (Stop showing here on visitor rows)", () => {
     expect(items.map((i) => i.title)).toEqual(["Remove from Q6 Test"]);
   });
 
+  it("offers no Add entry for a row the space already inherits", () => {
+    // The row is in the space through a folder, which the disabled entry
+    // above it names. `addAll` dedupes against the space's path members alone
+    // and never consults `inheritedFromFolder`, so accepting the offer wrote a
+    // redundant exact member: nothing visible changed, and removing the folder
+    // afterwards no longer took the row with it.
+    const { menu, items } = fakeMenu();
+    decorate(
+      menu,
+      ctxWith({ Papers: { visible: true, reason: "inherited-member" } }),
+      [fileAt("Papers")],
+      noopHandlers
+    );
+    // The unnamed form: this fixture's space has no folder member, so
+    // `inheritedFromFolder` has nothing to name. Which form is drawn is
+    // `anyInherited`'s business and is pinned elsewhere; what matters here is
+    // that it is the ONLY row.
+    expect(items.map((i) => i.title)).toEqual(["Remove from Q6 Test (inherited)"]);
+  });
+
+  it("counts only the rows an add would change, in a selection that mixes the two", () => {
+    // The label and the write have to agree, so the count comes from the same
+    // array the handler is given.
+    const { menu, items } = fakeMenu();
+    const added: string[][] = [];
+    decorate(
+      menu,
+      ctxWith({
+        "a.md": { visible: true, reason: "visitor" },
+        "b.md": { visible: true, reason: "visitor" },
+        Papers: { visible: true, reason: "inherited-member" },
+      }),
+      [fileAt("a.md"), fileAt("b.md"), fileAt("Papers")],
+      { ...noopHandlers, addAll: (f) => added.push(f.map((x) => x.path)) }
+    );
+    const entry = items.find((i) => i.title?.startsWith("Add"));
+    expect(entry?.title).toBe("Add 2 to Q6 Test");
+    entry!.clickHandler!();
+    expect(added).toEqual([["a.md", "b.md"]]);
+  });
+
   it("dismisses only the visitor rows in a mixed selection", () => {
     const { menu, items } = fakeMenu();
     const dismissed: string[][] = [];
@@ -280,6 +326,7 @@ function allCtx(spaces: SpaceDefinition[]) {
       currentSnapshot: () => ({ decisionFor: () => ({ visible: true, reason: "exact-member", canRemoveMembership: true }) }),
     },
     spaces: () => spaces,
+    tags: () => noTags,
   };
 }
 

@@ -20,8 +20,12 @@ import { SpaceSuggestModal } from "./ui/SpaceSuggestModal";
 import { spaceEntries } from "./ui/spaceEntries";
 import { knownIconIds } from "./ui/knownIcons";
 import { CreateSpacePanel } from "./ui/CreateSpacePanel";
+import { nativeKnownTags } from "./ui/nativeTagCounts";
 import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
+import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
+import { createLazyTagIndex } from "./visibility/TagIndex";
+import { createLazyVaultIndex } from "./visibility/VaultIndex";
 import { repairOnRename, repairRenameIn } from "./lifecycle/pathRepair";
 import {
   correlate,
@@ -47,7 +51,9 @@ import { installNativeCreateRedirect } from "./actions/nativeNewFileParent";
 import { armIntent, matchIntent, type CreationIntent } from "./actions/creationIntent";
 import { canOfferCreateSpaceFromFolder } from "./actions/createSpaceMenu";
 import { inheritedFromFolder } from "./actions/membershipMenu";
-import { canonicalPath } from "./visibility/glob";
+import { pathMembers, watchesMetadata } from "./definitions/membership";
+import { canonicalPath, compileIgnore } from "./visibility/glob";
+import { buildPreview } from "./ui/previewSeam";
 import { PublicApi } from "./api/PublicApi";
 import { MissingRootNotice } from "./ui/MissingRootNotice";
 import { SpacesSettingTab, type EffectiveRestoreState } from "./ui/SettingsTab";
@@ -174,12 +180,15 @@ const ATTR_SPACE = "data-spaces-space";
  * and not worth doing at any risk of a false `false`.
  *
  * Covers every string `repairOnRename` reads: `root`, each space's member
- * paths, and the KEYS as well as the entries of every order map (order lists
- * are keyed by folder path, so a folder rename rewrites keys too). `newPath`
- * counts as a hit because the move branch drops an entry already equal to the
- * destination, which is a change with no rewrite anywhere. Member
- * de-duplication needs no check: `validateMembers` de-duplicates on the way
- * in, so a document holding a member path twice cannot reach here.
+ * paths, each space's EXCLUSIONS, and the KEYS as well as the entries of
+ * every order map (order lists are keyed by folder path, so a folder rename
+ * rewrites keys too). `newPath` counts as a hit because the move branch drops
+ * an entry already equal to the destination, which is a change with no
+ * rewrite anywhere. Member de-duplication needs no check: `validateMembers`
+ * de-duplicates on the way in, so a document holding a member path twice
+ * cannot reach here. Exclusion de-duplication needs none either, for a
+ * different reason: a rename can manufacture a duplicate, but only by
+ * rewriting one of the two entries, which is already a hit.
  */
 export function renameTouchesDefs(
   defs: SpacesDefinitions,
@@ -195,7 +204,12 @@ export function renameTouchesDefs(
 
   for (const space of defs.spaces) {
     if (space.root !== undefined && hit(space.root)) return true;
-    for (const m of space.members) if (hit(m.path)) return true;
+    for (const m of pathMembers(space)) if (hit(m.path)) return true;
+    // Exclusions are literal vault paths and are rewritten by the repair, so
+    // a rename that ONLY an exclusion names must still reach it. Without
+    // this the repair is never invoked at all for that rename, which is the
+    // one shape of this bug that fails silently rather than half-way.
+    for (const p of space.exclude ?? []) if (hit(p)) return true;
   }
 
   const maps: OrderMap[] = [];
@@ -224,6 +238,25 @@ export default class SpacesPlugin extends Plugin {
   private defs!: DefinitionStore;
   private runtime!: RuntimeStateStore;
   private controller!: SpaceController;
+
+  /**
+   * Whether Obsidian's metadata cache has finished its initial parse, which
+   * is what lets the controller tell "no matches yet" from "no matches".
+   *
+   * `metadataCache.on("resolved")` is the only thing that sets it true, and
+   * it is public. `onload()` seeds it from `workspace.layoutReady` because of
+   * the one case the event cannot cover: a plugin ENABLED after startup has
+   * already missed `resolved`, and would never see another until some file
+   * changed, so a tag space would stay fallen open indefinitely. During app
+   * startup `onload` runs before the layout is ready, so the seed is false
+   * exactly when the cache really is cold, and true exactly when the plugin
+   * was started into a running app whose cache is already warm.
+   *
+   * The listener is registered in `onload` too, and that placement is load
+   * bearing: `resolved` fires before `onLayoutReady`, so registering any
+   * later misses it. See the registration for the measurement.
+   */
+  private metadataResolved = false;
 
   /**
    * Takes `fileManager.getNewFileParent` back off. Null until `start()`
@@ -361,6 +394,35 @@ export default class SpacesPlugin extends Plugin {
 
   override async onload(): Promise<void> {
     this.loaded = true;
+    // Read HERE and nowhere later: during app startup this is false, and by
+    // the time anything else could ask it would be true. See the field.
+    this.metadataResolved = this.app.workspace.layoutReady;
+    // Registered in `onload`, NOT in `startSteps`, because `resolved` fires
+    // before `onLayoutReady` and a listener installed there misses it.
+    //
+    // Measured, not reasoned: a probe plugin registering this listener from
+    // its own `onload` on a 408-note vault recorded `onload` at 0 ms,
+    // `resolved` at 96 ms with `layoutReady` still false, and `onLayoutReady`
+    // at 156 ms. Registering 60 ms late meant the event never arrived, and
+    // `metadataResolved` was still false minutes after startup — so every
+    // cold start left a tag space fallen open, showing the whole vault, until
+    // the user happened to edit a file and `resolved` fired again. The guard
+    // meant to close in a tenth of a second never closed at all.
+    //
+    // The gap this opens is real and is handled in `onMetadataEvent`: the
+    // controller is built in `start()`, at `onLayoutReady`, which the same
+    // measurement puts 60 ms AFTER this event. So the handler can run before
+    // there is a controller to notify, and it returns early when there is
+    // not. Setting the flag is the whole job here; `start()` computes the
+    // first snapshot itself and reads the flag when it does.
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        // The one place readiness is ever granted. From here a tag space
+        // matching nothing means nothing matches, not that nobody has looked.
+        this.metadataResolved = true;
+        this.onMetadataEvent();
+      })
+    );
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -391,8 +453,8 @@ export default class SpacesPlugin extends Plugin {
       // every write.
       new Notice(
         outcome.futureSchema
-          ? "Spaces: settings are from a newer version. Showing all files, and not saving changes."
-          : `Spaces: settings could not be read (${outcome.error}). Showing all files, and not saving changes.`
+          ? "Spaces: settings are from a newer version. Showing all notes and folders, and not saving changes."
+          : `Spaces: settings could not be read (${outcome.error}). Showing all notes and folders, and not saving changes.`
       );
     }
 
@@ -426,6 +488,12 @@ export default class SpacesPlugin extends Plugin {
         this.app,
         this,
         this.defs,
+        // THE tag index, reached rather than built. Deferred like the three
+        // accessors further down, and for a sharper reason than they have:
+        // the controller that owns the index is built in `start()` and this
+        // runs in `onload()`, and the index itself is a snapshot that every
+        // flush and every metadata change replaces.
+        () => this.controller.tagIndex(),
         {
           onDeleted: (id) => {
             this.runtime.dropLayoutFor(id);
@@ -525,7 +593,7 @@ export default class SpacesPlugin extends Plugin {
     } catch (e) {
       console.error("Spaces: failed to start; the file tree is unfiltered", e);
       new Notice(
-        "Spaces: failed to start — the file tree is showing every note, " +
+        "Spaces: failed to start. The file tree is showing every note, " +
           "unfiltered. Your spaces are untouched. See the developer console " +
           "for the error, then reload the plugin."
       );
@@ -541,9 +609,10 @@ export default class SpacesPlugin extends Plugin {
       if (this.explorerHealthWarned) return;
       this.explorerHealthWarned = true;
       new Notice(
-        "Spaces: stopped de-emphasising scaffold and visitor rows — the file " +
-          "explorer layout was not recognised. Spaces still filter the tree; only " +
-          "the dimming stopped."
+        "Spaces: dimming is off. Parent folders, and notes you open from " +
+          "outside this space, now look the same as the space's own notes and " +
+          "folders. Filtering is unaffected. Reload Obsidian to try again, and " +
+          "check for a Spaces update if the dimming stays off."
       );
     });
 
@@ -555,11 +624,20 @@ export default class SpacesPlugin extends Plugin {
     this.controller = new SpaceController(
       this.defs,
       this.runtime,
-      createObsidianVaultIndex(this.app.vault),
+      // LAZY, for the same reason the tag index below is. The walk costs
+      // 6.6 ms on a 10,000 note vault and `recompute` returns before touching
+      // the vault index at all while All is active — which is the majority
+      // case, and the only case for a user who has never made a space. It ran
+      // here inside `onload()`, which Obsidian awaits. The ordering invariant
+      // survives: the flush installs the vault index before the tag index,
+      // and a wrapper can only build at or after the moment it was installed.
+      createLazyVaultIndex(() => createObsidianVaultIndex(this.app.vault)),
       {
         apply: (snap) => this.onSnapshotApplied(snap),
         livePaths: () => this.liveLeafPaths(),
+        metadataReady: () => this.metadataResolved,
       },
+      createLazyTagIndex(() => createObsidianTagIndex(this.app)),
       {
         transition: (from, to) =>
           this.runMaskedTransition(from, to),
@@ -716,6 +794,9 @@ export default class SpacesPlugin extends Plugin {
         });
       })
     );
+    // A note's tags are not vault structure, so no vault event reports them.
+    this.registerEvent(this.app.metadataCache.on("changed", () => this.onMetadataEvent()));
+
     // The coalescing window is a live timer, so it must not outlive the
     // plugin. `register` runs this on unload with the rest of the teardown.
     this.register(() => this.vaultChanges.cancel());
@@ -1039,9 +1120,27 @@ export default class SpacesPlugin extends Plugin {
     if (!space) return null;
     const file = this.app.workspace.getActiveFile();
     if (!file) return null;
+    // The resolved membership, which is the only answer that accounts for tag
+    // members and exclusions — the two definition-only tests below cannot see
+    // either, so without this the command was offered for a note the space
+    // already holds through a tag, and taking it wrote a redundant exact
+    // member. Same pattern as `ensureMember` in `actions/creation.ts`.
+    //
+    // `reason`, NOT `visible`: the file in question is the OPEN one, so in any
+    // space that does not hold it it is a visitor, and visitors are visible.
+    // Testing `visible` would grey the command out for exactly the files it
+    // exists to offer.
+    const controller = this.controller as SpaceController | undefined;
+    const reason = controller?.currentSnapshot()?.decisionFor(file.path).reason;
+    if (reason === "exact-member" || reason === "inherited-member") return null;
+    // Kept behind the snapshot rather than replaced by it. There is no
+    // snapshot before the first recompute, and one taken before a write is a
+    // tick behind the document; both checks only ever grey the command out
+    // further, so a disagreement costs a redundant offer at worst.
+    //
     // The same fold the membership writes use, so a file the
     // space already stores in another casing is not offered again.
-    if (space.members.some((m) => canonicalPath(m.path) === canonicalPath(file.path))) {
+    if (pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(file.path))) {
       return null;
     }
     // Already covered by a member folder, so an exact entry would be a second
@@ -1065,7 +1164,7 @@ export default class SpacesPlugin extends Plugin {
         const space = d.spaces.find((s) => s.id === target.spaceId);
         if (
           space &&
-          !space.members.some((m) => canonicalPath(m.path) === canonicalPath(target.path))
+          !pathMembers(space).some((m) => canonicalPath(m.path) === canonicalPath(target.path))
         ) {
           // "file": the active file is a file. The kind decides whether
           // descendants inherit membership, so it is not cosmetic.
@@ -1095,8 +1194,32 @@ export default class SpacesPlugin extends Plugin {
     this.filteringPaused = paused;
     if (paused) {
       this.teardownOrdering();
+      // The dimming is the ADAPTER's, not the seam's, so releasing the seam
+      // above does not stop it. Without this the whole vault renders (which is
+      // what the Notice below promises) with the active space's scaffold and
+      // visitor rows still greyed and italicised, against a tree where those
+      // words mean nothing: rows dimmed for a reason the user cannot see.
+      //
+      // Clearing here is only half of it: `applyAdapterSnapshot` holds the
+      // paused state, so the next recompute cannot paint them back. See its
+      // comment for why the guard lives there and not at this call site.
+      this.applyAdapterSnapshot(null);
     } else {
       this.ensureOrderingPatched();
+      // And put it back, explicitly. Nothing else re-seeds the adapter:
+      // `applyFilterAndOrdering` below only asks the explorer to re-sort, and
+      // the adapter's MutationObserver re-reads the same null this method
+      // wrote on the way in. `currentSnapshot()` is null in *All*, which is
+      // the correct answer there and the one `apply` already expects.
+      //
+      // Reached through `applyAdapterSnapshot` rather than `adapter.apply`
+      // directly, because that helper exists to stop the second argument
+      // being dropped, and because `filteringPaused` is already false by this
+      // line so its guard lets this through.
+      //
+      // Optional on the controller for the same reason `start()`'s repaint
+      // steps are: the resume can be reached before `start()` has built one.
+      this.applyAdapterSnapshot(this.controller?.currentSnapshot() ?? null);
       this.applyFilterAndOrdering();
     }
     // The marker describes what the tree IS, so it must not claim a filtered
@@ -1104,7 +1227,7 @@ export default class SpacesPlugin extends Plugin {
     this.syncSpaceSurface();
     new Notice(
       paused
-        ? "Spaces: filtering paused — the file explorer is showing the whole vault. " +
+        ? "Spaces: filtering paused. The file explorer is showing the whole vault. " +
           "Run the command again to resume."
         : "Spaces: filtering resumed."
     );
@@ -1149,7 +1272,7 @@ export default class SpacesPlugin extends Plugin {
       await this.defs.mutate((d) => {
         const s = d.spaces.find((x) => x.id === match.spaceId);
         // For consistency with the membership writes.
-        if (s && !s.members.some((m) => canonicalPath(m.path) === canonicalPath(match.path))) {
+        if (s && !pathMembers(s).some((m) => canonicalPath(m.path) === canonicalPath(match.path))) {
           s.members.push({ path: match.path, kind: match.kind });
         }
       });
@@ -1240,12 +1363,68 @@ export default class SpacesPlugin extends Plugin {
       // controller reference stays valid. Built at flush time, so it is the
       // burst's end state rather than any intermediate one.
       this.controller.setVaultIndex(createObsidianVaultIndex(this.app.vault));
+      // Replaced in the same breath, and LAZY. A recompute reading a fresh
+      // vault against a stale tag index would show a note the vault has and
+      // the tags do not, so the index must not survive this flush — but
+      // building it here unconditionally charged every user an O(vault)
+      // metadata walk per burst of vault events, tags or no tags. The wrapper
+      // keeps the first half and drops the second: the walk happens when
+      // `resolveMembers` expands a tag member and at no other time, and
+      // because it can only happen AFTER the line above, it is never older
+      // than the vault index it is read against.
+      this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
       this.controller.refresh();
     },
   });
 
   private async onVaultChange(fn: () => Promise<unknown>): Promise<void> {
     await this.vaultChanges.submit(fn);
+  }
+
+  /**
+   * A note's metadata changed, or the cache finished resolving.
+   *
+   * TWO decisions, which used to be one early return and were wrong for it.
+   *
+   * 1. INVALIDATE, unconditionally. The flush was the only other
+   *    `setTagIndex` caller, so gating this on the active space meant that
+   *    tagging a note while *All* or a folder space was active never replaced
+   *    the index: `pathsMatching` went on answering from a picture taken
+   *    before the tag existed, for the rest of the session, and the note came
+   *    back `hidden-nonmember` after switching into the tag space. That same
+   *    stale index feeds `spaceAddTargets`, so it also re-opened the bug
+   *    `910bc6b` closed — "Add to space" offering a note the tag already
+   *    held. `createLazyTagIndex` is what makes this free: a replacement is
+   *    one closure until something asks it a question.
+   *
+   *    The vault index is deliberately NOT replaced here. A note's tags are
+   *    not vault structure, so nothing about the tree has changed; and the
+   *    ordering hazard runs the other way — `TagIndex.ts` documents that a
+   *    FRESH vault read against a STALE tag index is what shows a note the
+   *    vault has and the tags do not. The reverse is benign, because
+   *    `resolveLivePath` simply finds nothing for a path the vault index has
+   *    not seen yet, and the create's own coalesced flush replaces both.
+   *
+   * 2. REQUEST A RECOMPUTE only when the active space's contents can actually
+   *    have changed, which is what `watchesMetadata` has always been for. A
+   *    space of files and folders cannot change because someone typed, and
+   *    this fires on every save.
+   */
+  private onMetadataEvent(): void {
+    // The `resolved` listener is registered in `onload`, because the event
+    // fires before `onLayoutReady`, and `start()` builds the controller AT
+    // `onLayoutReady`. Measured on a 408-note vault: `resolved` at 96 ms,
+    // `onLayoutReady` at 156 ms. So this can be reached with no controller,
+    // and the field's `!` says otherwise only because it is assigned later.
+    // Nothing is lost by returning: `start()` computes the first snapshot and
+    // reads `metadataResolved`, which the listener has already set.
+    if ((this.controller as SpaceController | undefined) === undefined) return;
+    this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
+    if (!watchesMetadata(this.controller.activeSpace())) return;
+    // No membership work to run first, only the coalesced tail. Submitting an
+    // empty unit of work is how this reuses the existing window and burst
+    // ceiling rather than adding a second timer.
+    void this.onVaultChange(async () => undefined);
   }
 
   private async cycle(delta: number): Promise<void> {
@@ -1322,7 +1501,7 @@ export default class SpacesPlugin extends Plugin {
     outcome: SwitchOutcome | { kind: "aborted"; reason: string }
   ): void {
     if (outcome.kind === "aborted") {
-      new Notice("Spaces: could not switch space — the layout change failed, so you are still in the previous space.");
+      new Notice("Spaces: could not switch space. The layout change failed, so you are still in the previous space.");
     } else if (outcome.kind === "rolled-back") {
       new Notice("Spaces: that space's saved layout could not be restored; kept the previous one.");
     } else if (outcome.kind === "failed-open") {
@@ -1564,6 +1743,31 @@ export default class SpacesPlugin extends Plugin {
 
     const panel = new CreateSpacePanel({
       folders: this.folderSource(),
+      // The one private call behind the picker's `#` list, kept behind its
+      // quarantine module (`nativeTagCounts.ts`) exactly as the add-a-tag
+      // field in Settings keeps it. A build without `getTags` returns null,
+      // and the picker says so rather than showing an empty list.
+      tags: { knownTags: () => nativeKnownTags(this.app) },
+      // THE tag index, reached rather than built, exactly as `SpacesSettingTab`
+      // and `SpaceContentsModal` reach it. The picker asks it how many notes
+      // each offered tag brings in. Deferred because the index is a snapshot
+      // that every flush and every metadata change replaces, so a panel open
+      // for a while would otherwise count against the vault as it was when it
+      // opened.
+      tagIndex: () => this.controller.tagIndex(),
+      // What the space would hold, from the engine rather than from the panel.
+      // Rebuilt per call so the vault, the ignore rules and the tag index are
+      // all read fresh; the panel can stay open across any of them changing.
+      preview: (members) =>
+        buildPreview(
+          this.controller.vaultIndex(),
+          compileIgnore(this.defs.get().settings.globalIgnore),
+          // Reached per lookup, so a selection with no tag member never asks
+          // the controller for the index at all.
+          { pathsMatching: (tag) => this.controller.tagIndex().pathsMatching(tag) }
+        )(members),
+      // The engine's own index, for resolving a stored member to a live path.
+      vaultIndex: () => this.controller.vaultIndex(),
       // The rotation, or the neutral swatch, per the user's setting.
       // Read here rather than captured, so flipping the toggle takes effect on
       // the next open of this panel without a reload.
@@ -1970,7 +2174,21 @@ export default class SpacesPlugin extends Plugin {
    * earlier moment this method might have been created.
    */
   private applyAdapterSnapshot(snap: VisibilitySnapshot | null): void {
-    this.adapter.apply(snap, this.elsewhereFirstPath());
+    // Paused means the tree is the whole vault, so there is no space whose
+    // scaffold and visitor rows it would make sense to dim. Clearing on pause
+    // alone is not enough: `onSnapshotApplied` reaches here on every
+    // `file-open`, every coalesced vault flush and every `layout-change`, and
+    // `SpaceController` knows nothing about the pause, so it keeps handing
+    // over a live snapshot. Opening a note is the ordinary thing to do while
+    // paused, and before this guard that one gesture painted the dimming back
+    // onto an unfiltered tree.
+    //
+    // Guarded HERE, at the single call into the adapter, rather than at the
+    // several call sites, for the same reason `ensureOrderingPatched` guards
+    // itself: a new caller must not be able to reintroduce the bug by
+    // forgetting a check. Resume clears the flag before re-seeding through
+    // this method, so the classes come back with one ordinary call.
+    this.adapter.apply(this.filteringPaused ? null : snap, this.elsewhereFirstPath());
   }
 
   /**
@@ -2503,8 +2721,17 @@ export default class SpacesPlugin extends Plugin {
       // that already knows the platform. `manifest` says `isDesktopOnly`
       // today, so this is unreachable in practice; it is here so correctness
       // stops depending on that flag.
+      // Paused is inert too, and for the same coherence reason as an
+      // overridden space directly above: `setFilteringPaused` releases the
+      // sort seam but leaves `DragOrdering` bound, so a same-parent drag was
+      // still claimed and still wrote a new order through `writeOrderFor`
+      // while nothing on screen moved. `orderingScope.ts`'s header names that
+      // exact failure -- data quietly accumulating with no visible effect --
+      // and it is why this predicate, not the renderer alone, is where the
+      // gate belongs.
       enabled: () =>
         !Platform.isMobile &&
+        !this.filteringPaused &&
         orderingEnabledFor(this.runtime.getSelection(), this.defs.get().settings) &&
         !isOverridden(this.runtime.getSelection(), this.runtime.getSortOverrides()),
       // Only the override earns an explanation. A drag blocked because
@@ -2523,6 +2750,13 @@ export default class SpacesPlugin extends Plugin {
       // answer, passed as the third input so the "is this actually the
       // reason" check is real rather than assumed.
       onBlockedDrag: () => {
+        // A pause is silent, like `allowReordering` being off and unlike an
+        // override. Both of those are states the user turned on themselves and
+        // was told about at the time -- `setFilteringPaused` raises its own
+        // Notice saying the explorer is showing the whole vault -- so a toast
+        // per drag would only restate it. An override is different because
+        // nothing announces it: it is inferred from a sort-menu gesture.
+        if (this.filteringPaused) return;
         const sel = this.runtime.getSelection();
         const overridden = isOverridden(sel, this.runtime.getSortOverrides());
         const orderingEnabled = orderingEnabledFor(sel, this.defs.get().settings);
@@ -2669,7 +2903,7 @@ export default class SpacesPlugin extends Plugin {
     if (failures > 0) {
       new Notice(
         `Spaces: moved ${moved.length} of ${paths.length}. ` +
-          `${failures} could not move — see the console for details.`
+          `${failures} could not move. See the console for details.`
       );
     }
     if (moved.length === 0) return;

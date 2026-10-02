@@ -2,12 +2,31 @@ import type { OrderMap } from "./order/orderModel";
 
 export type { OrderMap };
 
+/**
+ * What a vault object is. Deliberately NOT widened to include `"tag"`:
+ * `VaultIndex.kindOf` returns this, and a tag is not something the vault
+ * holds.
+ */
 export type MemberKind = "file" | "folder";
 
-export interface MemberEntry {
-  path: string;
-  kind: MemberKind;
-}
+/**
+ * One entry in a space's member list.
+ *
+ * A discriminated union rather than `{ path, kind }` with an optional `tag`
+ * beside it. `path` exists only on the kinds where it means something, so
+ * reading `m.path` on a tag member is a compile error rather than
+ * `undefined` reaching a vault lookup at runtime.
+ *
+ * Members were always selectors: a `folder` member expands to everything
+ * inside it on every render. `tag` is the same idea with a different source.
+ */
+export type MemberEntry =
+  | { kind: "file"; path: string }
+  | { kind: "folder"; path: string }
+  | { kind: "tag"; tag: string };
+
+/** The members that name a vault path. See `pathMembers`. */
+export type PathMember = Extract<MemberEntry, { path: string }>;
 
 export interface SpaceDefinition {
   id: string;
@@ -31,6 +50,26 @@ export interface SpaceDefinition {
    * folder itself is hidden.
    */
   root?: string;
+  /**
+   * Vault paths this space leaves out, whatever pulled them in.
+   *
+   * Literal paths, never glob patterns. `escapeSeg` in `glob.ts` turns `*`
+   * into `[^/]*` and the grammar has no escape, so a file name containing `*`
+   * (legal on macOS and Linux, illegal on Windows) could not be written as a
+   * pattern that means only itself. Patterns have a home already in
+   * `globalIgnore`.
+   *
+   * Absent rather than empty when the space excludes nothing, so a document
+   * written before this field existed round-trips unchanged.
+   *
+   * An exclusion names a NOTE. Naming a folder does not exclude its
+   * contents: `buildVisibilitySnapshot` skips the folder itself but not its
+   * descendants, and the scaffold closure then puts the folder back to hold
+   * them. No gesture in the interface can produce one, since a member folder
+   * is removed as a member and a folder is never tag-matched, so this is a
+   * hand-edited `data.json` state only.
+   */
+  exclude?: string[];
   members: MemberEntry[];
 }
 
@@ -210,10 +249,27 @@ export type SwitchOutcome =
   /** Neither the target nor the rollback produced a usable workspace. */
   | { kind: "failed-open"; reason: string };
 
-export const SCHEMA_VERSION = 1;
+/**
+ * The highest document version this build understands.
+ *
+ * NOT what every write stamps. See `schemaVersionFor`: a document is marked 2
+ * only once it uses something a version 1 build cannot represent, so someone
+ * who never adds a tag member or an exclusion keeps a document an older
+ * install can still open.
+ */
+export const SCHEMA_VERSION = 2;
 
 export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
-  schemaVersion: SCHEMA_VERSION,
+  // Literal 1, not `SCHEMA_VERSION`. An empty document holds no spaces, so
+  // no tag member and no exclusion — nothing a version 1 build cannot
+  // represent — and `schemaVersionFor` (schema.ts) would compute 1 for it.
+  // `SCHEMA_VERSION` answers a different question, the highest version this
+  // build can READ, not what an empty document should be WRITTEN as. If a
+  // later change ever persists these defaults directly, stamping them
+  // `SCHEMA_VERSION` would mark an empty vault version 2 for holding
+  // nothing that needs it, and an older install would then refuse it
+  // outright — exactly the failure `schemaVersionFor` exists to prevent.
+  schemaVersion: 1,
   settings: {
     globalIgnore: [],
     // Off by default. Restoring tabs on every switch rearranges the workspace
@@ -289,11 +345,33 @@ export interface SpacesApi {
   /** Every defined space, in definition order — the order the strip uses. */
   listSpaces(): SpaceSummary[];
   /**
-   * Whether `path` is a member of `spaceId` (default: the active space).
+   * Whether `spaceId`'s stored PATH rules hold `path` (default: the active
+   * space).
    *
    * MEMBERSHIP, not visibility: a path inherited from a member folder is a
    * member, and a member that `globalIgnore` hides is still a member.
    * False for *All*, for an unknown id, and while there is no active space.
+   *
+   * **Narrow, deliberately, and it does not answer "is this note in the
+   * space".** Everything on this surface is a projection of `data.json` and
+   * `RuntimeStateV1` alone. Since tag members landed, that is strictly less
+   * than what the space shows, and the gap is stated here rather than
+   * papered over, because a consumer that assumed otherwise would be wrong
+   * in silence. Precisely:
+   *
+   * - An exact `file` or `folder` member naming `path` answers true.
+   * - A path under a member folder answers true, unless the space's
+   *   `exclude` names it, in which case it answers false — which is what
+   *   the space shows.
+   * - **A note the space holds only through a TAG member answers false**,
+   *   even though the space visibly contains it. Which notes a tag reaches
+   *   is computed against Obsidian's metadata cache, which this surface
+   *   does not read: answering would make a `data.json` projection depend
+   *   on live vault state, and a stale true is worse than a documented
+   *   false.
+   *
+   * A consumer that needs what the space currently SHOWS wants the
+   * visibility snapshot, not this.
    */
   isMember(path: string, spaceId?: string): boolean;
   /**
@@ -301,6 +379,11 @@ export interface SpacesApi {
    * `members` holds only exact entries — inherited ones are computed and
    * never stored — so a descendant of a member folder is a member without
    * appearing here. Empty for *All* and for an unknown id.
+   *
+   * TAG members are omitted entirely. A tag names no path, so it has nothing
+   * to contribute to a list of paths, and the notes it reaches are not
+   * stored anywhere to be listed. A space whose members are all tags returns
+   * an empty array, which is not the same as a space with no members.
    */
   memberPaths(spaceId?: string): string[];
   /**

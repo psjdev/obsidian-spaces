@@ -1,4 +1,5 @@
 import type { SpaceDefinition } from "../types";
+import type { TagIndex } from "../visibility/TagIndex";
 import { inheritedFromFolder } from "../definitions/membership";
 import { spaceAddTargets } from "./spaceAddTargets";
 import { submenuFor, type SubmenuLike } from "./nativeMenuSubmenu";
@@ -57,9 +58,16 @@ export interface DecorateContext {
   /**
    * Every space, for *All*'s "Add to space" entry. In *All* there is
    * no active space and so no per-space snapshot, so membership is read from
-   * the definitions directly (see `spaceAddTargets`).
+   * the definitions plus the tag index (see `spaceAddTargets`).
    */
   spaces(): readonly SpaceDefinition[];
+  /**
+   * The tag index the tree was last drawn from, for expanding those spaces'
+   * tag members. Required rather than optional: an absent one silently makes
+   * every tag member match nothing, which is exactly the bug this closes —
+   * "Add to space" offered for a note the space already holds through a tag.
+   */
+  tags(): TagIndex;
 }
 
 interface DecorateHandlers<T extends FileLike> {
@@ -131,14 +139,39 @@ export function decorate<T extends FileLike>(
     menu.addItem((i) => i.setTitle(label).setIcon("minus-circle").setDisabled(true));
   }
 
-  menu.addItem((i) =>
-    i
-      .setTitle(
-        visible.length === 1 ? `Add to ${space.name}` : `Add ${visible.length} to ${space.name}`
-      )
-      .setIcon("plus-circle")
-      .onClick(() => handlers.addAll(visible))
+  // What an add would actually change. Two kinds of row are already in the
+  // space and have to be left out:
+  //
+  //  - an EXACT member. (Reaching here at all means not every row is one,
+  //    since `allExact` returned above when they were.)
+  //  - an INHERITED one, which is in the space through the folder the disabled
+  //    entry above names. `addAll` dedupes against the space's path members
+  //    alone and never consults `inheritedFromFolder`, so adding one writes a
+  //    redundant exact member: nothing the user can see changes, and the
+  //    folder they would later remove no longer takes the row with it.
+  //
+  // Every other add path already refuses an inherited path — `main.ts`'s
+  // `activeFileToAdd` and `joinOnCreate`, and `spaceAddTargets`' `heldBy` —
+  // so this is the one that had drifted.
+  //
+  // Indexed against `decisions`, which was built from `visible` in order.
+  const addable = visible.filter(
+    (_, n) =>
+      !decisions[n].canRemoveMembership && decisions[n].reason !== "inherited-member"
   );
+  // Omitted entirely rather than disabled. The row above already says why the
+  // path is in the space, so a greyed "Add" beneath it would be a second
+  // sentence about the same fact.
+  if (addable.length > 0) {
+    menu.addItem((i) =>
+      i
+        .setTitle(
+          addable.length === 1 ? `Add to ${space.name}` : `Add ${addable.length} to ${space.name}`
+        )
+        .setIcon("plus-circle")
+        .onClick(() => handlers.addAll(addable))
+    );
+  }
 
   // A visitor is shown only because it is open, so it gets a way to
   // stop being shown that is distinct from membership -- nothing is added to
@@ -183,7 +216,8 @@ function addToSpaceEntries<T extends FileLike>(
   const byPath = new Map(files.map((f) => [f.path, f]));
   const targets = spaceAddTargets(
     spaces,
-    files.map((f) => f.path)
+    files.map((f) => f.path),
+    ctx.tags()
   );
   // No targets AFTER filtering means no entry, rather than one that opens onto
   // nothing. Checking `spaces.length` alone is not enough: `spaceAddTargets`

@@ -27,21 +27,21 @@ function defs(): SpacesDefinitions {
 describe("repairOnRename", () => {
   it("rewrites an exact match", () => {
     const out = repairOnRename(defs(), "Papers/Attention.md", "Papers/Focus.md");
-    const paths = out.spaces[0].members.map((m) => m.path);
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
     expect(paths).toContain("Papers/Focus.md");
     expect(paths).not.toContain("Papers/Attention.md");
   });
 
   it("rewrites descendant prefixes when a folder moves", () => {
     const out = repairOnRename(defs(), "Papers", "Research Papers");
-    const paths = out.spaces[0].members.map((m) => m.path);
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
     expect(paths).toContain("Research Papers");
     expect(paths).toContain("Research Papers/Attention.md");
   });
 
   it("does not rewrite a sibling that shares a string prefix", () => {
     const out = repairOnRename(defs(), "Papers", "Research Papers");
-    const paths = out.spaces[0].members.map((m) => m.path);
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
     expect(paths).toContain("Papers-old/Legacy.md");
   });
 
@@ -54,8 +54,27 @@ describe("repairOnRename", () => {
     const d = defs();
     d.spaces[0].members.push({ path: "Papers/Focus.md", kind: "file" });
     const out = repairOnRename(d, "Papers/Attention.md", "Papers/Focus.md");
-    const focus = out.spaces[0].members.filter((m) => m.path === "Papers/Focus.md");
+    const focus = out.spaces[0].members.filter((m) => m.kind !== "tag" && m.path === "Papers/Focus.md");
     expect(focus).toHaveLength(1);
+  });
+
+  it("passes a tag member through untouched", () => {
+    // A tag member has no path to rewrite, and must not be dropped either.
+    const d = defs();
+    d.spaces[0].members.push({ kind: "tag", tag: "project" });
+    const out = repairOnRename(d, "Papers/Attention.md", "Papers/Focus.md");
+    expect(out.spaces[0].members).toContainEqual({ kind: "tag", tag: "project" });
+  });
+
+  it("does not let a tag collide with a path of the same spelling when deduplicating", () => {
+    // `dedupe`'s key is namespaced by kind (p:/t:) specifically so this
+    // cannot happen: a tag and a path that happen to read identically must
+    // both survive.
+    const d = defs();
+    d.spaces[0].members.push({ kind: "tag", tag: "Papers/Focus.md" });
+    const out = repairOnRename(d, "Papers/Attention.md", "Papers/Focus.md");
+    expect(out.spaces[0].members).toContainEqual({ kind: "tag", tag: "Papers/Focus.md" });
+    expect(out.spaces[0].members).toContainEqual({ path: "Papers/Focus.md", kind: "file" });
   });
 
   it("follows a renamed folder-space root", () => {
@@ -262,7 +281,7 @@ describe("repairRenameIn — repairs computed from the DRAFT, not from a snapsho
   };
 
   const membersOf = (store: DefinitionStore) =>
-    store.get().spaces[0].members.map((m) => m.path);
+    store.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
 
   it("keeps BOTH repairs when two renames overlap", async () => {
     // The exact case the review reproduced: repairing a.md and b.md at the
@@ -323,5 +342,94 @@ describe("repairRenameIn — repairs computed from the DRAFT, not from a snapsho
     await store.load();
     await store.mutate((d) => repairRenameIn(d, "unrelated.md", "moved.md"));
     expect(membersOf(store)).toEqual(["a.md", "b.md"]);
+  });
+});
+
+/**
+ * Exclusions are literal vault paths, so a rename has to follow them exactly
+ * as it follows member paths.
+ *
+ * What this pins is not cosmetic. An exclusion left pointing at the old path
+ * means the excluded note reappears in the space the moment it is renamed or
+ * moved, the stale entry piles up under the dialog's "Left out" list with no
+ * way to tell it is dead, and any note that later comes to occupy the old
+ * path is silently excluded from a space nobody excluded it from.
+ */
+describe("exclusions survive path changes", () => {
+  function excluding(...paths: string[]): SpacesDefinitions {
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      settings: { globalIgnore: [] },
+      spaces: [
+        {
+          id: "work",
+          name: "Work",
+          icon: "briefcase",
+          color: "#5b5bff",
+          exclude: paths,
+          members: [{ path: "Projects", kind: "folder" }],
+        },
+      ],
+    } as unknown as SpacesDefinitions;
+  }
+
+  it("rewrites an exclusion when the excluded file itself is renamed", () => {
+    const out = repairOnRename(
+      excluding("Projects/Draft.md"),
+      "Projects/Draft.md",
+      "Projects/Final.md"
+    );
+    expect(out.spaces[0].exclude).toEqual(["Projects/Final.md"]);
+  });
+
+  it("carries excluded descendants with a renamed folder", () => {
+    const out = repairOnRename(
+      excluding("Projects/Old/Draft.md", "Projects/Old/Notes.md"),
+      "Projects/Old",
+      "Archive/Old"
+    );
+    expect(out.spaces[0].exclude).toEqual([
+      "Archive/Old/Draft.md",
+      "Archive/Old/Notes.md",
+    ]);
+  });
+
+  it("leaves an exclusion alone when the rename is unrelated", () => {
+    const out = repairOnRename(
+      excluding("Projects/Draft.md"),
+      "Inbox/scratch.md",
+      "Inbox/notes.md"
+    );
+    expect(out.spaces[0].exclude).toEqual(["Projects/Draft.md"]);
+  });
+
+  it("does not rewrite a sibling that merely shares a string prefix", () => {
+    const out = repairOnRename(
+      excluding("Projects-old/Draft.md"),
+      "Projects",
+      "Work"
+    );
+    expect(out.spaces[0].exclude).toEqual(["Projects-old/Draft.md"]);
+  });
+
+  it("collapses two exclusions a rename made name the same note", () => {
+    // Reachable: excluding `A/x.md` and `B/x.md`, then renaming `A` to `B`.
+    // Two entries for one path would show two identical rows under
+    // "Left out", only one of which the Put back button could clear.
+    const out = repairOnRename(excluding("A/x.md", "B/x.md"), "A", "B");
+    expect(out.spaces[0].exclude).toEqual(["B/x.md"]);
+  });
+
+  it("keeps a space with no exclusions free of the key", () => {
+    // Absent, never empty: a document written before this field existed must
+    // round-trip through a rename unchanged.
+    const d = defs();
+    const out = repairOnRename(d, "Papers", "Journals");
+    expect("exclude" in out.spaces[0]).toBe(false);
+  });
+
+  it("drops the key rather than storing an empty list", () => {
+    const out = repairOnRename(excluding(), "Papers", "Journals");
+    expect("exclude" in out.spaces[0]).toBe(false);
   });
 });

@@ -20,12 +20,42 @@ import {
 import type { FormFault } from "./createSpaceForm";
 import { alignmentGap } from "./ribbonAlign";
 import { iconColorFor } from "./spaceIconColor";
-import { ancestorsOf, buildVaultTree, visibleRows, type VaultNode } from "./vaultTree";
+import {
+  buildVaultTree,
+  isBranchByChildren,
+  isBranchByKind,
+  visibleRows,
+  type OverflowRow,
+  type PickerRow,
+  type Row,
+  type TagKind,
+  type VaultNode,
+} from "./vaultTree";
+import {
+  DEFAULT_PICKER_MODE,
+  ITEMS_SIGIL,
+  readModeSigil,
+  TAG_SIGIL,
+  type PickerMode,
+} from "./pickerFilter";
+import {
+  coveringFolderIn,
+  coveringTagIn,
+  memberFolderSet,
+  memberTagSet,
+} from "../definitions/membership";
+import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
+import type { Preview } from "./previewSeam";
+import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
+import { storedTags, type TagSource } from "./tagCandidates";
+import { countTagRows, tagCountLabel } from "./tagRowCounts";
+import type { TagIndex } from "../visibility/TagIndex";
+import type { MemberEntry } from "../types";
 
 import {
   isStillCovering as isStillCoveringPure,
   resyncInertSiblings as resyncInertSiblingsPure,
-} from "./panelCoverage";
+} from "./panelMount";
 import { SEL } from "../explorer/selectors";
 
 /**
@@ -37,18 +67,28 @@ import { SEL } from "../explorer/selectors";
  * click into alignment when an icon is nearly there, and no more.
  */
 /**
- * How many rows the item picker will draw at once.
+ * How many rows the picker will draw at once.
  *
  * Measured on a 20,000-note vault: cost tracks the row count almost exactly,
- * about 12 rows per millisecond, and a single "a" matched 18,954 rows — over a
- * second of work for one keystroke, repeated on the next. `buildVaultTree` was
- * 25 ms of that, so the rows are the cost and nothing else is worth capping.
+ * about 12 rows per millisecond, and a single "a" matched 18,954 rows. 200
+ * keeps a keystroke near 20 ms while still filling a tall pane several times
+ * over.
  *
- * 200 keeps a keystroke near 20 ms while still filling a tall pane several
- * times over. `visibleRows` still computes every match, so the count the
- * overflow row reports is exact rather than an estimate.
+ * `visibleRows` spends this depth-first, in the order rows are drawn, so
+ * running out hides whatever comes last in that order. See its docstring.
  */
 const MAX_PICKER_ROWS = 200;
+
+/**
+ * How long the sigil stays in the filter box before the box takes it back, in
+ * ms.
+ *
+ * Long enough to read as the box reacting, short enough that it cannot be
+ * mistaken for a character that failed to delete. Nothing waits on it: the
+ * query is sigil-free from the keystroke onwards, so this governs how the box
+ * LOOKS and nothing else.
+ */
+const SIGIL_FLASH_MS = 120;
 
 const DESIGN_TITLE_GAP = 22;
 const TITLE_GAP_TOLERANCE = 6;
@@ -79,6 +119,51 @@ export interface CreateSpacePanelDeps {
    * was folders alone; the tree shows both now (see `VaultSource`).
    */
   folders: VaultSource;
+  /**
+   * Every tag the picker can offer, behind the `#` sigil in the filter box.
+   * A source rather than an `App`, for the reason `TagSuggest` takes one: the
+   * single private call that answers this stays in `nativeTagCounts.ts`, and
+   * `knownTags()` returning null is the expected shape of a future Obsidian
+   * that no longer answers it.
+   */
+  tags: TagSource;
+  /**
+   * The one tag index, reached rather than built, so each row in the `#` list
+   * can say how many notes its tag currently brings in.
+   *
+   * A function rather than the index, for the reason `SettingsTab` documents:
+   * the index is a SNAPSHOT that the coalescer's flush and every metadata
+   * change replace, so a captured one would answer from the vault as it was
+   * when this panel opened. Building one here instead would walk the vault
+   * twice, once for this panel and once for the engine that already has one.
+   */
+  tagIndex: () => TagIndex;
+  /**
+   * What the space would contain if created now, answered by the engine
+   * rather than by this panel.
+   *
+   * A function rather than a value, for the reason `tagIndex` documents: the
+   * answer is a snapshot that every metadata change replaces, and a captured
+   * one would count against the vault as it was when the panel opened.
+   */
+  preview: (members: readonly MemberEntry[]) => Preview;
+  /**
+   * The engine's vault index, so the picker can resolve a stored member to the
+   * live path it names by the engine's own rule (`resolveLivePath`) when it
+   * asks which folder covers a row. `folders` cannot answer that: it lists
+   * paths and kinds, and has no way to ask what is directly under a folder.
+   * A function for the reason `tagIndex` is one.
+   *
+   * The rows come from `folders`, the live vault, while coverage comes from
+   * this index, the engine's snapshot. For up to the coalescer's window a
+   * freshly created folder can therefore be drawn but not yet resolve, and
+   * covers nothing until the snapshot catches up. The preview count lags the
+   * same way: `deps.preview` reads this index too, and `includedPaths` drops a
+   * seed the snapshot does not hold, so a freshly created folder or note that
+   * is picked contributes nothing to the summary's note total, and neither do
+   * the notes under a new folder. Bounded and self-correcting.
+   */
+  vaultIndex: () => VaultIndex;
   /**
    * The user's saved custom colors, and the way to persist a new one — the
    * theme button opens the same color popover the space strip uses, and that
@@ -146,6 +231,62 @@ const PLACEHOLDER_PATHS = [
   "M12 8v8",
 ] as const;
 
+const isOverflowRow = (row: PickerRow<string>): row is OverflowRow => row.kind === "overflow";
+
+/**
+ * What differs between the two picker bodies, handed to `renderTreeRow`.
+ *
+ * Everything not on this list is the same for both and lives in the renderer,
+ * which is the point: a row-level fix is made once. Each member is here
+ * because the two bodies genuinely disagree about it.
+ *
+ * Each adapter closes over what its own draw built (the covering set, the tag
+ * counts, the query). It also reaches panel state that outlives a draw:
+ * `expanded`, which a caret and the arrow keys edit, and `this.state`, which
+ * both bodies read and `choose` writes. The item body also reads
+ * `this.itemFilter`.
+ */
+interface RowAdapter<K extends string> {
+  /** The `data-` attribute a row is found by, which is also its focus key. */
+  datasetKey: "path" | "tag";
+  /** A class added to every row beyond the tree's own, or none. */
+  rowClass?: string;
+  /** Anything else a row's element carries, such as the item tree's `data-kind`. */
+  markRow?(el: HTMLElement, row: Row<K>): void;
+  /** The user's own opened set for this body; a caret and the arrow keys edit it. */
+  expanded: Set<string>;
+  /**
+   * What already brings this row in, or null. Asked only of a row that is not
+   * itself picked, since picked wins over covered.
+   */
+  coveredBy(row: Row<K>): string | null;
+  /** The title for a covered row, given what covers it. */
+  coveredTitle(by: string): string;
+  /** The title for a picked row, when it has one. The item tree gives none. */
+  selectedTitle?(row: Row<K>): string;
+  /**
+   * Why a budget-closed row has no caret, worded for its body and for whether
+   * a filter is active (a filter forces expansion, so only narrowing helps
+   * then). Joined onto any other title the row has.
+   */
+  budgetClosedTitle(): string;
+  /**
+   * Whether this tree's filter has text in it. The overflow row words its
+   * advice by it, as `budgetClosedTitle` does: narrowing is only advice when
+   * there is something to narrow.
+   */
+  filterActive(): boolean;
+  /** Draws the row's name cell, icon included. */
+  drawName(el: HTMLElement, row: Row<K>): void;
+  /** Extra elements after the name, such as the tag count. */
+  decorate?(el: HTMLElement, row: Row<K>): void;
+  /**
+   * Applies a pick to the form state. Never asked of a covered row; the
+   * renderer does the redraw and refocus that follows.
+   */
+  choose(row: Row<K>): void;
+}
+
 /**
  * The Arc-style "Create a Space" overlay. One owned element,
  * mount/destroy, shaped like SwitcherView. Holds a single `CreateFormState`
@@ -189,8 +330,57 @@ export class CreateSpacePanel {
    */
   private nameRow: HTMLElement | null = null;
 
-  /** The folder tree's container, redrawn in place by `renderItemTree()`. */
+  /** The folder tree's container, redrawn in place by `renderPickerBody()`. */
   private treeEl: HTMLElement | null = null;
+
+  /**
+   * The row pinned under the window's list, kept so `renderSummary()` can
+   * redraw its words in place: picking must not rebuild the window under the
+   * pointer that just clicked in it.
+   */
+  private summaryEl: HTMLElement | null = null;
+
+  /** The filter box, kept so the sigil shortcut can retitle its placeholder. */
+  private filterEl: HTMLInputElement | null = null;
+
+  /**
+   * The sigil now showing in the filter box but NOT part of the query, or
+   * null when nothing is flashing.
+   *
+   * The box has to show the character for a moment, because a keystroke that
+   * disappears at the instant it is pressed reads as a dropped key rather than
+   * as the window snapping over. It must not be in the query while it shows.
+   *
+   * Held as state rather than stripped by the timer alone, and that is what
+   * makes typing at speed safe: every character after it lands in the box
+   * normally and in the order the keyboard produced it, `itemFilter` is taken
+   * through `queryFrom` so the list never sees the sigil, and the flash ends
+   * by removing exactly the one character it put there.
+   */
+  private sigilFlash: string | null = null;
+
+  /**
+   * Cancels the pending flash, or null. A closure rather than a bare handle so
+   * the `clearTimeout` runs against whatever set it, and so teardown has one
+   * thing to call.
+   */
+  private sigilFlashOff: (() => void) | null = null;
+
+  /**
+   * The Vault and Tags buttons, kept so a mode reached by the sigil can press
+   * the right one without redrawing the pair.
+   */
+  private pickerModeEls = new Map<PickerMode, HTMLElement>();
+
+  /**
+   * Which body the explorer window is showing.
+   *
+   * Held here rather than read back out of the filter text: the buttons are
+   * the thing that holds the mode now, and the sigil presses a button rather
+   * than leaving a mark in the box. Folder mode overrules it, which is
+   * `readPickerBody`'s job rather than this field's.
+   */
+  private pickerMode: PickerMode = DEFAULT_PICKER_MODE;
 
   /**
    * The vault as a tree, kept while the picker stays open.
@@ -220,6 +410,16 @@ export class CreateSpacePanel {
   private itemFilter = "";
 
   private expandedFolders = new Set<string>();
+
+  /**
+   * The tag tree's own expansion, kept apart from `expandedFolders`.
+   *
+   * One set would collide on any tag that shares a spelling with a folder, and
+   * would make a switch to Tags and back collapse whatever the user had opened
+   * in the other body. The two bodies are one picker to look at and two
+   * independent things to have browsed into.
+   */
+  private expandedTags = new Set<string>();
 
   /**
    * Re-aligns when the window changes size, because the panel's top edge moves
@@ -297,6 +497,7 @@ export class CreateSpacePanel {
     this.fault = null;
     this.itemFilter = "";
     this.expandedFolders = new Set<string>();
+    this.expandedTags = new Set<string>();
     // Arriving from "Create space from this folder": the root is already set,
     // so open the branch containing it rather than showing a collapsed tree
     // with the selection hidden inside it...
@@ -318,8 +519,8 @@ export class CreateSpacePanel {
    * `container` is whatever `bindExplorer()` finds under `parent` right now —
    * no second query here.
    *
-   * The comparison lives in `panelCoverage.ts`, a plain-DOM module, so it is
-   * directly testable — see `tests/panelCoverage.test.ts`.
+   * The comparison lives in `panelMount.ts`, a plain-DOM module, so it is
+   * directly testable — see `tests/panelMount.test.ts`.
    */
   isStillCovering(parent: HTMLElement, container: HTMLElement | null): boolean {
     return isStillCoveringPure(this.el, this.mountedContainer, parent, container);
@@ -427,6 +628,9 @@ export class CreateSpacePanel {
     this.nameInput = null;
     this.nameRow = null;
     this.createBtn = null;
+    // A handle left running would reach for a filter box that is no longer
+    // in any document.
+    this.cancelSigilFlash();
     // After `el.remove()`, not before: this call is unguarded, and a throw
     // here must not leave our own element still attached, contradicting this
     // method's own "teardown comes off first" ordering above. Nothing above
@@ -650,6 +854,10 @@ export class CreateSpacePanel {
     // A full re-render is the point at which the vault is read again: opening
     // the picker, switching mode, or any state change that rebuilds the panel.
     this.vaultTree = null;
+    // The box the sigil is showing in is about to be discarded, and the one
+    // that replaces it is seeded from `itemFilter`, which never held the
+    // sigil.
+    this.cancelSigilFlash();
     const el = this.el;
     if (!el) return;
     const doc = el.ownerDocument;
@@ -775,7 +983,7 @@ export class CreateSpacePanel {
       ic.className = "spaces-create-theme-icon";
       setIcon(ic, icon);
       const text = doc.win.createSpan();
-      text.textContent = this.modeSummary(folderMode, label);
+      text.textContent = label;
       btn.appendChild(ic);
       btn.appendChild(text);
       btn.addEventListener("click", () => {
@@ -794,6 +1002,10 @@ export class CreateSpacePanel {
           this.state = setFolderMode(this.state, folderMode);
           this.itemsOpen = true;
         }
+        // The window is rebuilt for the mode being opened, and folder mode has
+        // no tags at all, so it reopens on the vault rather than on whatever
+        // the last curated session left it showing.
+        this.pickerMode = DEFAULT_PICKER_MODE;
         this.render();
       });
       return btn;
@@ -807,44 +1019,106 @@ export class CreateSpacePanel {
       const view = doc.win.createDiv();
       view.className = "spaces-create-items";
 
-      const treeEl = doc.win.createDiv();
-      treeEl.className = "spaces-create-tree";
+      // Folder mode is offered neither button, for the reason it is offered no
+      // sigil: a folder space is a window onto one root, and a tag is not one.
+      this.pickerModeEls.clear();
+      let bodies: HTMLElement | null = null;
+      if (!this.state.folderMode) {
+        bodies = doc.win.createDiv();
+        bodies.className = "spaces-create-bodies";
+        bodies.setAttribute("role", "group");
+        bodies.setAttribute("aria-label", "What the window below shows");
+        bodies.appendChild(this.bodyBtn(doc, "items", "Vault", "folder-tree", ITEMS_SIGIL));
+        bodies.appendChild(this.bodyBtn(doc, "tags", "Tags", "tag", TAG_SIGIL));
+      }
+
+      const windowEl = doc.win.createDiv();
+      windowEl.className = "spaces-create-tree";
       // Focusable programmatically but NOT in the tab order: `showFault` marks
       // this box and then focuses it, and `focus()` is a silent no-op on an
       // element with no tabindex — so a keyboard user refused a Create got the
       // Notice, a red border they could not reach, and focus left on the
       // button.
-      treeEl.tabIndex = -1;
+      windowEl.tabIndex = -1;
 
       const filter = doc.win.createEl("input");
       filter.type = "text";
       filter.className = "text-input";
-      filter.placeholder = this.state.folderMode ? "Filter folders…" : "Filter items…";
       filter.value = this.itemFilter;
       filter.dataset.focusKey = "item-filter";
       filter.addEventListener("input", () => {
-        this.itemFilter = filter.value;
-        this.renderItemTree();
+        this.itemFilter = this.queryFrom(filter.value);
+        this.renderPickerBody();
       });
+      filter.addEventListener("keydown", (e) => {
+        if (this.state.folderMode) return;
+        const mode = readModeSigil({
+          box: filter.value,
+          key: e.key,
+          modified: e.ctrlKey || e.metaKey || e.altKey,
+          composing: e.isComposing,
+        });
+        if (mode === null) return;
+        // NOT prevented, which is the change: the character lands so it can be
+        // seen, and `endSigilFlash` takes it back a moment later. It is still
+        // consumed in the sense that matters — `queryFrom` keeps it out of
+        // `itemFilter`, so the query typed behind it filters from its first
+        // character and ends up in the box without it.
+        this.startSigilFlash(e.key);
+        this.setPickerMode(mode);
+      });
+      this.filterEl = filter;
       view.appendChild(filter);
+      // Under the box they act on, between it and the list they switch. A
+      // sibling of the window rather than a child: the filter is a sibling
+      // too, so the buttons stay in the same column as the box, and the window
+      // keeps exactly two children (the scrolling list and the pinned row).
+      if (bodies) view.appendChild(bodies);
 
       // Rows live in their own child so redrawing them cannot disturb the box
-      // around them. `role="tree"` belongs HERE rather than on the box: ARIA
+      // around them. The role belongs HERE rather than on the box: ARIA
       // requires treeitems to be owned by the tree, and with an unroled div in
       // between assistive tech reported a tree of zero items and a pile of
-      // orphaned rows.
+      // orphaned rows. Both bodies are trees now, but they differ on
+      // `aria-multiselectable` and on the label, so each body sets both on every
+      // draw rather than leaving a stale one behind after a switch. The empty
+      // message is NOT a child of this box: it is drawn as its sibling inside the
+      // scrolling list (`setEmptyMessage`), because a tree whose child is not a
+      // treeitem is the orphan problem this comment describes.
       const rowsEl = doc.win.createDiv();
-      rowsEl.className = "spaces-create-tree-rows";
-      rowsEl.setAttribute("role", "tree");
-      rowsEl.setAttribute("aria-label", this.state.folderMode ? "Choose a folder" : "Choose items");
-      treeEl.appendChild(rowsEl);
-      view.appendChild(treeEl);
+      // The list scrolls, the window does not. That is what lets the summary
+      // row below sit still: the list gives up the height instead of the
+      // window taking more.
+      const scroll = doc.win.createDiv();
+      scroll.className = "spaces-create-tree-scroll";
+      scroll.appendChild(rowsEl);
+      windowEl.appendChild(scroll);
       this.treeEl = rowsEl;
 
+      // Inside the window and pinned under its list: a choice made in one body
+      // is still visible from the other, which is what the row above the
+      // window used to do before it was taken out for crowding the pane.
+      const summary = doc.win.createDiv();
+      summary.className = "spaces-create-summary";
+      // Announced when it changes, because the thing that changed it may have
+      // been a click in a list the user is not reading. It is the only element
+      // in the panel with this role: the overflow notice that once had its own
+      // is a treeitem row now, and the empty-state message has none.
+      summary.setAttribute("role", "status");
+      windowEl.appendChild(summary);
+      this.summaryEl = summary;
+
+      view.appendChild(windowEl);
+
       el.appendChild(view);
-      this.renderItemTree();
+      this.renderPlaceholder();
+      this.renderSummary();
+      this.renderPickerBody(true);
     } else {
       this.treeEl = null;
+      this.summaryEl = null;
+      this.filterEl = null;
+      this.pickerModeEls.clear();
     }
 
 
@@ -879,162 +1153,197 @@ export class CreateSpacePanel {
   }
 
   /**
-   * Rewrites the mode buttons' text in place.
+   * Draws whichever body the two buttons above the window ask for, in place.
    *
-   * Picking an item redraws only the tree — a full re-render would drop focus
-   * out of the filter field — so the count on Curate would otherwise sit stale
-   * until something else happened to rebuild the panel.
-   */
-  private refreshModeLabels(): void {
-    const el = this.el;
-    if (!el) return;
-    const set = (key: string, folderMode: boolean, label: string): void => {
-      const btn = el.querySelector(`[data-focus-key="${key}"]`);
-      const text = btn?.lastElementChild;
-      if (text instanceof HTMLElement) text.textContent = this.modeSummary(folderMode, label);
-    };
-    set("mode-curate", false, "Curated");
-    set("mode-folder", true, "Folder pinned");
-  }
-
-  /**
-   * What one mode button says.
+   * The sole redraw entry for both bodies. Separate from `renderInner()`
+   * because filtering, expanding and picking must not rebuild the whole panel:
+   * a full re-render would drop focus out of the filter field on every
+   * keystroke.
    *
-   * Curate appends its count, because "how many did I pick?" is not answerable
-   * from a scrolled list. Pin to Folder appends nothing: a vault path would
-   * blow out a half-width button, and the chosen folder is already highlighted
-   * in the tree below.
-   */
-  private modeSummary(folderMode: boolean, label: string): string {
-    if (folderMode) return label;
-    const n = this.state.items.length;
-    return n === 0 ? label : `${label} · ${n}`;
-  }
-
-  /**
-   * Draws the item tree into its container, in place.
+   * Which body that is lives in `readPickerBody`, not here, so the rule can be
+   * read and tested without a DOM rather than inferred from the panel that
+   * happens to be this prototype's drawing.
    *
-   * Separate from `renderInner()` because filtering, expanding and picking
-   * must not rebuild the whole panel: a full re-render would drop focus out of
-   * the filter field on every keystroke.
-   */
-  /**
-   * Tells the user how many matches were not drawn, or takes the message away
-   * when everything fits.
+   * Folder mode never reaches the tag body: a folder space is a window onto
+   * one root, and a tag is not one, so that mode draws neither button and the
+   * sigils do nothing there.
    *
-   * Appended to the scroll box rather than to the row container, because that
-   * container is the `role="tree"` and a tree may own only `treeitem`s.
+   * `revealSelection` is for the draw that builds the window and no other.
+   * Every later draw (filtering, expanding, picking) redraws rows the user is
+   * already looking at, and moving the box there throws away their place. The
+   * tag body ignores it: only the notes-and-folders body is ever built around
+   * a selection made before the window opened.
    */
-  private renderOverflowNotice(hidden: number): void {
-    const box = this.treeEl?.parentElement;
-    if (!box) return;
-    const existing = box.querySelector(".spaces-create-tree-more");
-    if (hidden <= 0) {
-      existing?.remove();
-      return;
-    }
-    const el = existing ?? box.ownerDocument.win.createDiv();
-    el.className = "spaces-create-tree-more";
-    el.setAttribute("role", "status");
-    el.textContent = `${hidden.toLocaleString()} more — keep typing to narrow`;
-    if (!existing) box.appendChild(el);
-  }
-
-  private renderItemTree(): void {
+  private renderPickerBody(revealSelection = false): void {
     const host = this.treeEl;
     if (!host) return;
+    // Every draw starts with no message, so a body that has rows never inherits
+    // the previous draw's "No match". A body with nothing to show sets its own.
+    this.setEmptyMessage(host, null);
+    if (readPickerBody(this.pickerMode, this.state.folderMode) === "tags") {
+      this.renderTagBody(host, this.itemFilter);
+      return;
+    }
+    this.renderItemBody(host, revealSelection);
+  }
+
+  /**
+   * Shows, replaces or removes the picker's empty-state message.
+   *
+   * It is a sibling of `host`, not a child. `host` is the `role="tree"` box, and
+   * a child of a tree that is not a treeitem is reported by assistive tech as a
+   * stray node in a tree it does not belong to. The message sits right after the
+   * tree, inside the same scrolling list, so it reads and scrolls where the
+   * rows would have been. At most one exists: any earlier one is removed first.
+   * Pass null to remove it.
+   */
+  private setEmptyMessage(host: HTMLElement, text: string | null): void {
+    host.parentElement
+      ?.querySelectorAll(":scope > .spaces-create-tree-empty")
+      .forEach((el) => el.remove());
+    if (text === null) return;
+    const empty = host.ownerDocument.win.createDiv();
+    empty.className = "spaces-create-tree-empty";
+    empty.textContent = text;
+    host.after(empty);
+  }
+
+  /**
+   * Redraw the current body and put focus back on the row it was on.
+   *
+   * Every redraw calls `host.replaceChildren()`, which destroys the focused
+   * element, so without this a keyboard pick dropped focus to `<body>` and
+   * lost the user's place in a two-hundred-row tree. Expanding restored it and
+   * picking did not, each body having written its own restore in one handler
+   * and not the other; both now come through here.
+   *
+   * `focusKey` names the row to refocus. Left out, it is whichever row holds
+   * focus now, which is what a caret click wants: a pointer gesture should not
+   * move focus, and nothing is refocused when focus was not on a row.
+   */
+  private redrawKeepingFocus(focusKey?: string): void {
+    const key = focusKey ?? this.focusedRowKey();
+    this.renderPickerBody();
+    if (key === undefined) return;
+    // The attribute of the body just drawn, decided by the same rule that
+    // drew it, so a key is never looked up under the other body's attribute.
+    const attr = readPickerBody(this.pickerMode, this.state.folderMode) === "tags" ? "tag" : "path";
+    this.treeEl?.querySelector<HTMLElement>(`[data-${attr}="${CSS.escape(key)}"]`)?.focus();
+  }
+
+  /** The key of the picker row holding focus, or undefined when none does. */
+  private focusedRowKey(): string | undefined {
+    const active = this.doc?.activeElement;
+    if (!active || !this.treeEl?.contains(active) || !active.instanceOf(HTMLElement)) return undefined;
+    return active.dataset.path ?? active.dataset.tag;
+  }
+
+  /**
+   * The notes-and-folders body.
+   *
+   * Everything specific to it is here: the vault tree, what counts as
+   * selected in each mode, what a covered row is covered by, and what picking
+   * does. The rows themselves are `renderTreeRow`'s.
+   */
+  private renderItemBody(host: HTMLElement, revealSelection: boolean): void {
     const doc = host.ownerDocument;
+    // Set every time rather than once at build: the box is the SAME element in
+    // both modes, so coming back from the tag list has to undo what that left
+    // behind. A `role="tree"` still carrying `aria-multiselectable` reads as a
+    // multi-select tree, which this is not in folder mode, and one without it
+    // reads as single-select, which this is not in curated mode.
+    host.setAttribute("role", "tree");
+    // Curated mode holds any number of notes and folders; folder mode holds one
+    // root. Removing the attribute in both said single-select for a tree that
+    // is not, in the mode where it is not.
+    if (this.state.folderMode) host.removeAttribute("aria-multiselectable");
+    else host.setAttribute("aria-multiselectable", "true");
+    host.setAttribute(
+      "aria-label",
+      this.state.folderMode ? "Choose a folder" : "Choose notes and folders"
+    );
     const src = this.deps.folders;
     const tree = (this.vaultTree ??= buildVaultTree(
       src
         .allPaths()
         .map((path) => ({ path, kind: src.kindOf(path) }))
-        .filter((e): e is { path: string; kind: "file" | "folder" } => e.kind !== null)
+        .filter((e): e is { path: string; kind: "file" | "folder" } => e.kind !== null),
+      "folder",
+      isBranchByKind
     ));
     // Folder mode holds at most one path; curated holds any number. One set
     // covers both, so the tree needs no idea which mode it is in beyond
-    // `foldersOnly`.
+    // `onlyKind`.
     const selected = this.state.folderMode
       ? new Set(this.state.root === "" ? [] : [this.state.root])
-      : new Set(this.state.items.map((i) => i.path));
+      : new Set(this.state.items.flatMap((i) => (i.kind === "tag" ? [] : [i.path])));
 
-    const matched = visibleRows(tree, {
+    const rows = visibleRows(tree, {
       expanded: this.expandedFolders,
       filter: this.itemFilter,
       selected,
-      foldersOnly: this.state.folderMode,
+      onlyKind: this.state.folderMode ? "folder" : null,
+      budget: MAX_PICKER_ROWS,
     });
-    const rows = matched.slice(0, MAX_PICKER_ROWS);
-    this.renderOverflowNotice(matched.length - rows.length);
+    // Built once per draw rather than once per row: the list redraws on every
+    // keystroke and holds up to MAX_PICKER_ROWS rows, none of which changes the
+    // member list. Folder mode takes one root and keeps no member list, so
+    // nothing there can be covered and nothing is built. The vault is passed
+    // so each member resolves to the live folder it names and a row is covered
+    // only by a folder that really is its ancestor, not by one that differs
+    // from it in case. The resolution runs once per member here, in the draw,
+    // and the per-row lookup below stays an exact set test.
+    const coveringFolders = this.state.folderMode
+      ? null
+      : memberFolderSet(this.state.items, this.deps.vaultIndex());
 
     host.replaceChildren();
     if (rows.length === 0) {
-      const empty = doc.win.createDiv();
-      empty.className = "spaces-create-tree-empty";
       // Distinguishes "your filter matched nothing" from "there is nothing
       // here" — identical as an empty box, different things to do about it.
-      empty.textContent =
-        this.itemFilter.trim() === "" ? "Nothing in this vault yet" : "No match";
-      host.appendChild(empty);
+      this.setEmptyMessage(
+        host,
+        this.itemFilter.trim() === "" ? "Nothing in this vault yet" : "No match"
+      );
       return;
     }
 
-    for (const row of rows) {
-      const el = doc.win.createDiv();
-      el.className = "spaces-create-tree-row";
-      el.setAttribute("role", "treeitem");
-      el.tabIndex = 0;
-      el.dataset.path = row.path;
-      el.dataset.kind = row.kind;
-      // The caret's slot is reserved even on a childless row, so names stay in
-      // one column instead of jittering by level.
-      el.style.paddingLeft = `${row.depth * 14}px`;
-      el.classList.toggle("is-selected", row.selected);
-      // Both states, not just the true one: a treeitem with no `aria-selected`
-      // reads as "not selectable" rather than "not selected".
-      el.setAttribute("aria-selected", String(row.selected));
-      if (row.hasChildren) el.setAttribute("aria-expanded", String(row.expanded));
-
-      const caret = doc.win.createSpan();
-      caret.className = "spaces-create-tree-caret";
-      if (row.hasChildren) {
-        setIcon(caret, row.expanded ? "chevron-down" : "chevron-right");
-        // Hidden from assistive tech rather than labelled as a button: it
-        // takes no focus, and the row's `aria-expanded` already carries the
-        // state. Keyboard users expand with the arrow keys below.
-        caret.setAttribute("aria-hidden", "true");
-        caret.addEventListener("click", (e) => {
-          // Expanding is browsing, not choosing — without this the caret would
-          // also pick, and there would be no way to look inside a folder
-          // without selecting it.
-          e.stopPropagation();
-          if (this.expandedFolders.has(row.path)) this.expandedFolders.delete(row.path);
-          else this.expandedFolders.add(row.path);
-          this.renderItemTree();
-        });
-      }
-      el.appendChild(caret);
-
-      const icon = doc.win.createSpan();
-      icon.className = "spaces-create-tree-icon";
-      setIcon(icon, row.kind === "folder" ? "folder" : "file");
-      el.appendChild(icon);
-
-      const label = doc.win.createSpan();
-      label.className = "spaces-create-tree-name";
-      label.textContent = row.name;
-      el.appendChild(label);
-
-      const setExpanded = (open: boolean): void => {
-        if (!row.hasChildren) return;
-        if (open) this.expandedFolders.add(row.path);
-        else this.expandedFolders.delete(row.path);
-        this.renderItemTree();
-        const again = host.querySelector<HTMLElement>(`[data-path="${CSS.escape(row.path)}"]`);
-        again?.focus();
-      };
-
-      const choose = (): void => {
+    this.renderTreeRow(host, rows, {
+      datasetKey: "path",
+      expanded: this.expandedFolders,
+      markRow: (el, row) => {
+        el.dataset.kind = row.kind;
+      },
+      // Everything under a selected folder is already in the space, at every
+      // depth, and the folder is the row directly above its children, so the
+      // mark states a fact about the tree on screen.
+      //
+      // Tags are deliberately not shown here. A tag is a rule that matches notes
+      // scattered across the vault, not a position in the tree, so marking them
+      // would mark a scattered majority of rows at a broad tag and leave no way to
+      // tell why a given row was marked. Tags mode lists the selected tags with
+      // their counts, and the summary row counts every note the selection
+      // resolves to.
+      coveredBy: (row) =>
+        coveringFolders === null ? null : coveringFolderIn(coveringFolders, row.path),
+      coveredTitle: (by) =>
+        `Already included by the selected folder ${by}. ` +
+        "Deselect that folder to pick notes and folders under it one at a time.",
+      filterActive: () => this.itemFilter.trim() !== "",
+      budgetClosedTitle: () =>
+        "There is no room to show what is inside this folder. " +
+        (this.itemFilter.trim() !== "" ? "Narrow the filter to make room." : "Type in the filter to find what is inside."),
+      drawName: (el, row) => {
+        const icon = doc.win.createSpan();
+        icon.className = "spaces-create-tree-icon";
+        setIcon(icon, row.kind === "folder" ? "folder" : "file");
+        el.appendChild(icon);
+        const label = doc.win.createSpan();
+        label.className = "spaces-create-tree-name";
+        label.textContent = row.name;
+        el.appendChild(label);
+      },
+      choose: (row) => {
         if (this.state.folderMode) {
           // One root: picking replaces, and picking the same one again clears,
           // so a mis-click is undoable without leaving the picker.
@@ -1042,19 +1351,167 @@ export class CreateSpacePanel {
         } else {
           this.state = toggleItem(this.state, { path: row.path, kind: row.kind });
         }
+      },
+    });
+
+    // Only when the window has just been built, with a root already chosen
+    // (the right-click entry): the selection can then sit below the fold of a
+    // scrolling box the user has not scrolled yet. It must NOT run on a pick,
+    // an expand or a filter. `querySelector` returns the topmost selected
+    // row, so on a pick with several chosen it dragged the box back to the
+    // first of them, away from the row that was just clicked.
+    if (revealSelection) {
+      const selectedEl = host.querySelector(".is-selected");
+      if (selectedEl instanceof HTMLElement) selectedEl.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  /**
+   * Draws one body's rows into `host`. The adapter is the only difference
+   * between the two bodies.
+   *
+   * Everything a row is lives here once: the overflow row, the mark classes,
+   * the ARIA state, the caret, the keyboard split and the redraw after a pick,
+   * so a fix to any of them is made in one place. What the adapter supplies is
+   * what genuinely differs: the key a row is found by, what covers it, the
+   * wording of its titles, the name cell, and what picking changes in state.
+   * Each adapter closes over what its own draw built (the covering set, the tag
+   * counts, the query). It also reaches panel state that outlives a draw:
+   * `expanded`, which a caret and the arrow keys edit, and `this.state`, which
+   * both bodies read and `choose` writes. The item body also reads
+   * `this.itemFilter`.
+   */
+  private renderTreeRow<K extends string>(
+    host: HTMLElement,
+    rows: PickerRow<K>[],
+    adapter: RowAdapter<K>
+  ): void {
+    const doc = host.ownerDocument;
+    for (const row of rows) {
+      // A guard rather than `row.kind === "overflow"`: with `K` generic the
+      // compiler cannot rule out a row kind spelled "overflow", so a plain
+      // comparison does not narrow the union.
+      if (isOverflowRow(row)) {
+        const el = doc.win.createDiv();
+        el.className = "spaces-create-tree-row is-overflow";
+        el.setAttribute("role", "treeitem");
+        // Not focusable, no listeners, and not selectable: it stands in for
+        // rows, it is not one. `aria-disabled` rather than omitting the role,
+        // because a non-treeitem child of a tree is a worse answer for a
+        // screen reader than a disabled one.
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("aria-selected", "false");
+        el.style.paddingLeft = `${row.depth * 14}px`;
+        // Branches on the same test as the budget-closed title beside it, and
+        // both give the same advice in each state: narrow the filter when one
+        // is typed, otherwise type one. Typing a filter helps whether or not
+        // any folder is open, which closing folders does not.
+        const count = row.hidden === 1 ? "1 more" : `${row.hidden.toLocaleString()} more`;
+        const it = row.hidden === 1 ? "it" : "them";
+        el.textContent = adapter.filterActive()
+          ? `${count}, narrow the filter to see ${it}`
+          : `${count}, type in the filter to find ${it}`;
+        host.appendChild(el);
+        continue;
+      }
+      const el = doc.win.createDiv();
+      el.className = `spaces-create-tree-row${adapter.rowClass === undefined ? "" : ` ${adapter.rowClass}`}`;
+      el.setAttribute("role", "treeitem");
+      el.tabIndex = 0;
+      el.dataset[adapter.datasetKey] = row.path;
+      adapter.markRow?.(el, row);
+      // The caret's slot is reserved even on a childless row, so names stay in
+      // one column instead of jittering by level.
+      el.style.paddingLeft = `${row.depth * 14}px`;
+      el.classList.toggle("is-selected", row.selected);
+      // Both states, not just the true one: a treeitem with no `aria-selected`
+      // reads as "not selectable" rather than "not selected".
+      el.setAttribute("aria-selected", String(row.selected));
+      if (row.hasChildren && !row.budgetClosed) el.setAttribute("aria-expanded", String(row.expanded));
+
+      // Picked wins over covered: a row chosen by hand is a member in its own
+      // right and still removable, and reading it as inherited would hide the
+      // entry it is.
+      const covered = row.selected ? null : adapter.coveredBy(row);
+      el.classList.toggle("is-inherited", covered !== null);
+      if (covered !== null) {
+        // `aria-disabled` rather than the mark alone: covered is a third
+        // state, and `aria-selected="false"` says nothing a screen reader
+        // could use to tell it from an ordinary unselected row, while the edge
+        // and muted text are visual only. Not `disabled`, which would take
+        // the row out of the tab order and leave a keyboard user with no way
+        // to reach the title that explains it.
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("title", adapter.coveredTitle(covered));
+      } else if (row.selected && adapter.selectedTitle) {
+        el.setAttribute("title", adapter.selectedTitle(row));
+      }
+
+      if (row.budgetClosed) {
+        // A leaf that says why, like a covered row: the state is visible and
+        // the title carries the reason. It may share a title with the covered
+        // or removable one, so they are joined rather than one overwriting.
+        // Said per state because only one remedy works in each: a filter
+        // forces expansion and ignores what the user opened, so closing other
+        // branches changes nothing there, and with no filter there is nothing
+        // to narrow. The test is `visibleRows`'s own, so the two agree.
+        const why = adapter.budgetClosedTitle();
+        el.title = el.title === "" ? why : `${el.title} ${why}`;
+      }
+
+      // `refocus` is for the keyboard, where this row holds focus by
+      // definition. A pointer gesture leaves focus wherever it already was.
+      const setExpanded = (open: boolean, refocus: boolean): void => {
+        if (!row.hasChildren || row.budgetClosed) return;
+        if (open) adapter.expanded.add(row.path);
+        else adapter.expanded.delete(row.path);
+        this.redrawKeepingFocus(refocus ? row.path : undefined);
+      };
+
+      const caret = doc.win.createSpan();
+      caret.className = "spaces-create-tree-caret";
+      if (row.hasChildren && !row.budgetClosed) {
+        setIcon(caret, row.expanded ? "chevron-down" : "chevron-right");
+        // Hidden from assistive tech rather than labelled as a button: it
+        // takes no focus, and the row's `aria-expanded` already carries the
+        // state. Keyboard users expand with the arrow keys below.
+        caret.setAttribute("aria-hidden", "true");
+        caret.addEventListener("click", (e) => {
+          // Expanding is browsing, not choosing: without this the caret would
+          // also pick, and there would be no way to look inside a branch
+          // without selecting it. It works on a covered row too, which is what
+          // lets someone look inside a branch a selected parent already takes.
+          e.stopPropagation();
+          // Toggles the user's own opening, not the effective state: a filter
+          // can force a branch open that the user never did.
+          setExpanded(!adapter.expanded.has(row.path), false);
+        });
+      }
+      el.appendChild(caret);
+
+      adapter.drawName(el, row);
+      adapter.decorate?.(el, row);
+
+      const choose = (): void => {
+        // A click on a covered row would store a member the selected parent
+        // already covers. Nothing is the honest answer, and the title says which one gave it.
+        if (covered !== null) return;
+        adapter.choose(row);
         this.clearFault("root");
-        this.renderItemTree();
+        this.renderSummary();
+        // Through the focus-restoring redraw: the redraw destroys this row, so
+        // a keyboard pick would otherwise leave focus on `<body>`.
+        this.redrawKeepingFocus(row.path);
         this.refreshCreateButton();
-        this.refreshModeLabels();
       };
       el.addEventListener("click", choose);
       el.addEventListener("keydown", (e) => {
-        // Arrows browse, Enter and Space pick — the same split the caret and
+        // Arrows browse, Enter and Space pick: the same split the caret and
         // the row body draw for the mouse, so expanding never selects.
         if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-          if (!row.hasChildren) return;
+          if (!row.hasChildren || row.budgetClosed) return;
           e.preventDefault();
-          setExpanded(e.key === "ArrowRight");
+          setExpanded(e.key === "ArrowRight", true);
           return;
         }
         if (e.key !== "Enter" && e.key !== " ") return;
@@ -1063,11 +1520,403 @@ export class CreateSpacePanel {
       });
       host.appendChild(el);
     }
+  }
 
-    const selectedEl = host.querySelector(".is-selected");
-    // Opened with a root already chosen (the right-click entry), the selection
-    // can be below the fold of a scrolling box.
-    if (selectedEl instanceof HTMLElement) selectedEl.scrollIntoView({ block: "nearest" });
+  /**
+   * The tags this space currently holds, folded to the spelling the tag tree's
+   * rows are keyed on.
+   *
+   * Folder mode reports none. It keeps `items` so switching back costs nothing
+   * (`setFolderMode`), but `toCreateOptions` submits the root alone, so
+   * showing them would advertise members the space will not have.
+   *
+   * A set rather than the list it was: order said something when the tag body
+   * was a list in the order they were chosen, and the tree draws them where
+   * they belong instead.
+   */
+  private chosenTags(): Set<string> {
+    if (this.state.folderMode) return new Set<string>();
+    return memberTagSet(this.state.items);
+  }
+
+  /**
+   * One of the two buttons that choose what the window below them shows.
+   *
+   * They are new furniture in a pane that was kept bare on purpose, and that
+   * is the point: a corner icon and a typed sigil both ask the user to already
+   * know the other body is there. Two labelled buttons say it.
+   *
+   * `aria-pressed` rather than a radio group or a tablist: the pair beside
+   * them, Curated and Folder pinned, is already a pressed-button pair in this
+   * panel, and one idiom for two segmented pairs on one pane is what makes
+   * them read as the same kind of control.
+   *
+   * The title names the shortcut, which is the only place the shortcut is
+   * written down now that the placeholder is about filtering again.
+   */
+  private bodyBtn(
+    doc: Document,
+    mode: PickerMode,
+    label: string,
+    icon: string,
+    sigil: string
+  ): HTMLButtonElement {
+    const btn = doc.win.createEl("button");
+    btn.type = "button";
+    btn.className = "spaces-create-body";
+    btn.dataset.focusKey = mode === "tags" ? "body-tags" : "body-items";
+    btn.title = `${label}. Type ${sigil} in an empty filter box.`;
+    const ic = doc.win.createSpan();
+    ic.className = "spaces-create-theme-icon";
+    setIcon(ic, icon);
+    const text = doc.win.createSpan();
+    text.textContent = label;
+    btn.appendChild(ic);
+    btn.appendChild(text);
+    btn.addEventListener("click", () => {
+      this.setPickerMode(mode);
+    });
+    this.pickerModeEls.set(mode, btn);
+    this.paintPickerModes();
+    return btn;
+  }
+
+  /**
+   * What a box showing a flashing sigil is actually asking for.
+   *
+   * Stripping the sigil here rather than from the box is the whole trick: the
+   * list narrows by the real query from the first character typed after the
+   * sigil, while the box goes on showing the sigil until the flash ends.
+   */
+  private queryFrom(value: string): string {
+    const sigil = this.sigilFlash;
+    if (sigil === null || !value.startsWith(sigil)) return value;
+    return value.slice(sigil.length);
+  }
+
+  /** Starts the sigil showing, and arms the one thing that takes it back. */
+  private startSigilFlash(sigil: string): void {
+    this.cancelSigilFlash();
+    this.sigilFlash = sigil;
+    // The timer belongs to the window the panel is drawn in, as the drawing code
+    // does. `this.doc` is set in `mount()` and cleared in `destroy()`, and this
+    // runs from the filter box's key handler, which exists between the two; the
+    // `window` fallback satisfies the type and is not expected to be reached.
+    const win = this.doc?.win ?? window;
+    const handle = win.setTimeout(() => this.endSigilFlash(), SIGIL_FLASH_MS);
+    this.sigilFlashOff = () => win.clearTimeout(handle);
+  }
+
+  /**
+   * Takes the sigil out of the box, and nothing else.
+   *
+   * Exactly one character, matched against the one that was put there, and
+   * only while the box still starts with it. Someone who backspaced it, or
+   * selected the lot and typed over it, has already dealt with it; removing a
+   * character anyway would eat the first letter of what they typed instead.
+   *
+   * The caret moves back by what was removed, so a flash that ends mid-word
+   * leaves the user typing where they were rather than one place to the right.
+   * `itemFilter` is untouched: it has been sigil-free since the keystroke
+   * landed, so only the box changes and the list does not redraw.
+   */
+  private endSigilFlash(): void {
+    const sigil = this.sigilFlash;
+    this.cancelSigilFlash();
+    const filter = this.filterEl;
+    if (sigil === null || !filter || !filter.value.startsWith(sigil)) return;
+    const caret = filter.selectionStart;
+    filter.value = filter.value.slice(sigil.length);
+    const at = caret === null ? filter.value.length : Math.max(0, caret - sigil.length);
+    filter.setSelectionRange(at, at);
+  }
+
+  /** Drops a pending flash without touching the box. Idempotent. */
+  private cancelSigilFlash(): void {
+    this.sigilFlashOff?.();
+    this.sigilFlashOff = null;
+    this.sigilFlash = null;
+  }
+
+  /**
+   * Switches the window over, from either door.
+   *
+   * The filter text is left exactly as it is. The box narrows whichever body
+   * is on screen, so text in it is a query the user wrote and not a thing the
+   * old body owned; clearing it would make the buttons destructive, and a
+   * button that loses work is a button people stop pressing.
+   *
+   * Redrawn in place rather than through `render()`, so switching does not
+   * rebuild the pane under the pointer or take focus off the filter box the
+   * sigil was typed into.
+   */
+  private setPickerMode(mode: PickerMode): void {
+    this.pickerMode = mode;
+    this.paintPickerModes();
+    this.renderPlaceholder();
+    this.renderPickerBody();
+    // Nothing is written to the summary row: it shows the figures and the
+    // figures do not change with the body, so a switch is silent in the live
+    // region. The buttons are `aria-pressed`, which a screen reader says when
+    // focus is on them; a sigil typed in the filter box has no such cue.
+  }
+
+  /** Marks the button whose body is on screen, for the eye and for ARIA. */
+  private paintPickerModes(): void {
+    for (const [mode, btn] of this.pickerModeEls) {
+      const active = mode === this.pickerMode;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", String(active));
+    }
+  }
+
+  /**
+   * What the filter box says it will filter.
+   *
+   * It names the body on screen rather than the sigil, which the buttons now
+   * teach by being visible. Folder mode gets its own words, as it always has.
+   */
+  private renderPlaceholder(): void {
+    const filter = this.filterEl;
+    if (!filter) return;
+    if (this.state.folderMode) {
+      filter.placeholder = "Filter folders…";
+      return;
+    }
+    filter.placeholder = this.pickerMode === "tags" ? "Filter tags…" : "Filter notes and folders…";
+  }
+
+  /**
+   * The row pinned under the window's list: what this space holds so far.
+   *
+   * It is what makes the two bodies one picker. A tag chosen in Tags mode has
+   * no row to mark in the tree, and a note chosen in the tree has none in the
+   * tag list, so without this the window could only ever report half of what
+   * was picked. Counting both in one line also keeps it to one line, which is
+   * what the row of chips above the window failed at.
+   *
+   * Folder mode reports its root, by the same count. The mode holds one folder
+   * or none, and `toCreateOptions` submits the root alone, so reporting the
+   * curated items it is still carrying would advertise members the space will
+   * not have.
+   *
+   * Redrawn in place rather than through `render()`, so picking does not
+   * rebuild the window under the pointer that just clicked inside it.
+   */
+  private renderSummary(): void {
+    const host = this.summaryEl;
+    if (!host) return;
+    const picked = this.pickedMembers();
+    const counts = countPicked(picked);
+    // The total is the whole row's lead figure, so it is resolved on every
+    // draw, by the engine's own membership rule through `deps.preview`.
+    const notes = this.deps.preview(picked).notes;
+    const summary = pickedSummary(counts, notes);
+    host.textContent = summary;
+  }
+
+  /**
+   * What the summary row is reporting on: the curated members, or a folder
+   * space's root alone.
+   *
+   * Expressed as members rather than as counts so the root is resolved by
+   * exactly the rule a curated folder member is, and so both shapes reach
+   * `deps.preview` as the one thing it takes.
+   */
+  private pickedMembers(): readonly MemberEntry[] {
+    if (!this.state.folderMode) return this.state.items;
+    return this.state.root === "" ? [] : [{ kind: "folder", path: this.state.root }];
+  }
+
+  /**
+   * The tag body: the vault's tags as a tree, drawn into the same box the
+   * vault tree uses.
+   *
+   * It holds all of them, with the ones this space already has marked — the
+   * same job the item tree does for notes and folders, which is what makes the
+   * two buttons above the window mean the same kind of thing. An empty filter
+   * box is the whole tree, collapsed; text narrows it.
+   *
+   * **A tree, where this used to be a flat list of 50.** Obsidian's tags nest
+   * on `/` exactly as paths do, and a flat list threw that structure away
+   * twice over: it said nothing about `area/health/active` belonging under
+   * `area`, and on a real vault the cap hid most of it. Measured on the test
+   * vault, 446 distinct tags are 6 top-level roots, so what was 50 rows of 446
+   * is now six that open onto the rest. The old argument for flatness was that
+   * a selected parent covers its children anyway, which is true, and is
+   * answered below by SHOWING that coverage rather than by hiding the shape it
+   * is a fact about.
+   *
+   * `buildVaultTree` and `visibleRows` are the item tree's own, generalised
+   * over the kind rather than forked: expansion, carets, a filter that keeps a
+   * node when a descendant matches, and the invented intermediates tags need
+   * more than paths do, since `area/health/active` can exist with nothing ever
+   * tagged `area` on its own.
+   *
+   * **Filtering is `visibleRows`, not `prepareFuzzySearch`.** A substring test
+   * against a node's own name, which is its last segment, so typing `atlas`
+   * finds `project/atlas` and brings its ancestors with it. The quick
+   * switcher's scorer went with the flat list it ranked: a rank is an order,
+   * and a tree already has one that the rows' indentation is drawing. Ranking
+   * inside a tree would either reorder siblings under their parent for reasons
+   * the indentation cannot show, or be computed and then thrown away. One
+   * filter rule now serves both bodies, which is also what the one filter box
+   * above them implies.
+   *
+   * Each row reports how many notes its tag currently brings in, which is what
+   * `pathsMatching` already answers and therefore exactly what the member
+   * would resolve to. It is the row's confidence signal: the picker offers a
+   * SELECTOR, so there is no list of notes to click through here, and without
+   * the number a tag is a name and nothing else. Counted after the cap, never
+   * before it (see `countTagRows`).
+   */
+  private renderTagBody(host: HTMLElement, query: string): void {
+    const doc = host.ownerDocument;
+    // A tree, like the body the Vault button shows, because tags nest. Still
+    // multi-select, and multi-select is what makes ONE gesture enough:
+    // activating a selected row deselects it, so a click means "turn this on
+    // or off" here exactly as it does in the item tree.
+    host.setAttribute("role", "tree");
+    host.setAttribute("aria-multiselectable", "true");
+    host.setAttribute("aria-label", "Choose tags");
+    host.replaceChildren();
+
+    const message = (text: string): void => this.setEmptyMessage(host, text);
+
+    // Every tag, uncapped: a cap here would drop whole branches rather than
+    // the rows at the bottom of what is drawn.
+    //
+    // The union of what the vault reports and what is already chosen. The
+    // vault's list is re-read on every draw, so a tag whose last note was
+    // deleted vanished from it while staying in the member list: no row, no way
+    // to deselect, and the summary still counting it. `knownTags` returning
+    // null does the same to every chosen tag at once, and null is how
+    // `nativeKnownTags` reports a missing private `getTags`.
+    const chosen = this.chosenTags();
+    const known = storedTags(this.deps.tags);
+    if (known === null && chosen.size === 0) {
+      // Null is the source saying it cannot list the vault's tags at all, a
+      // return and not a throw, and the likelier of the two failures. The way
+      // out is the field in Settings, so say that rather than leaving an
+      // empty box to be read as "this vault has no tags". Said only when
+      // nothing is chosen: with a tag chosen there are rows to draw, and the
+      // chosen ones must stay deselectable.
+      message("Tags cannot be listed here. Add a tag from Settings, Contents.");
+      return;
+    }
+    const all = [...new Set([...(known ?? []), ...chosen])].sort();
+    if (all.length === 0) {
+      // Still split on the query, as the flat list was: a vault with no tags
+      // and a box with text in it is a search that found nothing, and telling
+      // someone mid-query about the vault's lifetime state answers a question
+      // they did not ask.
+      message(query.trim() === "" ? "No tags in this vault yet" : "No matching tag");
+      return;
+    }
+
+    // Rebuilt per draw rather than cached like `vaultTree`: the whole list is
+    // hundreds of short strings where the vault is tens of thousands of paths,
+    // and a tag appears the moment it is typed into a note.
+    const tree = buildVaultTree<TagKind>(
+      all.map((tag) => ({ path: tag, kind: "tag" })),
+      "tag",
+      isBranchByChildren
+    );
+    // The same budget the item tree uses, for the same reason. The collapsed
+    // view is usually a handful of roots and fits whole. Past the budget, a
+    // level is cut and ends in a marker that counts what it hid, the root level
+    // included. The common case is a branch like `topic` with its 401 children:
+    // it spends the budget inside the branch and its marker says how many of
+    // its own children are missing, while roots that sort after it may fall
+    // behind the root level's own marker, hidden but counted.
+    const rows = visibleRows(tree, {
+      expanded: this.expandedTags,
+      filter: query,
+      selected: chosen,
+      budget: MAX_PICKER_ROWS,
+    });
+    if (rows.length === 0) {
+      message("No matching tag");
+      return;
+    }
+
+    // Reached once per draw, not once per row: the accessor hands back the
+    // engine's current snapshot, and `pathsMatching` is a map lookup on it.
+    const index = this.deps.tagIndex();
+    // Only tag rows are counted: an overflow row is not a tag, so it never
+    // reaches the counter, and `decorate` looks each result up by path as
+    // `renderTreeRow` meets its row.
+    const counts = new Map(
+      countTagRows(
+        rows.flatMap((row) => (row.kind === "overflow" ? [] : [{ ...row, tag: row.path }])),
+        (tag) => index.pathsMatching(tag).length
+      ).map((row) => [row.path, row.count])
+    );
+
+    this.renderTreeRow(host, rows, {
+      datasetKey: "tag",
+      // Both classes: the tree's row rules are the layout, and the tag class
+      // carries only what differs.
+      rowClass: "spaces-create-tag-row",
+      expanded: this.expandedTags,
+      // A selected tag covers its children through `tagMatches`, and here the
+      // parent is the row directly above them, so the mark states a fact about
+      // the tree on screen. That is the whole difference from the item tree,
+      // which deliberately does NOT mark the notes a tag covers: a tag's reach
+      // over a NOTE is a rule matching files scattered anywhere, not a
+      // position in the tree it would have been drawn in. Same principle,
+      // opposite outcome, because the structure on screen is different.
+      coveredBy: (row) => coveringTagIn(chosen, row.path),
+      coveredTitle: (by) =>
+        `Already included by the selected tag ${TAG_SIGIL}${by}. ` +
+        "Deselect that tag to pick tags under it one at a time.",
+      // The row toggles, so a selected one is offering to come off. Said in a
+      // tooltip rather than in a second control: a real remove button inside
+      // a clickable row gives two targets for one action.
+      selectedTitle: (row) => `Remove ${TAG_SIGIL}${row.path}`,
+      filterActive: () => query.trim() !== "",
+      budgetClosedTitle: () =>
+        "There is no room to show what is inside this tag. " +
+        (query.trim() !== "" ? "Narrow the filter to make room." : "Type in the filter to find what is inside."),
+      drawName: (el, row) => {
+        const label = doc.win.createSpan();
+        label.className = "spaces-create-tree-name";
+        const sigil = doc.win.createSpan();
+        sigil.className = "spaces-create-tag-sigil";
+        // A Lucide tag, not a `#`: the same mark the Tags button carries, so one
+        // shape means "tag" everywhere in this panel.
+        setIcon(sigil, "tag");
+        label.appendChild(sigil);
+        const name = doc.win.createSpan();
+        // The last segment, not the whole tag: the indentation and the rows
+        // above it are already saying where this one sits, and repeating the
+        // ancestors on every row would put the part that differs last.
+        name.textContent = row.name;
+        label.appendChild(name);
+        el.appendChild(label);
+      },
+      // Trailing the name and set in the muted type the rest of the picker
+      // uses for anything that is not a name: a hint the eye picks up while it
+      // is already deciding, rather than a second thing to read.
+      //
+      // A parent's count INCLUDES the notes under its children, because
+      // `pathsMatching` resolves a tag the way a member would and the index
+      // files a note under each of its tags' ancestors. So `project` reading
+      // more than its own children add up to is correct rather than a double
+      // count: a note tagged only `project/atlas` is in the figure for both.
+      decorate: (el, row) => {
+        const count = doc.win.createSpan();
+        count.className = "spaces-create-tag-count";
+        count.textContent = tagCountLabel(counts.get(row.path) ?? 0);
+        el.appendChild(count);
+      },
+      // An invented intermediate is as selectable as any other row. Nobody
+      // may have tagged a note `area`, but `area` matches everything beneath
+      // it, which is exactly what picking it means.
+      choose: (row) => {
+        this.state = toggleItem(this.state, { kind: "tag", tag: row.path });
+      },
+    });
   }
 
   /**

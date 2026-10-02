@@ -120,3 +120,38 @@ export function createTreeVaultIndex(
     allPaths: () => [...kinds.keys()],
   };
 }
+
+/**
+ * A `VaultIndex` that does not exist until something asks it a question.
+ *
+ * The counterpart to `createLazyTagIndex`, and for the same reason.
+ * `createObsidianVaultIndex` walks the whole vault tree — 6.6 ms on a 10,000
+ * note vault — and it was built eagerly in the `SpaceController` constructor,
+ * inside the load Obsidian awaits. But `SpaceController.recompute` returns
+ * before it touches the vault index at all when *All* is active, which is the
+ * majority case and the only case for a user who has never made a space. The
+ * walk was provably unused and still paid for, on the one path where cost is
+ * most visible to the user.
+ *
+ * Built at most ONCE per wrapper, so one recompute sees one consistent
+ * picture, exactly as an eagerly built snapshot does. A caller wanting a
+ * fresh picture makes a fresh wrapper, which is what the coalescer's flush
+ * does.
+ *
+ * It preserves the ordering invariant `TagIndex.ts` documents rather than
+ * weakening it: the flush installs the vault index before the tag index, and
+ * a wrapper can only ever build at or AFTER the moment it was installed, so a
+ * recompute still cannot read a fresh vault against a tag index taken before
+ * it.
+ */
+export function createLazyVaultIndex(build: () => VaultIndex): VaultIndex {
+  let built: VaultIndex | null = null;
+  const index = (): VaultIndex => (built ??= build());
+  return {
+    exists: (p) => index().exists(p),
+    kindOf: (p) => index().kindOf(p),
+    childrenOf: (p) => index().childrenOf(p),
+    descendantsOf: (p) => index().descendantsOf(p),
+    allPaths: () => index().allPaths(),
+  };
+}

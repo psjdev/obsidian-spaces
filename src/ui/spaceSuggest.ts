@@ -2,7 +2,7 @@
  * What the space quick switcher offers for a given query.
  *
  * Kept apart from the modal for the same reason as `headerPlacement.ts` and
- * `panelCoverage.ts`: `SpaceSuggestModal` imports from `"obsidian"`, so nothing
+ * `panelMount.ts`: `SpaceSuggestModal` imports from `"obsidian"`, so nothing
  * in that file can be reached from a plain Vitest run. All the behaviour worth
  * asserting lives here instead.
  *

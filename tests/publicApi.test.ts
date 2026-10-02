@@ -137,6 +137,54 @@ describe("the declared read-only API", () => {
     expect(plugin.api.isMember("Invoices/2026.md", "nope")).toBe(false);
   });
 
+  it("isMember is false for a note the space excludes from a member folder", async () => {
+    // The user said "not that one" and the tree obeys. A surface that still
+    // called it a member would contradict what the user can see.
+    plugin["runtime"].setSelection({ kind: "space", id: "research" });
+    expect(plugin.api.isMember("Inbox/Today.md")).toBe(true);
+    await plugin["defs"].mutate((d) => {
+      const target = d.spaces.find((x) => x.id === "research");
+      if (target) target.exclude = ["Inbox/Today.md"];
+    });
+    expect(plugin.api.isMember("Inbox/Today.md")).toBe(false);
+    // Case folded, like every other path comparison in the plugin.
+    expect(plugin.api.isMember("inbox/today.md")).toBe(false);
+    // The sibling is untouched.
+    expect(plugin.api.isMember("Inbox/Other.md")).toBe(true);
+  });
+
+  it("isMember keeps an EXACT member that is also excluded", async () => {
+    // An exact member is a seed, and the engine consults exclusions only when
+    // expanding folder seeds, so the space still shows it. Reachable only by
+    // hand-editing data.json, and this must agree with the tree either way.
+    plugin["runtime"].setSelection({ kind: "space", id: "research" });
+    await plugin["defs"].mutate((d) => {
+      const target = d.spaces.find((x) => x.id === "research");
+      if (target) target.exclude = ["Papers/Attention.md"];
+    });
+    expect(plugin.api.isMember("Papers/Attention.md")).toBe(true);
+  });
+
+  it("isMember answers false for a note held only through a TAG member", async () => {
+    // The documented narrowing. Which notes a tag reaches is computed against
+    // the metadata cache, which this surface does not read, so it reports the
+    // stored path rules and says so rather than guessing. A consumer relying
+    // on the old wording would have been wrong in silence, which is why the
+    // docstring on `SpacesApi.isMember` now states this case outright.
+    await plugin["defs"].mutate((d) => {
+      d.spaces.push({
+        id: "tagged",
+        name: "Tagged",
+        icon: "tag",
+        color: "#4ecdc4",
+        members: [{ kind: "tag", tag: "project" }],
+      });
+    });
+    expect(plugin.api.isMember("Anywhere/Tagged.md", "tagged")).toBe(false);
+    // And a tag contributes no path here either, for the same reason.
+    expect(plugin.api.memberPaths("tagged")).toEqual([]);
+  });
+
   it("memberPaths returns the EXACT stored entries only", () => {
     // `members` holds only exact members; inherited ones are computed and
     // never stored, so a descendant of `Inbox` is a member but not a path here.

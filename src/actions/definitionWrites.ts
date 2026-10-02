@@ -26,13 +26,17 @@ import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 
 /**
- * Drops `paths` from `spaceId`'s member list.
+ * Takes `paths` out of `spaceId`, one way or the other: a path a stored
+ * member names is removed as a member; a path no stored member names (it is
+ * in the space because a tag member matched it, or because a member folder
+ * covers it) becomes an entry in that space's `exclude` list instead.
  *
- * Exact paths only. The inheritance means a folder member confers
- * membership on everything under it WITHOUT storing an entry per descendant,
- * so there is nothing under a removed folder to sweep — and a prefix sweep
- * would delete exact members the user added separately, which is the mistake
- * `repairOnDelete` was removed for (see `lifecycle/pathRepair.ts`).
+ * Exact paths only, in the member case. The inheritance means a folder
+ * member confers membership on everything under it WITHOUT storing an entry
+ * per descendant, so there is nothing under a removed folder to sweep — and
+ * a prefix sweep would delete exact members the user added separately, which
+ * is the mistake `repairOnDelete` was removed for (see
+ * `lifecycle/pathRepair.ts`).
  *
  * A space id that does not resolve is a no-op rather than an error: the two
  * callers both read the id from state that a concurrent `data.json` change can
@@ -55,17 +59,36 @@ export async function removeMembers(
     const target = d.spaces.find((s) => s.id === spaceId);
     if (!target) return;
     const drop = new Set<string>();
+    const exclude = new Set(target.exclude ?? []);
     for (const wanted of paths) {
-      const exact = target.members.find((m) => m.path === wanted);
-      if (exact) {
+      const exact = target.members.find(
+        (m) => m.kind !== "tag" && m.path === wanted
+      );
+      if (exact && exact.kind !== "tag") {
         drop.add(exact.path);
         continue;
       }
       const folded = canonicalPath(wanted);
+      let matched = false;
       for (const m of target.members) {
-        if (canonicalPath(m.path) === folded) drop.add(m.path);
+        if (m.kind === "tag") continue;
+        if (canonicalPath(m.path) === folded) {
+          drop.add(m.path);
+          matched = true;
+        }
+      }
+      // Nothing stored names this path, so it is in the space because a rule
+      // put it there, or because a member folder covers it. Either way the
+      // only way to take it out is to say so.
+      if (!matched) {
+        const already = [...exclude].some((e) => canonicalPath(e) === folded);
+        if (!already) exclude.add(wanted);
       }
     }
-    target.members = target.members.filter((m) => !drop.has(m.path));
+    target.members = target.members.filter(
+      (m) => m.kind === "tag" || !drop.has(m.path)
+    );
+    // Absent rather than empty, matching what the schema stores.
+    if (exclude.size > 0) target.exclude = [...exclude];
   });
 }

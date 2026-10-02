@@ -9,6 +9,8 @@ import {
   type ActiveSpaceStyle,
   type DropIndicatorStyle,
 } from "../types";
+import { normalizeTag } from "../visibility/tagMatch";
+import { canonicalPath } from "../visibility/glob";
 
 export type ValidationResult =
   | { ok: true; value: SpacesDefinitions }
@@ -72,12 +74,54 @@ function validateMembers(raw: unknown): MemberEntry[] | null {
   const out: MemberEntry[] = [];
   for (const m of raw) {
     if (!m || typeof m !== "object") return null;
-    const { path, kind } = m as Record<string, unknown>;
-    if (!isSafeVaultPath(path)) return null;
-    if (kind !== "file" && kind !== "folder") return null;
-    if (seen.has(path)) continue;
-    seen.add(path);
-    out.push({ path, kind });
+    const { kind } = m as Record<string, unknown>;
+    if (kind === "file" || kind === "folder") {
+      const { path } = m as Record<string, unknown>;
+      if (!isSafeVaultPath(path)) return null;
+      // Namespaced so a tag can never collide with a path in this set.
+      const key = "p:" + path;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind, path });
+      continue;
+    }
+    if (kind === "tag") {
+      const { tag } = m as Record<string, unknown>;
+      if (typeof tag !== "string") return null;
+      const normalized = normalizeTag(tag);
+      if (normalized.length === 0) return null;
+      const key = "t:" + normalized;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: "tag", tag: normalized });
+      continue;
+    }
+    // An unrecognised kind is still fatal, which rejects the whole document
+    // rather than silently dropping a member an older build would then write
+    // back without. See the forward compatibility section of the spec.
+    //
+    // **This loader answers "a field I do not understand" in two different
+    // ways on purpose, and the next schema field has to pick one.** Here, an
+    // unrecognised member `kind` rejects the WHOLE document; in
+    // `validateSpace` below, an unusable `exclude` entry is dropped on its
+    // own and the space is kept. The question to ask is what the plugin
+    // would destroy by carrying on:
+    //
+    // - Reject the document when the value is a MEMBERSHIP the user chose
+    //   and a write-back would erase. A newer install's `kind` dropped here
+    //   would be written back without it, losing curation the user cannot
+    //   recover; a sticky refusal to write leaves their data intact and says
+    //   why. Anything that says what is IN a space belongs in this branch.
+    // - Drop the entry when the value only REFINES what is already there, so
+    //   losing it costs nothing the user cannot see and redo. A bad
+    //   `exclude` string is unusable, not incoherent, and rejecting the
+    //   space over it would cost its name, icon, color and every member.
+    //   `root` is handled the same way, for the same reason.
+    //
+    // Both are right for their own field. Copying whichever one you read
+    // first is how a space gets thrown away over a typo, or how a user's
+    // members get silently deleted by an older client.
+    return null;
   }
   return out;
 }
@@ -184,6 +228,24 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
   if (typeof r.root === "string" && (r.root === "" || r.root === "/" || isSafeVaultPath(r.root))) {
     root = r.root;
   }
+  // Shape only, entry by entry, exactly like `root` above: a bad string is
+  // unusable, not incoherent, and dropping the whole space over one would
+  // cost the user its name, icon, color and members. The split between this
+  // and `validateMembers`' fatal branch is deliberate; the note at that
+  // branch says which of the two a new field wants.
+  let exclude: string[] | undefined;
+  if (Array.isArray(r.exclude)) {
+    const seen = new Set<string>();
+    const kept: string[] = [];
+    for (const e of r.exclude) {
+      if (!isSafeVaultPath(e)) continue;
+      const folded = canonicalPath(e);
+      if (seen.has(folded)) continue;
+      seen.add(folded);
+      kept.push(e);
+    }
+    if (kept.length > 0) exclude = kept;
+  }
   const members = validateMembers(r.members);
   if (!members) return null;
   return {
@@ -192,8 +254,49 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
     icon: r.icon,
     color: r.color,
     ...(root === undefined ? {} : { root }),
+    ...(exclude === undefined ? {} : { exclude }),
     members,
   };
+}
+
+/**
+ * The version to stamp on a document about to be written.
+ *
+ * Version 2 added tag members and per-space exclusions. A build that only
+ * understands version 1 rejects the whole document rather than dropping what
+ * it does not recognise, which is the safe behaviour, but it is also a
+ * plugin that refuses to work. So a document earns version 2 by using
+ * something version 1 cannot hold, and nothing else.
+ *
+ * This matters for someone running two devices through Sync who upgrades one
+ * of them first.
+ *
+ * Recomputed from current content every call, deliberately, rather than
+ * remembering the version a document arrived with: removing the last tag
+ * member or exclusion returns a document to version 1, so an older install
+ * can open it again. That is why the incoming version is never consulted
+ * here — considering it would quietly remove that recovery path.
+ */
+/*
+ * Scope, so the next person to add a SETTING sees this before they need it:
+ * this reads `spaces` and nothing else, so only a tag member or an exclusion
+ * can raise the stamp. A release that adds a setting and no new member kind
+ * still writes version 1, an older install accepts the document, and
+ * `validateDefinitions` rebuilds `settings` from its fixed key list and drops
+ * the key it does not know. On two devices through Sync that erases the
+ * setting silently.
+ *
+ * Left as is on purpose while the plugin is pre-1.0, where the contract is
+ * that things move. If it matters later, the cheapest fix is to carry the
+ * unrecognised remainder of `settings` through the validator rather than to
+ * widen this function: a downgrade then loses nothing without anyone having
+ * to remember to gate each new key.
+ */
+export function schemaVersionFor(spaces: readonly SpaceDefinition[]): number {
+  const usesV2 = spaces.some(
+    (s) => s.members.some((m) => m.kind === "tag") || (s.exclude?.length ?? 0) > 0
+  );
+  return usesV2 ? 2 : 1;
 }
 
 export function validateDefinitions(raw: unknown): ValidationResult {
@@ -236,7 +339,7 @@ export function validateDefinitions(raw: unknown): ValidationResult {
   return {
     ok: true,
     value: {
-      schemaVersion: SCHEMA_VERSION,
+      schemaVersion: schemaVersionFor(spaces),
       settings: {
         globalIgnore,
         // Defaults to FALSE, matching `DEFAULT_DEFINITIONS`. A *missing*

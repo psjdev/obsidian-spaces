@@ -293,6 +293,37 @@
 }
 .spaces-create-mode.is-active .spaces-create-theme-icon { color: inherit; }
 
+/* The two buttons that choose what the window below them shows, sitting under
+   the filter box they share a column with. The same segmented shape as the
+   Curated / Folder pinned pair above, but the active one is OUTLINED rather
+   than filled: two filled pairs on one pane read as one control with four
+   states, and the outline keeps them apart. The ring is an inset box-shadow
+   so it takes no space (a border appearing on the active button would move its
+   neighbour), and it replaces Obsidian's own button shadow, so the inactive
+   button keeps the stock chrome and reads as inactive. Text takes
+   `--text-accent` rather than `--text-on-accent`, because the background is
+   no longer the accent. The accessible state is `aria-pressed`, not this. */
+.spaces-create-bodies {
+  display: flex;
+  gap: 6px;
+}
+.spaces-create-body {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.spaces-create-body.is-active,
+.spaces-create-body.is-active:hover {
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+  color: var(--text-accent);
+}
+.spaces-create-body.is-active .spaces-create-theme-icon { color: inherit; }
+
 /* The item picker's view: fills the space between its button and the pinned
    actions, so the tree gets the whole pane rather than a fixed box. */
 .spaces-create-items {
@@ -301,6 +332,19 @@
   gap: 6px;
   min-height: 0;
   flex: 1 1 auto;
+}
+
+/* The filter box is a fixed-size control, so it must not shrink. It sits in a
+   height-constrained flex column, and `flex-shrink` defaults to 1: when the
+   content below it overflowed the column, the browser shrank the input along
+   with the tree. The Vault list is marginally taller than the Tags list, so
+   the box measured 27.2px in one body and 30px in the other (Obsidian 1.13.7,
+   10,000-note vault). The tree is the child meant to absorb that: it has
+   `flex: 1 1 auto` and its own overflow handling. The Vault / Tags buttons
+   row is not given the same rule because its own content height already
+   serves as its automatic minimum size, and it measured 30px in both bodies. */
+.spaces-create-items > .text-input {
+  flex-shrink: 0;
 }
 
 /* The tree. `flex: 1` rather than a fixed max-height, so it grows into the
@@ -313,21 +357,69 @@
    sat two pixels larger than the tree it mirrors. Set on the container so the
    rows, the caret and the empty-state message all follow; the filter field
    above is a sibling, so it keeps Obsidian's input sizing. */
+/* The window: a column of two, the list and the row pinned under it. The
+   border and the typesetting are the window's; the scrolling belongs to the
+   list alone, so the summary row stays put while the rows move under it. */
 .spaces-create-tree {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 80px;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s, 4px);
-  padding: 4px;
   font-size: var(--nav-item-size);
   font-weight: var(--nav-item-weight);
 }
+.spaces-create-tree-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+/* One row tall, under a divider, and it does not scroll: the list gives up the
+   height for it rather than the window taking more. */
+.spaces-create-summary {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 0.9em;
+  font-weight: var(--font-normal, 400);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* `margin-bottom` rather than a `gap` on the list: a gap cannot be removed
+   for one pair, and the rule below removes exactly this margin where two rows
+   belong to the same selection and have to merge into one block. Without the
+   separation, two folders picked separately read as one shape joined at the
+   waist.
+
+   `min-height` and the 3px margin are a pair, and both numbers are measured
+   rather than chosen. A row's natural height is the line box plus padding,
+   which is fractional (20.88px at the default font), so consecutive row edges
+   land on fractional device pixels and each gap rounds independently. At a
+   fractional device pixel ratio that painted a 2px gap as alternating 2 and 3
+   device pixels, which is a 50% swing on a thin dark line and plainly visible
+   down a run of tinted rows. Measured at dpr 1.3693: 20.88px/2px gave
+   2,3,3,2,3,3,2,3,3; 22px/3px gave 4 every time.
+
+   Obsidian's own file explorer has the same artifact — its rows are 24.876px
+   with a 2px margin, and its gaps measure 2.088 and 1.997. It is invisible
+   there because stock rows are transparent, so there is no seam to see. Ours
+   are filled, so a run of them shows every one.
+
+   `min-height` rather than `height`: a theme with a larger font would clip
+   against a fixed height, and a clipped name is worse than an uneven gap. */
 .spaces-create-tree-row {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 2px 4px;
+  min-height: 22px;
+  margin-bottom: 3px;
   border-radius: var(--radius-s, 4px);
   cursor: pointer;
   white-space: nowrap;
@@ -337,10 +429,100 @@
   outline: none;
   box-shadow: inset 0 0 0 2px var(--text-accent);
 }
+/* Covered by something already picked: a consequence, not a choice.
+
+   The same 10% accent fill the selected row carries, on purpose. A picked
+   folder and the rows it brings in are ONE selection, and the block below
+   draws them as one shape. What separates the two states inside that block is
+   the selected row's accent text and weight 600, which is where the eye lands
+   first in a run that is otherwise uniform.
+
+   Stated plainly, because this was the branch's headline defect and is now a
+   deliberate choice: a theme that narrows `--text-accent` toward
+   `--text-normal` leaves only the weight to tell a picked row from a covered
+   one. The weight is not theme-derived, so something always remains, but the
+   margin is thinner than an edge mark gave. The grouping is what carries the
+   meaning now: the block says "this is your selection", and the bold row says
+   which one you clicked.
+
+   `cursor: default` because the click is a no-op. The hover rule below holds
+   the tint rather than letting the row's generic hover repaint it, so a
+   covered row does not light up under the pointer while saying it is inert. A
+   row that looks clickable and does nothing is worse than one that says so.
+   `:not(.is-selected)` so a row that is both keeps the selected fill.
+
+   No box-shadow here, so the plain `:focus-visible` ring above applies
+   unchanged. Covered rows stay in the tab order, so a keyboard user can reach
+   the title explaining why they are inert, and they need that ring. */
+.spaces-create-tree-row.is-inherited {
+  background: color-mix(in oklch, var(--interactive-accent) 10%, transparent);
+  cursor: default;
+}
+/* One selection is drawn as one block: a picked folder and the rows it brings
+   in merge into a single rectangle, with the corners rounded only where the
+   block starts and ends.
+
+   The join is decided by the NEXT row being COVERED, not merely tinted, and
+   that is the whole rule. A covered row belongs to the selection above it, so
+   it joins. A selected row starts a selection of its own, so it does not:
+   two sibling folders picked separately stay two pills, which is what they
+   are. `toggleItem` keeps the member list minimal, so a selected row can
+   never be a descendant of another selected row, and the two cases are
+   therefore exhaustive.
+
+   `:has(+ ...)` looks forward and `+` looks back, which is what lets the
+   first and last row of a block keep their rounding without the renderer
+   having to mark them. Anything else ends a block by not matching, including
+   the overflow row, which should end it: it is not part of the selection.
+
+   The separator is FILLED, not removed. Collapsing the margin to 0 was the
+   obvious way to join two rows and it moved them: a block of N rows lost
+   (N-1) x 3px of height, so picking a parent pulled its children up and
+   deselecting dropped them back. Nothing about a selection should change
+   where a row sits. `box-shadow` paints the 3px below the row in the same
+   tint and takes no part in layout, so the block reads continuous and every
+   row stays exactly where it was.
+
+   Listed before the focus ring's own rule for `.is-inherited`, which restates
+   this shadow alongside the ring: `box-shadow` is one property, so a focused
+   row inside a block has to set both or lose one. */
+.spaces-create-tree-row:is(.is-selected, .is-inherited):has(
+    + .spaces-create-tree-row.is-inherited
+  ) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: 0 3px 0 0 color-mix(in oklch, var(--interactive-accent) 10%, transparent);
+}
+.spaces-create-tree-row:is(.is-selected, .is-inherited):has(
+    + .spaces-create-tree-row.is-inherited
+  ):focus-visible {
+  box-shadow:
+    0 3px 0 0 color-mix(in oklch, var(--interactive-accent) 10%, transparent),
+    inset 0 0 0 2px var(--text-accent);
+}
+.spaces-create-tree-row:is(.is-selected, .is-inherited)
+  + .spaces-create-tree-row.is-inherited {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.spaces-create-tree-row.is-inherited:not(.is-selected):hover {
+  background: color-mix(in oklch, var(--interactive-accent) 10%, transparent);
+}
+.spaces-create-tree-row.is-overflow:hover {
+  background: transparent;
+}
 .spaces-create-tree-row.is-selected {
   background: var(--background-modifier-active-hover, var(--background-modifier-hover));
   color: var(--text-accent);
   font-weight: 600;
+}
+/* Stands in for rows the budget could not draw. Reads as a note, not a row to
+   act on. Sets no box-shadow, so the base `:focus-visible` ring applies
+   unchanged if it ever takes focus. */
+.spaces-create-tree-row.is-overflow {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: default;
 }
 /* Reserved even on a childless row, so names stay in one column. */
 .spaces-create-tree-caret {
@@ -358,19 +540,54 @@
 }
 .spaces-create-tree-icon svg { width: 14px; height: 14px; }
 .spaces-create-tree-row.is-selected .spaces-create-tree-icon { color: inherit; }
-/* Sits below the rows, inside the scroll box but outside the tree itself. A
-   status line, not a row: it is not selectable and takes no focus. */
-.spaces-create-tree-more {
-  padding: 4px;
-  color: var(--text-muted);
-  font-size: 0.9em;
-  border-top: 1px solid var(--background-modifier-border);
-}
 .spaces-create-tree-empty {
   padding: 8px 4px;
   color: var(--text-muted);
   font-size: 0.9em;
 }
+
+/* §: the tag tree, drawn in the same box as the item tree and reached by the
+   Tags button above it.
+   The row itself is `.spaces-create-tree-row` -- including its caret slot, its
+   indent and the leading-edge `.is-inherited` mark a covering parent gives it -- so only
+   the differences live here: the tag mark and the note count. No
+   `padding-left` of its own, because the panel sets one per row from the
+   depth and the two would be the same rule written twice. */
+.spaces-create-tag-row .spaces-create-tree-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* A Lucide tag, the same mark the Tags button carries. Muted so the tag's
+   name is what the eye lands on. Its own element, so it takes its own color
+   and the name text stays just the last segment. */
+.spaces-create-tag-sigil {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.spaces-create-tag-sigil svg { width: 13px; height: 13px; }
+.spaces-create-tag-row.is-selected .spaces-create-tag-sigil { color: inherit; }
+/* How many notes the tag brings in. `margin-left: auto` puts it against the
+   right edge so the numbers line up as a column the eye can skim, and the
+   name keeps the whole of the space left of it. Muted and a size down,
+   because it is a hint beside the name rather than a second name. */
+.spaces-create-tag-count {
+  margin-left: auto;
+  padding-left: 8px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  font-weight: var(--font-normal, 400);
+  font-variant-numeric: tabular-nums;
+}
+/* A selected row goes accent-colored and semibold; the count must not follow
+   it there, or the hint becomes the loudest thing on the row it is hinting
+   about. */
+.spaces-create-tag-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
+
 /* The theme button replaces the old swatch row: full width under the name,
    so it reads as an action rather than seven unexplained circles. The brush
    carries the current color (set inline from state), so the button shows the
@@ -1091,7 +1308,12 @@ body.spaces-claims-drop .drag-ghost-action {
   }
 }
 
-/* §19.6: the settings tab's own furniture.
+/* §19.6: the settings tab.
+
+   It owns no furniture of its own: every row is one of Obsidian's, and the
+   two classes it does carry (`.spaces-setting-warning` and
+   `.spaces-restore-warning`) are defined with the other warnings above. What
+   is recorded here is a decision NOT to add any.
 
    There is deliberately NO visual treatment for a subordinate setting. Two
    were tried against §20.7's "Allow reordering in All" and both were worse
@@ -1106,56 +1328,6 @@ body.spaces-claims-drop .drag-ghost-action {
    every theme: the child is DISABLED while its parent is off, and its
    description says so ("Reordering is off above, so this has no effect").
    Rows stay full width, like every other setting. */
-
-/* The support line, above everything. Deliberately quiet: it is the first
-   thing on the tab and the least important thing on it. */
-.spaces-support {
-  margin: 0 0 18px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-}
-
-/* Shown when a space has no members, and when the whole vault has no spaces. */
-.spaces-settings-empty {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-}
-
-/* §19.6: the settings tab strip. Obsidian has no component for sub-tabs
-   inside a plugin's settings pane, so this is owned furniture — built from
-   real <button>s, which is what makes it keyboard-operable without any
-   scripting of our own. */
-.spaces-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 18px;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-.spaces-tab {
-  /* Obsidian's default button is a raised pill, which reads as an action
-     rather than a place. Stripped back so the strip reads as navigation. */
-  background: none;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-  padding: 6px 12px;
-  margin-bottom: -1px;
-  cursor: pointer;
-  color: var(--text-muted);
-  border-bottom: 2px solid transparent;
-}
-.spaces-tab:hover {
-  background: none;
-  color: var(--text-normal);
-  box-shadow: none;
-}
-.spaces-tab.is-active {
-  color: var(--text-normal);
-  font-weight: var(--font-medium);
-  border-bottom-color: var(--interactive-accent);
-}
 
 /* ---------- Space strip placement ----------------------------------------
    One class on the explorer pane decides where the strip paints. The strip

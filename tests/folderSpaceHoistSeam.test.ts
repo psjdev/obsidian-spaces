@@ -32,6 +32,7 @@ import SpacesPlugin from "../src/main";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { buildFakeVault } from "./helpers/fakeVault";
 import type { FolderItemLike } from "../src/layout/nativeExplorerSort";
 import type { SpaceDefinition } from "../src/types";
@@ -178,18 +179,24 @@ async function makeHarness(leaves: { view: FakeView }[]): Promise<Harness> {
     get: (k) => runtimeBacking.get(k),
     set: (k, v) => void runtimeBacking.set(k, v),
   });
-  plugin["controller"] = new SpaceController(plugin["defs"], plugin["runtime"], VAULT_INDEX, {
-    // Delegates to the plugin's own `liveLeafPaths()`, mirroring `main.ts`'s
-    // real wiring (`livePaths: () => this.liveLeafPaths()`) exactly. Every
-    // existing test here sees the same empty set as before, because the
-    // fake `app.workspace.iterateRootLeaves` above calls no callback; the
-    // elsewhere-group tests below override `liveLeafPaths` once and get it
-    // threaded to BOTH the hoist (`hoistedRootItems`/`currentPermits`) and
-    // the controller's revealed-set sync, which is what actually decides
-    // whether an elsewhere row survives `filterVisibleItems`.
-    apply: (snap) => plugin["adapter"].apply(snap, plugin["elsewhereFirstPath"]()),
-    livePaths: () => plugin["liveLeafPaths"](),
-  });
+  plugin["controller"] = new SpaceController(
+    plugin["defs"],
+    plugin["runtime"],
+    VAULT_INDEX,
+    {
+      // Delegates to the plugin's own `liveLeafPaths()`, mirroring `main.ts`'s
+      // real wiring (`livePaths: () => this.liveLeafPaths()`) exactly. Every
+      // existing test here sees the same empty set as before, because the
+      // fake `app.workspace.iterateRootLeaves` above calls no callback; the
+      // elsewhere-group tests below override `liveLeafPaths` once and get it
+      // threaded to BOTH the hoist (`hoistedRootItems`/`currentPermits`) and
+      // the controller's revealed-set sync, which is what actually decides
+      // whether an elsewhere row survives `filterVisibleItems`.
+      apply: (snap) => plugin["adapter"].apply(snap, plugin["elsewhereFirstPath"]()),
+      livePaths: () => plugin["liveLeafPaths"](),
+    },
+    createMapTagIndex(new Map())
+  );
   plugin["switcher"] = { mount: () => undefined, render: () => undefined } as unknown as SwitcherView;
   plugin["header"] = { mount: () => undefined, render: () => undefined } as unknown as SpaceHeaderView;
   return { plugin, leaves };

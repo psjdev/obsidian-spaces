@@ -409,7 +409,10 @@ describe("picking items for a curated space", () => {
 
   it("keeps the order things were picked in", () => {
     const s = toggleItem(toggleItem(empty(), note), dir);
-    expect(s.items.map((i) => i.path)).toEqual(["Archive/Bravo.md", "Papers"]);
+    expect(s.items.flatMap((i) => (i.kind === "tag" ? [] : [i.path]))).toEqual([
+      "Archive/Bravo.md",
+      "Papers",
+    ]);
   });
 
   it("removes on a second click of the same path", () => {
@@ -423,6 +426,35 @@ describe("picking items for a curated space", () => {
     // user could see and not explain.
     const s = toggleItem(toggleItem(empty(), note), { path: note.path, kind: "folder" });
     expect(s.items).toEqual([]);
+  });
+
+  // Tag members reach the picker too, now that the filter box's `#` sigil
+  // offers them. `items` was already typed to hold one — `MemberEntry` is a
+  // union and `resolveMembers` expands a tag member before the visibility
+  // engine runs — so these assert that the EXISTING toggle already handles
+  // the third kind rather than that anything was added for it.
+  const tag = { kind: "tag" as const, tag: "project" };
+
+  it("adds a tag", () => {
+    expect(toggleItem(empty(), tag).items).toEqual([tag]);
+  });
+
+  it("removes on a second click of the same tag", () => {
+    expect(toggleItem(toggleItem(empty(), tag), tag).items).toEqual([]);
+  });
+
+  it("keeps a tag and a path apart even when the text is the same", () => {
+    // A tag member carries no path and a path member carries no tag, so the
+    // two are only ever identical to their own kind. Without that, a space
+    // could not hold both a `project` tag and a `project` folder.
+    const alike = { path: "project", kind: "folder" as const };
+    const s = toggleItem(toggleItem(empty(), tag), alike);
+    expect(s.items).toEqual([tag, alike]);
+  });
+
+  it("submits a tag member as picked, with no path invented for it", () => {
+    const s = toggleItem({ ...empty(), name: "Reading" }, tag);
+    expect(toCreateOptions(s).members).toEqual([tag]);
   });
 
   it("submits what was picked, with each kind carried through", () => {

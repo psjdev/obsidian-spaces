@@ -7,7 +7,7 @@
  * drag-to-reorder gesture does not degrade there — it does not exist. `SwitcherView` already
  * gates its space-icon drag on `Platform.isMobile`; the file-tree drag did not,
  * so it was silently dead: no error, no explanation, and a settings toggle
- * ("Allow reordering of space items") still advertising it.
+ * ("Allow reordering a space's notes and folders") still advertising it.
  *
  * `manifest.json` says `isDesktopOnly: true`, so this is unreachable today.
  * That is exactly why it is worth pinning: the guard's whole purpose is to stop

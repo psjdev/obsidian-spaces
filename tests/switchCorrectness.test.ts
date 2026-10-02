@@ -13,6 +13,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { SpaceController } from "../src/controller/SpaceController";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { LayoutCoordinator } from "../src/layout/LayoutCoordinator";
@@ -113,7 +114,7 @@ describe("switch serialization and outcome", () => {
       },
       rt
     );
-    const controller = new SpaceController(store, rt, vault, host, {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
       transition: (from, to) => coord.transition(from, to, true),
     });
 
@@ -140,7 +141,7 @@ describe("switch serialization and outcome", () => {
     const gate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const controller = new SpaceController(store, rt, vault, host, {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
       transition: async (from, to): Promise<SwitchOutcome> => {
         seen.push({ from, to });
         if (seen.length === 1) await gate;
@@ -166,7 +167,7 @@ describe("switch serialization and outcome", () => {
     // the target anyway means the NEXT departure captures the outgoing
     // workspace into the target's slot.
     const { store, rt, host, apply } = await base();
-    const controller = new SpaceController(store, rt, vault, host, {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
       transition: async (): Promise<SwitchOutcome> => ({
         kind: "rolled-back",
         reason: "restore produced an empty workspace",
@@ -182,7 +183,7 @@ describe("switch serialization and outcome", () => {
 
   it("does not commit the selection when neither the restore nor the rollback worked", async () => {
     const { store, rt, host, apply } = await base();
-    const controller = new SpaceController(store, rt, vault, host, {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
       transition: async (): Promise<SwitchOutcome> => ({
         kind: "failed-open",
         reason: "boom; rollback: boom",
@@ -205,7 +206,7 @@ describe("switch serialization and outcome", () => {
     const { store, rt, host, apply } = await base();
     const seen: Array<{ kind: string; reason?: string }> = [];
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const controller = new SpaceController(store, rt, vault, host, {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
       transition: async (): Promise<SwitchOutcome> => {
         throw new Error("changeLayout blew up");
       },
@@ -234,9 +235,16 @@ describe("switch serialization and outcome", () => {
       { kind: "skipped" },
     ] as SwitchOutcome[]) {
       const { store, rt, host } = await base();
-      const controller = new SpaceController(store, rt, vault, host, {
-        transition: async (): Promise<SwitchOutcome> => outcome,
-      });
+      const controller = new SpaceController(
+        store,
+        rt,
+        vault,
+        host,
+        createMapTagIndex(new Map()),
+        {
+          transition: async (): Promise<SwitchOutcome> => outcome,
+        }
+      );
       await controller.switchTo(RESEARCH);
       expect(rt.getSelection()).toEqual(RESEARCH);
     }
@@ -257,7 +265,7 @@ describe("switch serialization and outcome", () => {
     const gate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const controller = new SpaceController(store, rt, vault, host, {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
       transition: async (from, to): Promise<SwitchOutcome> => {
         seen.push({ from, to });
         if (seen.length === 1) await gate;

@@ -93,6 +93,27 @@ describe("renameTouchesDefs", () => {
     expect(repairIsNoOp(defs, "Papers", "Journals")).toBe(false);
   });
 
+  it("returns true when only an EXCLUSION names the renamed path", () => {
+    // The half that would otherwise do nothing at all. `repairOnRename`
+    // rewrites `exclude`, so a predicate that read `root` and the member
+    // paths alone would early-out and leave the exclusion pointing at a path
+    // the note has left: the note reappears in the space, and whatever later
+    // occupies the old path is excluded in its place.
+    const defs = defsWith({
+      spaces: [{ ...RESEARCH, exclude: ["Papers/A.md"], members: [] }],
+    });
+    expect(renameTouchesDefs(defs, "Papers/A.md", "Papers/B.md")).toBe(true);
+    expect(repairIsNoOp(defs, "Papers/A.md", "Papers/B.md")).toBe(false);
+  });
+
+  it("returns true when an exclusion sits UNDER the renamed folder", () => {
+    const defs = defsWith({
+      spaces: [{ ...RESEARCH, exclude: ["Papers/A.md"], members: [] }],
+    });
+    expect(renameTouchesDefs(defs, "Papers", "Journals")).toBe(true);
+    expect(repairIsNoOp(defs, "Papers", "Journals")).toBe(false);
+  });
+
   it("returns true when only an order map KEY is affected", () => {
     // Order lists are keyed BY FOLDER PATH, so a folder rename rewrites
     // keys as well as entries. Nothing in `spaces` mentions the path here.
@@ -140,6 +161,11 @@ describe("renameTouchesDefs", () => {
       defsWith({
         spaces: [{ ...RESEARCH, members: [] }],
         orders: { bySpaceId: { research: { Papers: ["Papers/A.md"] } } },
+      }),
+      defsWith({
+        spaces: [
+          { ...RESEARCH, exclude: ["Papers/A.md", "Papers/Sub/B.md"], members: [] },
+        ],
       }),
     ];
     const renames: [string, string][] = [

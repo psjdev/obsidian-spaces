@@ -90,7 +90,7 @@ Click **All** to leave the space and see the whole vault again.
 Right-click a row in the file tree:
 
 - In **All**, **Add to space** offers each of your spaces.
-- Inside a space, **Remove from *space*** removes a member. A row that is in the space because you added its parent folder shows a disabled entry naming the folder it came from. Remove the folder, or use **Stop showing here** to dismiss a visitor.
+- Inside a space, `Remove from <space name>` removes a member. A row that is in the space because you added its parent folder shows a disabled entry naming the folder it came from. Remove the folder, or use **Stop showing here** to dismiss a visitor.
 - On a folder in **All**, **Create folder pinned space** builds a space pinned to it in one step.
 
 Right-click a space's icon in the space strip for **Rename space…**, **Change space icon…**, **Change space color…**, and **Restore saved ordering**.
@@ -100,6 +100,21 @@ Right-click a space's icon in the space strip for **Rename space…**, **Change 
 | <img src="docs/media/menu-add-to-space.png" width="360" alt="Obsidian's own folder menu with two added entries: Add to space, opened to show the spaces that can take this folder, and Create folder pinned space."> | <img src="docs/media/menu-space-icon.png" width="360" alt="The menu on a space icon: Rename space, Change space icon and Change space color."> |
 
 Only spaces that can take the row are offered: a folder pinned space is a window onto its own folder, so it never appears in **Add to space**.
+
+## Tags
+
+A curated space can hold a tag as well as notes and folders. Every note carrying the tag appears in the space, wherever it lives in your vault.
+
+To add one:
+
+- In the creation form, switch the picker from **Vault** to **Tags** and click a tag.
+- On an existing space, open Settings → Spaces, click **Contents…** beside the space, and type the tag under **Add a tag**.
+
+Nested tags match. A space holding `project` includes notes tagged `project/atlas` and `project/atlas/phase-1`. A space holding `project/atlas` includes only that tag and the tags nested under it.
+
+Add the tag to a note and it appears, change or delete the tag and it leaves. Tags written in a note's properties and tags written in its text both count.
+
+To drop a single note without dropping the tag, right-click it inside the space and choose `Remove from <space name>`. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
 
 ## Sorting
 
@@ -184,9 +199,9 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Assign a color to new spaces | On | New spaces take the next palette color. Off, they start neutral and you pick |
 | Drag indicator | Box | How the file pane shows where a dragged item will land. Box opens a gap between the rows and fills it. Line draws a thin rule at the boundary and moves nothing |
 | Use theme colors for space icons | Off | Draws every space icon in your theme's icon color. Your saved colors are kept and come back when you turn it off |
-| Show files you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
+| Show notes you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
 | Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A file you added explicitly is still shown |
-| Allow reordering of space items | On | Whether dragging rows rearranges them inside a space |
+| Allow reordering a space's notes and folders | On | Whether dragging rows rearranges them inside a space |
 | Allow reordering outside spaces | On | The same, for **All** |
 | Restore tabs when switching spaces | Off | Whether each space restores its own tabs. On, switching also rearranges your panes; off changes nothing about which rows are visible |
 

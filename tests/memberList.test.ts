@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { memberRows, memberSummary, missingCount, spaceRowSummary } from "../src/ui/memberList";
+import {
+  exclusionRows,
+  memberRows,
+  memberSummary,
+  missingCount,
+  spaceRowSummary,
+  withoutMember,
+  withoutTagMember,
+  type MemberRow,
+  type PathMemberRow,
+} from "../src/ui/memberList";
 import type { SpaceDefinition } from "../src/types";
 
 const space = (members: SpaceDefinition["members"]): SpaceDefinition => ({
@@ -13,6 +23,25 @@ const space = (members: SpaceDefinition["members"]): SpaceDefinition => ({
 /** Everything exists except paths beginning `Gone`. */
 const exists = (p: string): boolean => !p.startsWith("Gone");
 
+/**
+ * The tag lookup `memberRows` now takes. Every fixture in this file holds
+ * path members only, so it is never called and the rows these tests assert
+ * about are exactly the rows they were before tag members existed. Tag rows
+ * have their own file, `memberRowsTags.test.ts`.
+ */
+const noTags = (): number => 0;
+
+/**
+ * Narrows a row to the path variant, so an assertion about a path-only field
+ * stays the assertion it always was. A tag row reaching one of these fails
+ * loudly instead of reading as `undefined`, which is what a cast would have
+ * made it.
+ */
+const pathRow = (r: MemberRow): PathMemberRow => {
+  if (r.kind === "tag") throw new Error(`expected a path row, got #${r.tag}`);
+  return r;
+};
+
 describe("memberRows", () => {
   it("keeps definition order", () => {
     // The same ordering the switcher, the header dropdown and All's "Add to
@@ -23,18 +52,19 @@ describe("memberRows", () => {
         { path: "b.md", kind: "file" },
         { path: "a.md", kind: "file" },
       ]),
-      exists
+      exists,
+      noTags
     );
-    expect(rows.map((r) => r.path)).toEqual(["b.md", "a.md"]);
+    expect(rows.map((r) => pathRow(r).path)).toEqual(["b.md", "a.md"]);
   });
 
   it("marks an entry whose file is gone as missing", () => {
-    const rows = memberRows(space([{ path: "Gone/Idea.md", kind: "file" }]), exists);
+    const rows = memberRows(space([{ path: "Gone/Idea.md", kind: "file" }]), exists, noTags);
     expect(rows[0]).toMatchObject({ status: "missing", coveredBy: null });
   });
 
   it("marks a plain member present", () => {
-    const rows = memberRows(space([{ path: "Notes/Idea.md", kind: "file" }]), exists);
+    const rows = memberRows(space([{ path: "Notes/Idea.md", kind: "file" }]), exists, noTags);
     expect(rows[0]).toMatchObject({ status: "present", coveredBy: null });
   });
 
@@ -47,7 +77,8 @@ describe("memberRows", () => {
         { path: "Projects", kind: "folder" },
         { path: "Projects/Deep/Note.md", kind: "file" },
       ]),
-      exists
+      exists,
+      noTags
     );
     expect(rows[1]).toMatchObject({ status: "redundant", coveredBy: "Projects" });
   });
@@ -59,13 +90,14 @@ describe("memberRows", () => {
         { path: "Projects/Sub", kind: "folder" },
         { path: "Projects/Sub/Note.md", kind: "file" },
       ]),
-      exists
+      exists,
+      noTags
     );
-    expect(rows[2].coveredBy).toBe("Projects/Sub");
+    expect(pathRow(rows[2]).coveredBy).toBe("Projects/Sub");
   });
 
   it("does not call a member folder redundant because of itself", () => {
-    const rows = memberRows(space([{ path: "Projects", kind: "folder" }]), exists);
+    const rows = memberRows(space([{ path: "Projects", kind: "folder" }]), exists, noTags);
     expect(rows[0].status).toBe("present");
   });
 
@@ -76,7 +108,8 @@ describe("memberRows", () => {
         { path: "Projects", kind: "folder" },
         { path: "Projects2/Note.md", kind: "file" },
       ]),
-      exists
+      exists,
+      noTags
     );
     expect(rows[1].status).toBe("present");
   });
@@ -89,18 +122,19 @@ describe("memberRows", () => {
         { path: "Gone", kind: "folder" },
         { path: "Gone/Note.md", kind: "file" },
       ]),
-      exists
+      exists,
+      noTags
     );
     expect(rows[1].status).toBe("missing");
   });
 
   it("carries the stored kind through", () => {
-    const rows = memberRows(space([{ path: "Projects", kind: "folder" }]), exists);
+    const rows = memberRows(space([{ path: "Projects", kind: "folder" }]), exists, noTags);
     expect(rows[0].kind).toBe("folder");
   });
 
   it("returns nothing for a space with no members", () => {
-    expect(memberRows(space([]), exists)).toEqual([]);
+    expect(memberRows(space([]), exists, noTags)).toEqual([]);
   });
 });
 
@@ -114,13 +148,89 @@ describe("missingCount", () => {
         { path: "Gone/b.md", kind: "file" },
         { path: "Gone/c.md", kind: "file" },
       ]),
-      exists
+      exists,
+      noTags
     );
     expect(missingCount(rows)).toBe(2);
   });
 
   it("is zero when everything resolves", () => {
-    expect(missingCount(memberRows(space([{ path: "a.md", kind: "file" }]), exists))).toBe(0);
+    expect(missingCount(memberRows(space([{ path: "a.md", kind: "file" }]), exists, noTags))).toBe(0);
+  });
+});
+
+describe("withoutMember", () => {
+  // The contents modal's Remove button (`SpaceContentsModal.ts`) is built out
+  // of `Setting`, which the obsidian stub deliberately does not model — so
+  // this is the only layer this decision can be tested at.
+  it("drops the named path", () => {
+    const out = withoutMember(
+      [
+        { path: "a.md", kind: "file" },
+        { path: "b.md", kind: "file" },
+      ],
+      "a.md"
+    );
+    expect(out).toEqual([{ path: "b.md", kind: "file" }]);
+  });
+
+  it("leaves tag members untouched, including one that shares the removed spelling", () => {
+    const out = withoutMember(
+      [
+        { path: "a.md", kind: "file" },
+        { kind: "tag", tag: "project" },
+        { kind: "tag", tag: "a.md" },
+      ],
+      "a.md"
+    );
+    expect(out).toEqual([
+      { kind: "tag", tag: "project" },
+      { kind: "tag", tag: "a.md" },
+    ]);
+  });
+});
+
+describe("withoutTagMember", () => {
+  // The mirror of `withoutMember`, extracted for the same reason: the contents
+  // modal's tag Remove button is a `Setting` control, which the stub does not
+  // model, so this is the only layer the decision can be tested at.
+  it("drops the named tag", () => {
+    const out = withoutTagMember(
+      [
+        { kind: "tag", tag: "project" },
+        { kind: "tag", tag: "archive" },
+      ],
+      "project"
+    );
+    expect(out).toEqual([{ kind: "tag", tag: "archive" }]);
+  });
+
+  it("leaves other tag members alone, including one nested under the removed tag", () => {
+    // Removing `#project` must not remove `#project/api`. It is a separate
+    // stored member, even though notes carrying it were reached through both.
+    const out = withoutTagMember(
+      [
+        { kind: "tag", tag: "project" },
+        { kind: "tag", tag: "project/api" },
+      ],
+      "project"
+    );
+    expect(out).toEqual([{ kind: "tag", tag: "project/api" }]);
+  });
+
+  it("leaves path members untouched, including one whose path matches the tag", () => {
+    const out = withoutTagMember(
+      [
+        { path: "project", kind: "folder" },
+        { path: "project.md", kind: "file" },
+        { kind: "tag", tag: "project" },
+      ],
+      "project"
+    );
+    expect(out).toEqual([
+      { path: "project", kind: "folder" },
+      { path: "project.md", kind: "file" },
+    ]);
   });
 });
 
@@ -131,7 +241,8 @@ describe("memberSummary", () => {
   const rowsFor = (paths: string[]) =>
     memberRows(
       space(paths.map((p) => ({ path: p, kind: "file" as const }))),
-      exists
+      exists,
+      noTags
     );
 
   it("says a space has no members rather than showing a zero", () => {
@@ -167,7 +278,8 @@ describe("memberSummary", () => {
         { path: "Projects", kind: "folder" },
         { path: "Projects/Deep/Note.md", kind: "file" },
       ]),
-      exists
+      exists,
+      noTags
     );
     expect(memberSummary(rows)).toBe("2 members · 1 needs attention");
   });
@@ -190,7 +302,7 @@ describe("spaceRowSummary", () => {
     root: "Projects/Work", members: [] } as SpaceDefinition;
 
   it("counts members for a curated space", () => {
-    expect(spaceRowSummary(curated, () => true)).toContain("1 member");
+    expect(spaceRowSummary(curated, () => true, noTags)).toContain("1 member");
   });
 
   // Reuses `memberSummary` rather than re-deriving a
@@ -199,7 +311,7 @@ describe("spaceRowSummary", () => {
   // inline count fails at THIS call site.
   it("names the kind and says 'No members' rather than a zero count", () => {
     const empty = { ...curated, members: [] } as SpaceDefinition;
-    expect(spaceRowSummary(empty, () => true)).toBe("Curated · No members");
+    expect(spaceRowSummary(empty, () => true, noTags)).toBe("Curated · No members");
   });
 
   it("counts a REDUNDANT member as needing attention, not just a missing one", () => {
@@ -214,15 +326,15 @@ describe("spaceRowSummary", () => {
         { path: "Papers/Deep/Note.md", kind: "file" as const },
       ],
     } as SpaceDefinition;
-    expect(spaceRowSummary(covered, () => true)).toBe("Curated · 2 members · 1 needs attention");
+    expect(spaceRowSummary(covered, () => true, noTags)).toBe("Curated · 2 members · 1 needs attention");
   });
 
   it("names the root for a folder space", () => {
-    expect(spaceRowSummary(folder, () => true)).toContain("Projects/Work");
+    expect(spaceRowSummary(folder, () => true, noTags)).toContain("Projects/Work");
   });
 
   it("says so when a folder space's root is missing", () => {
-    expect(spaceRowSummary(folder, () => false)).toContain("missing");
+    expect(spaceRowSummary(folder, () => false, noTags)).toContain("missing");
   });
 
   // A root of "" or "/" is the missing-root state, never a usable
@@ -236,10 +348,14 @@ describe("spaceRowSummary", () => {
   it("does not call exists() for a root of \"\" — the pre-choice state, not a fault", () => {
     let called = false;
     const neverChosen = { ...folder, root: "" } as SpaceDefinition;
-    const summary = spaceRowSummary(neverChosen, () => {
-      called = true;
-      return false;
-    });
+    const summary = spaceRowSummary(
+      neverChosen,
+      () => {
+        called = true;
+        return false;
+      },
+      noTags
+    );
     expect(called).toBe(false);
     expect(summary).not.toContain("missing");
     expect(summary).toContain("Folder pinned");
@@ -250,7 +366,7 @@ describe("spaceRowSummary", () => {
     // exists() check, "/" would read as a healthy resolved root because
     // Obsidian's own getAbstractFileByPath('/') returns the vault root.
     const vaultRootChosen = { ...folder, root: "/" } as SpaceDefinition;
-    const summary = spaceRowSummary(vaultRootChosen, () => true);
+    const summary = spaceRowSummary(vaultRootChosen, () => true, noTags);
     expect(summary).not.toBe("Folder pinned · /");
     expect(summary).toContain("Folder pinned");
   });
@@ -260,7 +376,38 @@ describe("spaceRowSummary", () => {
     // root cannot be honoured — it must never render as an empty curated
     // space, which is indistinguishable from "there was never anything here".
     const neverChosen = { ...folder, root: "" } as SpaceDefinition;
-    const summary = spaceRowSummary(neverChosen, () => false);
+    const summary = spaceRowSummary(neverChosen, () => false, noTags);
     expect(summary).not.toContain("member");
+  });
+});
+
+/**
+ * The "Left out" section drew every exclusion identically, so an entry
+ * naming a path nothing lives at read as healthy. A path MEMBER in the same
+ * dialog has always been marked `missing`, and the two entries are equally
+ * dead and equally invisible from the file tree.
+ */
+describe("exclusionRows", () => {
+  it("has no rows when the space excludes nothing", () => {
+    expect(exclusionRows(space([]), exists)).toEqual([]);
+  });
+
+  it("marks an exclusion naming a path nothing lives at", () => {
+    const s = { ...space([]), exclude: ["Gone/Old.md"] };
+    expect(exclusionRows(s, exists)).toEqual([{ path: "Gone/Old.md", status: "missing" }]);
+  });
+
+  it("leaves an exclusion whose note is still there alone", () => {
+    const s = { ...space([]), exclude: ["Inbox/Today.md"] };
+    expect(exclusionRows(s, exists)).toEqual([{ path: "Inbox/Today.md", status: "present" }]);
+  });
+
+  it("keeps stored order, so rows do not move under the pointer mid-tidy", () => {
+    const s = { ...space([]), exclude: ["Inbox/A.md", "Gone/B.md", "Inbox/C.md"] };
+    expect(exclusionRows(s, exists).map((r) => r.path)).toEqual([
+      "Inbox/A.md",
+      "Gone/B.md",
+      "Inbox/C.md",
+    ]);
   });
 });

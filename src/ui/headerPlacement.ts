@@ -1,6 +1,6 @@
 /**
  * Where the space header goes in the explorer pane. Plain DOM, no
- * `"obsidian"` import, extracted for the same reason as `panelCoverage.ts` —
+ * `"obsidian"` import, extracted for the same reason as `panelMount.ts` —
  * `SpaceHeaderView` imports `Notice`/`setIcon`, so nothing in that file can be
  * reached from a plain Vitest run.
  *

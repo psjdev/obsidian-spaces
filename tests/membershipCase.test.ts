@@ -26,6 +26,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Menu, TAbstractFile } from "obsidian";
 import { decorate } from "../src/actions/membership";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
+import { coveringFolderIn, memberFolderSet } from "../src/definitions/membership";
+import { createTreeVaultIndex } from "../src/visibility/VaultIndex";
 import { buildVisibilitySnapshot } from "../src/visibility/VisibilityEngine";
 import { compileIgnore } from "../src/visibility/glob";
 import type { SpaceController } from "../src/controller/SpaceController";
@@ -111,7 +113,8 @@ async function makeCtx(): Promise<{
   const controller = {
     activeSpace: () => space,
     currentSnapshot: () =>
-      buildVisibilitySnapshot(vault, space, new Set<string>(), compileIgnore([])),
+      buildVisibilitySnapshot(vault, space, new Set<string>(), compileIgnore([]),
+      new Set()),
     dismissRevealed: () => undefined,
   } as unknown as SpaceController;
   return { defs, ctx: { defs, controller } };
@@ -153,14 +156,14 @@ describe("removal matches the way visibility matches", () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.map((m) => m.path)).toEqual(["Inbox"]);
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Inbox"]);
   });
 
   it("removes a case-mismatched FOLDER member too", async () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("inbox")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.map((m) => m.path)).toEqual(["Notes/A.md"]);
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Notes/A.md"]);
   });
 
   it("prefers the exact stored entry when the vault holds both casings", async () => {
@@ -196,38 +199,93 @@ describe("removal matches the way visibility matches", () => {
       controller: {
         activeSpace: () => space2,
         currentSnapshot: () =>
-          buildVisibilitySnapshot(bothVault, space2, new Set<string>(), compileIgnore([])),
+          buildVisibilitySnapshot(bothVault, space2, new Set<string>(), compileIgnore([]),
+      new Set()),
         dismissRevealed: () => undefined,
       } as unknown as SpaceController,
     };
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx2, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs2.get().spaces[0].members.map((m) => m.path)).toEqual(["Notes/A.md"]);
+    expect(defs2.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Notes/A.md"]);
   });
 
   it("does not remove an unrelated member", async () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.map((m) => m.path)).toContain("Inbox");
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toContain("Inbox");
   });
 });
 
-describe("adding does not duplicate a case-mismatched member", () => {
-  it("declines to add a second entry for a path already stored in another casing", async () => {
+describe("adding does not duplicate a member the space already holds", () => {
+  /**
+   * This describe used to drive `addAll`'s own case-insensitive dedupe through
+   * the menu: the selection below produced "Add 2 to Research", and the
+   * assertion was that clicking it left `Notes/A.md` with one entry rather
+   * than two.
+   *
+   * That route is gone, and deliberately. The menu now builds its add list
+   * from the rows an add would actually CHANGE, so neither of these two rows
+   * reaches `addAll` at all: `notes/a.md` resolves to the stored `Notes/A.md`
+   * and is therefore an exact member whatever the casing, and `inbox/today.md`
+   * is in the space through the `Inbox` folder member. The guarantee the old
+   * test was protecting is now made one layer earlier and is asserted as such.
+   *
+   * `addAll`'s `samePath` comparison still stands behind it as the write-side
+   * gate, and `tests/membership.test.ts` covers which rows the menu offers.
+   */
+  it("offers no Add at all when every selected row is already in the space", async () => {
     const { defs, ctx } = await makeCtx();
     const { menu, rows } = fakeMenu();
-    // A mixed selection is what makes the menu offer Add at all: `inbox/today.md`
-    // is visible by INHERITANCE from the `Inbox` folder member, so not every row
-    // is an exact member and `decorate` falls through to "Add 2 to Research".
-    // `notes/a.md` is already stored — as `Notes/A.md` — and must not gain a
-    // second entry for the same file.
     decorate(menu, ctx, [file("notes/a.md"), file("inbox/today.md")]);
-    await clickRow(rows, "Add ");
-    const paths = defs.get().spaces[0].members.map((m) => m.path);
-    expect(paths.filter((p) => p.toLowerCase() === "notes/a.md")).toHaveLength(1);
-    expect(paths).toContain("inbox/today.md");
+    expect(rows.filter((r) => r.title.startsWith("Add ")).map((r) => r.title)).toEqual([]);
+    // And nothing was written, which is the point: the old behaviour added a
+    // redundant exact member for the inherited row.
+    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    expect(paths).toEqual(["Notes/A.md", "Inbox"]);
+  });
+
+  it("adds the one row that is not, and leaves the case-mismatched member alone", async () => {
+    // The discriminator for the assertion above: with a visitor in the
+    // selection there IS something to add, so "no Add entry" is a statement
+    // about these rows rather than about the menu never offering one.
+    const defs = new DefinitionStore({
+      read: async () => undefined,
+      write: async () => undefined,
+    });
+    await defs.mutate((d) => {
+      d.spaces = [RESEARCH];
+    });
+    const space = defs.get().spaces[0];
+    const ctx = {
+      defs,
+      controller: {
+        activeSpace: () => space,
+        // `notes/b.md` is open, so it renders as a visitor: visible, in the
+        // space in no other way, and the only addable row here.
+        currentSnapshot: () =>
+          buildVisibilitySnapshot(
+            vault,
+            space,
+            new Set(["notes/b.md"]),
+            compileIgnore([]),
+            new Set()
+          ),
+        dismissRevealed: () => undefined,
+      } as unknown as SpaceController,
+    };
+    const { menu, rows } = fakeMenu();
+    decorate(menu, ctx, [file("notes/a.md"), file("notes/b.md"), file("inbox/today.md")]);
+    // Singular, because one of the three rows is addable.
+    await clickRow(rows, "Add to Research");
+    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    // The exact list is the assertion. A `filter(...).toHaveLength(1)` on the
+    // casing used to sit here as well, carried over from when this test drove
+    // `addAll` directly; once the menu stopped offering the already-held row
+    // it could only ever pass, because that path is no longer submitted at
+    // all. A check that cannot fail reads like coverage and is not.
+    expect(paths).toEqual(["Notes/A.md", "Inbox", "notes/b.md"]);
   });
 });
 
@@ -243,3 +301,46 @@ describe("adding does not duplicate a case-mismatched member", () => {
  * case-mismatched member visible — so the change there is consistency, not a
  * second live defect.
  */
+
+describe("coverage across a case difference", () => {
+  // Both spellings of one folder exist, as on a case-sensitive filesystem,
+  // beside a folder that exists in one spelling only.
+  const tree = createTreeVaultIndex(
+    new Map<string, "file" | "folder">([
+      ["Docs", "folder"],
+      ["Docs/a.md", "file"],
+      ["docs", "folder"],
+      ["docs/b.md", "file"],
+      ["Inbox", "folder"],
+      ["Inbox/x.md", "file"],
+    ])
+  );
+
+  it("Docs does not cover docs/b.md when both folders exist", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "Docs" }], tree);
+    expect(coveringFolderIn(set, "docs/b.md")).toBeNull();
+    expect(coveringFolderIn(set, "Docs/a.md")).toBe("Docs");
+  });
+
+  it("docs does not cover Docs/a.md either, so the answer is not one-sided", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "docs" }], tree);
+    expect(coveringFolderIn(set, "Docs/a.md")).toBeNull();
+    expect(coveringFolderIn(set, "docs/b.md")).toBe("docs");
+  });
+
+  it("a stored spelling that has drifted still covers its children", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "inbox" }], tree);
+    expect(coveringFolderIn(set, "Inbox/x.md")).toBe("Inbox");
+  });
+
+  it("a member whose folder is gone claims nothing and does not throw", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "Deleted" }], tree);
+    expect(() => coveringFolderIn(set, "Docs/a.md")).not.toThrow();
+    expect(coveringFolderIn(set, "Deleted/old.md")).toBeNull();
+  });
+
+  it("without a vault it still folds, as callers holding only a stored document need", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "Inbox" }]);
+    expect(coveringFolderIn(set, "inbox/today.md")).toBe("inbox");
+  });
+});

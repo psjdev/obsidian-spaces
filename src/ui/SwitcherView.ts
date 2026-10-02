@@ -43,6 +43,23 @@ const PROP_RAIL_GAP = "--spaces-strip-rail-gap";
 /** The space header, when it is shown -- the strip's preferred anchor row. */
 const CLS_SPACE_HEADER = ".spaces-space-header";
 
+/**
+ * `render()` rebuilds every child of the strip, so focus has to be recorded
+ * before the rebuild and put back after it. These are the names it is recorded
+ * under, written to `data-switcher-key` on each control.
+ *
+ * The prefix in `focusKeyFor` is what keeps these distinct from any space:
+ * every space's key is `space:<id>`, so none of the three bare names below can
+ * ever be one, whatever a space is called.
+ */
+const ADD_FOCUS_KEY = "add";
+const GRIP_FOCUS_KEY = "grip";
+
+/** The `data-switcher-key` for one strip entry. */
+function focusKeyFor(key: ActiveSelection): string {
+  return key.kind === "all" ? "all" : `space:${key.id}`;
+}
+
 /** A measured centre, or null for a node that is absent or not yet laid out. */
 function centreOf(node: Element | null): number | null {
   if (!node) return null;
@@ -110,8 +127,22 @@ export class SwitcherView {
   private unlocked = false;
   /** A pointer drag of the grip in progress, or null when idle. */
   private drag: DragState | null = null;
-  /** Index in `spaces` of the icon being dragged, or null. */
-  private dragFrom: number | null = null;
+  /**
+   * The ID of the space being dragged, or null when no space drag is running.
+   *
+   * An ID rather than the index it used to be. The index was captured at
+   * `dragstart` and spent at `drop`, and `render()` can run between the two:
+   * it is called from five sites in `main.ts`, one of them inside
+   * `onSnapshotApplied`, which runs on every file open and every coalesced
+   * vault flush. If the definitions changed in that window -- realistically
+   * `onExternalSettingsChange` applying a `data.json` written on another
+   * device -- the index named a different space and the drop moved that one
+   * instead.
+   *
+   * `draggedIndex()` re-derives the position from this at the moment it is
+   * needed, and answers null when the space is no longer there.
+   */
+  private dragFromId: string | null = null;
   /** Last pointer reading, projected onto the strip's axis, re-read every auto-scroll frame. */
   private dragPointerAlong = 0;
   private dragRaf = 0;
@@ -173,9 +204,9 @@ export class SwitcherView {
     // preview and the temporary listeners from outliving the node.
     this.cancelDrag();
     // A drag in flight owns a requestAnimationFrame loop that re-arms
-    // itself while `dragFrom` is set. Dropping the element without clearing
+    // itself while `dragFromId` is set. Dropping the element without clearing
     // both would leave that loop running forever against a detached rail.
-    this.dragFrom = null;
+    this.dragFromId = null;
     this.stopDragScrolling?.();
     this.stopDragScrolling = null;
     // A picker anchored to one of these icons outlives the element it points
@@ -476,6 +507,11 @@ export class SwitcherView {
     // that capture, and the preview it painted, from being left dangling on
     // a node this call is about to detach.
     this.cancelDrag();
+    // Read BEFORE the line below destroys the element holding it. Everything
+    // in the strip that can take focus carries a `data-switcher-key`, so what
+    // is recorded is an identity rather than a position in a list this render
+    // may be about to change the length of.
+    const refocus = this.focusedKey();
     el.replaceChildren();
     // That line just destroyed every icon a picker could be anchored to, and
     // destroying a node fires nothing. This is the moment to notice: deleting
@@ -533,6 +569,7 @@ export class SwitcherView {
     add.setAttribute("role", "button");
     add.setAttribute("tabindex", "0");
     add.setAttribute("aria-label", "Create a space");
+    add.dataset.switcherKey = ADD_FOCUS_KEY;
     setIcon(add, "plus");
     add.addEventListener("click", () => this.onCreateClicked());
     add.addEventListener("keydown", (e) => {
@@ -548,6 +585,7 @@ export class SwitcherView {
     // pinned to the leading edge ahead of a pinned *All* control too.
     const grip = applyUnlockState(el, this.unlocked);
     if (grip) {
+      grip.dataset.switcherKey = GRIP_FOCUS_KEY;
       setIcon(grip, this.axis === "y" ? "grip-horizontal" : "grip-vertical");
       // Rebuilt every render, so these are re-wired every time rather than
       // once: `applyUnlockState` returns a fresh element whenever the strip
@@ -566,6 +604,56 @@ export class SwitcherView {
     el.classList.toggle(BOLDED_CLASS, styleClass === BOLDED_CLASS);
     // Last: every box it measures was created above.
     this.alignToPane();
+    // After alignment, because focusing a control inside the scrolling rail
+    // scrolls it into view and the padding written above changes where that
+    // is.
+    this.restoreFocus(refocus);
+  }
+
+  /**
+   * The key of the strip control holding focus, or null when focus is
+   * elsewhere.
+   *
+   * Null is the ordinary answer: `document.activeElement` is the body when
+   * nothing is focused, and the strip does not contain the body.
+   */
+  private focusedKey(): string | null {
+    const el = this.el;
+    const active = el?.ownerDocument.activeElement;
+    if (!el || !active || !el.contains(active) || !active.instanceOf(HTMLElement)) {
+      return null;
+    }
+    // A control inside the strip with no key of its own falls back to the add
+    // button rather than to nothing: focus was demonstrably in the strip, and
+    // dropping it to `<body>` is the failure this method exists to prevent.
+    return active.dataset.switcherKey ?? ADD_FOCUS_KEY;
+  }
+
+  /**
+   * Put focus back on the control `focusedKey()` named, after the rebuild
+   * that destroyed it.
+   *
+   * Does nothing for a null key, which is what keeps a render from STEALING
+   * focus: the strip re-renders on every definitions change, including ones
+   * the user caused from the settings tab or from another window, and pulling
+   * the caret out of whatever they were typing in would be worse than the bug
+   * this fixes.
+   *
+   * A space that has gone — deleted from the settings tab, or by a `data.json`
+   * arriving from another device — falls back to the add button. It is the one
+   * control the strip always has, and it is what the user is now nearest to
+   * doing.
+   */
+  private restoreFocus(key: string | null): void {
+    const el = this.el;
+    if (!el || key === null) return;
+    const match = el.querySelector<HTMLElement>(
+      `[data-switcher-key="${CSS.escape(key)}"]`
+    );
+    const add = el.querySelector<HTMLElement>(
+      `[data-switcher-key="${ADD_FOCUS_KEY}"]`
+    );
+    (match ?? add)?.focus();
   }
 
   /**
@@ -669,9 +757,12 @@ export class SwitcherView {
    *
    * Every rule lives in `spaceReorder.ts`; this measures, renders and writes.
    *
-   * Rebuilt with the rail on each render, which is safe because a render cannot
-   * happen mid-drag — the only render a drop causes runs after the write, from
-   * the definitions subscription.
+   * Rebuilt with the rail on each render, and a render CAN land mid-drag:
+   * `main.ts` calls it on every file open and every coalesced vault flush, not
+   * only after a write of its own. Rebuilding is still safe for the listeners
+   * themselves, which are discarded with the rail they were on while the drag
+   * state lives on the view -- but it is exactly why that state holds the
+   * dragged space by ID and re-derives its index per use. See `dragFromId`.
    */
   private wireReorder(rail: HTMLElement): void {
     const line = rail.ownerDocument.win.createDiv();
@@ -695,14 +786,22 @@ export class SwitcherView {
       });
 
     const update = (): void => {
-      if (this.dragFrom === null) return;
+      // Null for "no drag in flight" and for "the space being dragged is no
+      // longer in the definitions". Both mean there is no line to draw, and
+      // the second has to HIDE one that is already showing rather than leave
+      // it pointing at a position that no longer means anything.
+      const from = this.draggedIndex();
+      if (from === null) {
+        line.hidden = true;
+        return;
+      }
       const vertical = this.axis === "y";
       const railSpan = spanOf(rail.getBoundingClientRect(), this.axis);
       const boxes = boxesOf(spaceEls(), railSpan);
       const contentPointer = this.dragPointerAlong - railSpan.start + railScrollAlong();
       const index = insertionIndexAt(contentPointer, boxes);
       // A drop that changes nothing draws no line.
-      if (isNoOpMove(this.dragFrom, index)) {
+      if (isNoOpMove(from, index)) {
         line.hidden = true;
         return;
       }
@@ -723,7 +822,7 @@ export class SwitcherView {
 
     const tick = (): void => {
       this.dragRaf = 0;
-      if (this.dragFrom === null) return;
+      if (this.dragFromId === null) return;
       const vertical = this.axis === "y";
       const railSpan = spanOf(rail.getBoundingClientRect(), this.axis);
       const step = edgeScrollStep(this.dragPointerAlong, railSpan);
@@ -745,12 +844,12 @@ export class SwitcherView {
     };
 
     rail.addEventListener("dragover", (e) => {
-      if (this.dragFrom === null) return;
+      if (this.dragFromId === null) return;
       // Calling `preventDefault()` here must not happen for the FILE TREE,
       // where Obsidian's own handler already permits the drop. Nothing
       // permits a drop in our own strip, though, and without cancelling here
       // the `drop` event never fires at all. Scoped to a space drag we
-      // started: `dragFrom` is null for every other drag crossing this
+      // started: `dragFromId` is null for every other drag crossing this
       // element, including a note dragged out of the explorer.
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
@@ -760,14 +859,19 @@ export class SwitcherView {
     });
 
     rail.addEventListener("drop", (e) => {
-      const from = this.dragFrom;
-      if (from === null) return;
+      if (this.dragFromId === null) return;
       e.preventDefault();
       const railSpan = spanOf(rail.getBoundingClientRect(), this.axis);
       const boxes = boxesOf(spaceEls(), railSpan);
       const pointer = pointerAlong(e, this.axis) - railSpan.start + railScrollAlong();
       const index = insertionIndexAt(pointer, boxes);
+      // Re-derived HERE, against the definitions as they are at the drop
+      // rather than as they were at the dragstart. Null means the space was
+      // deleted while the drag was in flight: there is no position to compute
+      // and nothing the user could have meant, so nothing is written.
+      const from = this.draggedIndex();
       this.endDrag(rail, line);
+      if (from === null) return;
       if (isNoOpMove(from, index)) return;
       void this.defs
         .mutate((d) => {
@@ -784,11 +888,26 @@ export class SwitcherView {
     this.stopDragScrolling = stopScrolling;
   }
 
+  /**
+   * Where the dragged space sits in `spaces` right now, or null when no drag
+   * is running or the space is no longer in the definitions.
+   *
+   * Asked per use rather than cached, because the whole point is that the
+   * answer can change between the dragstart that set `dragFromId` and the drop
+   * that spends it.
+   */
+  private draggedIndex(): number | null {
+    const id = this.dragFromId;
+    if (id === null) return null;
+    const at = this.defs.get().spaces.findIndex((sp) => sp.id === id);
+    return at < 0 ? null : at;
+  }
+
   /** Set by `wireReorder`; torn down with the view. */
   private stopDragScrolling: (() => void) | null = null;
 
   private endDrag(rail: HTMLElement, line: HTMLElement): void {
-    this.dragFrom = null;
+    this.dragFromId = null;
     line.hidden = true;
     this.stopDragScrolling?.();
     rail
@@ -821,6 +940,12 @@ export class SwitcherView {
     // aria-label and no `title` at all — so adding `title` too produced a
     // second, OS-drawn tooltip stacked on the first.
     item.setAttribute("aria-label", entry.label);
+    // What `render()` refocuses by. Stable across a rebuild and across a
+    // change in how many icons there are, which an index would not be. Set on
+    // EVERY item, including *All* and including a mobile build, because this
+    // is about the keyboard rather than about dragging — `data-space-id`
+    // beside it is the drag's own marker and is neither.
+    item.dataset.switcherKey = focusKeyFor(entry.key);
     // `iconColorFor` answers this for every surface that draws a space icon.
     // A real color is the user's data and goes inline, where it wins over a
     // theme's rule. The neutral swatch means no color was chosen, so nothing
@@ -890,17 +1015,16 @@ export class SwitcherView {
         item.draggable = true;
       }
       item.addEventListener("dragstart", (e) => {
-        const from = this.defs.get().spaces.findIndex((sp) => sp.id === spaceId);
-        if (from < 0) return;
-        this.dragFrom = from;
+        // The ID, not the position it currently has. See `dragFromId`.
+        this.dragFromId = spaceId;
         this.dragPointerAlong = pointerAlong(e, this.axis);
         item.classList.add(CLS_SPACE_DRAGGING);
         if (e.dataTransfer) {
           e.dataTransfer.effectAllowed = "move";
           // Some browsers fire no `drop` at all unless the drag carries data.
-          // The payload is never read back — `dragFrom` is the source of truth,
-          // and trusting a string from the event would let any outside drag
-          // claiming this type reorder the strip.
+          // The payload is never read back -- `dragFromId` is the source of
+          // truth, and trusting a string from the event would let any outside
+          // drag claiming this type reorder the strip.
           e.dataTransfer.setData("text/plain", spaceId);
         }
       });

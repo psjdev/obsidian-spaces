@@ -3,8 +3,10 @@ import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceController } from "../controller/SpaceController";
 import type { MemberEntry, SpaceDefinition } from "../types";
+import type { TagIndex } from "../visibility/TagIndex";
 import { decorate as decorateMenu } from "./membershipMenu";
 import { removeMembers } from "./definitionWrites";
+import { pathMembers } from "../definitions/membership";
 
 interface MembershipContext {
   defs: DefinitionStore;
@@ -28,6 +30,22 @@ function entryFor(f: TAbstractFile): MemberEntry {
   return { path: f.path, kind: f instanceof TFolder ? "folder" : "file" };
 }
 
+/**
+ * What a membership notice calls what it just acted on.
+ *
+ * One is named. The name is shorter than a count and says more: "Added
+ * plan.md to Work" confirms which note, so a misclick on the wrong row is
+ * obvious from the toast. A count of one would read "1 notes and folders",
+ * and fixing that with a singular branch would still say less than the name.
+ *
+ * Several are counted, because listing them would outrun a toast. "notes and
+ * folders" rather than one kind, because a multi-select can hold both and
+ * counting them separately is more words for no more meaning.
+ */
+function subject(files: TAbstractFile[]): string {
+  return files.length === 1 ? files[0].name : `${files.length} notes and folders`;
+}
+
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
   const space = ctx.controller.activeSpace();
   if (!space) return;
@@ -36,7 +54,7 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
       const target = d.spaces.find((s) => s.id === space.id);
       if (!target) return;
       for (const f of files) {
-        if (!target.members.some((m) => samePath(m.path, f.path))) {
+        if (!pathMembers(target).some((m) => samePath(m.path, f.path))) {
           target.members.push(entryFor(f));
         }
       }
@@ -45,7 +63,7 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
     new Notice(`Spaces: could not add to ${space.name} (${String(e)})`);
     return;
   }
-  new Notice(`Added ${files.length} to ${space.name}`);
+  new Notice(`Added ${subject(files)} to ${space.name}`);
 }
 
 /**
@@ -66,7 +84,7 @@ async function addToSpace(
       const target = d.spaces.find((s) => s.id === spaceId);
       if (!target) return;
       for (const f of files) {
-        if (!target.members.some((m) => samePath(m.path, f.path))) {
+        if (!pathMembers(target).some((m) => samePath(m.path, f.path))) {
           target.members.push(entryFor(f));
         }
       }
@@ -75,7 +93,7 @@ async function addToSpace(
     new Notice(`Spaces: could not add to ${name} (${String(e)})`);
     return;
   }
-  new Notice(`Added ${files.length} to ${name}`);
+  new Notice(`Added ${subject(files)} to ${name}`);
 }
 
 /**
@@ -95,13 +113,18 @@ async function removeAll(ctx: MembershipContext, files: TAbstractFile[]): Promis
     new Notice(`Spaces: could not remove from ${space.name} (${String(e)})`);
     return;
   }
-  new Notice(`Removed ${files.length} from ${space.name}`);
+  new Notice(`Removed ${subject(files)} from ${space.name}`);
 }
 
 export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFile[]): void {
   const decorateCtx = {
     controller: ctx.controller,
     spaces: (): readonly SpaceDefinition[] => ctx.defs.get().spaces,
+    // The controller's own snapshot, so *All*'s "Add to space" answers from
+    // the same picture the tree was drawn from. Lazy behind
+    // `createLazyTagIndex`, so a vault whose spaces hold no tag member pays
+    // nothing for opening a context menu.
+    tags: (): TagIndex => ctx.controller.tagIndex(),
   };
   decorateMenu(menu, decorateCtx, files, {
     addAll: (fs) => void addAll(ctx, fs),
