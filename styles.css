@@ -457,7 +457,7 @@
 /* §: the tag tree, drawn in the same box as the item tree and reached by the
    Tags button above it.
    The row itself is `.spaces-create-tree-row` -- including its caret slot, its
-   indent and the `.is-inherited` tinted mark a covering parent gives it -- so only
+   indent and the leading-edge `.is-inherited` mark a covering parent gives it -- so only
    the differences live here: the tag mark and the note count. No
    `padding-left` of its own, because the panel sets one per row from the
    depth and the two would be the same rule written twice. */
