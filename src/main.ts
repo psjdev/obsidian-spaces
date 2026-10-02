@@ -1711,6 +1711,8 @@ export default class SpacesPlugin extends Plugin {
           compileIgnore(this.defs.get().settings.globalIgnore),
           this.controller.tagIndex()
         )(members),
+      // The engine's own index, for resolving a stored member to a live path.
+      vaultIndex: () => this.controller.vaultIndex(),
       // The rotation, or the neutral swatch, per the user's setting.
       // Read here rather than captured, so flipping the toggle takes effect on
       // the next open of this panel without a reload.

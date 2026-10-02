@@ -47,6 +47,7 @@ import {
 } from "../definitions/membership";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
 import type { Preview } from "./previewSeam";
+import type { VaultIndex } from "../visibility/VaultIndex";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -147,6 +148,14 @@ export interface CreateSpacePanelDeps {
    * one would count against the vault as it was when the panel opened.
    */
   preview: (members: readonly MemberEntry[]) => Preview;
+  /**
+   * The engine's vault index, so the picker can resolve a stored member to the
+   * live path it names by the engine's own rule (`resolveLivePath`) when it
+   * asks which folder covers a row. `folders` cannot answer that: it lists
+   * paths and kinds, and has no way to ask what is directly under a folder.
+   * A function for the reason `tagIndex` is one.
+   */
+  vaultIndex: () => VaultIndex;
   /**
    * The user's saved custom colors, and the way to persist a new one — the
    * theme button opens the same color popover the space strip uses, and that
@@ -1229,8 +1238,14 @@ export class CreateSpacePanel {
     // Built once per draw rather than once per row: the list redraws on every
     // keystroke and holds up to MAX_PICKER_ROWS rows, none of which changes the
     // member list. Folder mode takes one root and keeps no member list, so
-    // nothing there can be covered and nothing is built.
-    const coveringFolders = this.state.folderMode ? null : memberFolderSet(this.state.items);
+    // nothing there can be covered and nothing is built. The vault is passed
+    // so each member resolves to the live folder it names and a row is covered
+    // only by a folder that really is its ancestor, not by one that differs
+    // from it in case. The resolution runs once per member here, in the draw,
+    // and the per-row lookup below stays an exact set test.
+    const coveringFolders = this.state.folderMode
+      ? null
+      : memberFolderSet(this.state.items, this.deps.vaultIndex());
 
     host.replaceChildren();
     if (rows.length === 0) {

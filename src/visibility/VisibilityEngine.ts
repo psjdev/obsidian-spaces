@@ -3,8 +3,9 @@ import type {
   VisibilityDecision,
   VisibilityReason,
 } from "../types";
-import { canonicalPath, type IgnoreMatcher } from "./glob";
+import type { IgnoreMatcher } from "./glob";
 import { includedPaths } from "./includedPaths";
+import { resolveLivePath } from "./resolveLivePath";
 import type { VaultIndex } from "./VaultIndex";
 import { pathMembers } from "../definitions/membership";
 
@@ -19,33 +20,6 @@ const HIDDEN_NONMEMBER: VisibilityDecision = {
   canRemoveMembership: false,
   overridesIgnore: false,
 };
-
-/**
- * Resolve a stored path to the live path it names.4's
- * case-insensitive policy, or `null` when the vault holds nothing by that
- * name in any casing.
- *
- * An exact hit short-circuits, so a case-sensitive filesystem holding both
- * `a/Note.md` and `a/note.md` still gives each stored path itself; the fold
- * only ever decides a lookup that would otherwise have failed. That is also
- * what keeps this off the hot path — the walk runs only for a member the
- * verbatim lookup missed, and costs one `childrenOf` per segment rather than
- * an O(vault) rescan.
- */
-function resolveLivePath(vault: VaultIndex, stored: string): string | null {
-  if (vault.exists(stored)) return stored;
-  let at = "";
-  for (const seg of stored.split("/")) {
-    const want = canonicalPath(seg);
-    const offset = at === "" ? 0 : at.length + 1;
-    const hit = vault
-      .childrenOf(at)
-      .find((c) => canonicalPath(c.slice(offset)) === want);
-    if (hit === undefined) return null;
-    at = hit;
-  }
-  return at;
-}
 
 export function buildVisibilitySnapshot(
   vault: VaultIndex,

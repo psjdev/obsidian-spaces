@@ -75,9 +75,10 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
     // the engine exactly as it does in the app. The index is reached once per
     // call and only when a tag member is present, which is what the panel
     // used to do itself and what `reached` asserts.
+    vaultIndex: () => createTreeVaultIndex(new Map(Object.entries(VAULT))),
     preview: (members) =>
       buildPreview(
-        createTreeVaultIndex(new Map(Object.entries(VAULT))),
+        deps.vaultIndex(),
         compileIgnore([]),
         {
           pathsMatching: (tag) => deps.tagIndex().pathsMatching(tag),
