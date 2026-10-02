@@ -64,10 +64,12 @@ export interface Row<K extends string = NodeKind> {
   expanded: boolean;
   /**
    * The row has children and was meant to be open, by the user or by a filter,
-   * but the budget had nothing left for them. Distinct from a row the user
-   * closed: that caret works, and this one would not, because allocation is
-   * breadth-first and opening a deeper parent frees nothing above it. The
-   * panel draws it as a leaf that says why.
+   * but the budget had too little left for them when the walk reached it.
+   * Distinct from a row the user closed: that caret works. This one is drawn
+   * without a caret, because the rows are spent in order, so opening it adds
+   * demand and frees nothing; closing an open branch drawn earlier, or
+   * narrowing the filter, is what makes room. The panel draws it as a leaf
+   * that says why.
    */
   budgetClosed?: true;
   selected: boolean;
@@ -92,8 +94,8 @@ export interface ViewOptions<K extends string = NodeKind> {
   onlyKind?: K | null;
   /**
    * The most rows to return, overflow rows included. Absent means no limit.
-   * Spent breadth-first, so running out hides the deepest rows rather than
-   * whatever sorted last. See `visibleRows`.
+   * Spent in the order the rows are drawn, so running out hides whatever comes
+   * last, and says how many at each level it cut. See `visibleRows`.
    */
   budget?: number;
 }
@@ -194,36 +196,34 @@ export type PickerRow<K extends string = NodeKind> = Row<K> | OverflowRow;
 /**
  * The rows to render, in order, within a budget.
  *
- * The budget is allocated BREADTH-FIRST and the survivors are emitted
- * depth-first. That separation is the whole point. Allocating depth-first,
- * which is what slicing a flat pre-order list does, spends the budget on one
- * expanded branch's children and silently deletes the roots that sort after
- * it: expanding `topic` on a real vault removed four unrelated root tags from
- * the tree, with nothing on screen to say so and a notice that said "keep
- * typing to narrow", which does not bring a root back.
+ * The tree is walked depth-first and each row is emitted as it is reached, so
+ * opening a branch shows its children directly beneath it and the budget goes
+ * to the branches the user opened, not to rows at the same depth elsewhere.
+ * The cost is that a big branch drawn early can use the budget that later
+ * siblings needed. Nothing is dropped silently for it: every parent whose
+ * children were cut, the root level included, ends its list with an overflow
+ * row at its children's depth that counts exactly how many it hid. Typing in
+ * the filter is what brings those back.
  *
- * Allocating breadth-first gives the invariant instead: a row at depth N is
- * only ever dropped once every row at depth N-1 has been drawn. A branch that
- * cannot fit its children says so where its children would be.
+ * `rows.length <= budget` always holds, overflow rows included. An overflow
+ * row costs a slot like any other, so a level that is cut spends `take + 1`:
+ * its marker's slot is held back while a sibling is still to come, and the
+ * last sibling needs no marker and holds none. A budget of 0 returns no rows.
  *
- * The budget stays at the measured 200. Its size was never the defect.
- *
- * An overflow row costs a slot of the budget like any other row, so a parent
- * that is cut hands over one slot less than its share and spends it on the
- * marker, and the total never exceeds the budget. A parent that cannot be
- * given a child AND its marker, or whose level the budget never reached, is
- * returned closed (`expanded: false`) and flagged `budgetClosed`, even if the
- * user or the filter asked for it open. Drawing it open with nothing beneath
- * would tell a screen reader the branch is empty. It is not offered as a
- * caret either: allocation is breadth-first, so opening a deeper parent adds
- * demand and frees nothing, and the click would do nothing. What makes room
+ * A parent that wants to be open is drawn open only when its children fit
+ * together with a marker (or alone, if it has one child), because an open row
+ * with nothing beneath it would tell a screen reader the branch is empty.
+ * Otherwise it is returned closed (`expanded: false`) and flagged
+ * `budgetClosed`, even if the user or the filter asked for it open. In
+ * depth-first order that is the exception: it happens to a parent reached
+ * with almost nothing left, near the end of the budget. It is not offered as
+ * a caret, because opening it adds demand and frees nothing. What makes room
  * depends on the state. With a filter, expansion is forced and `expanded` is
- * ignored, so only narrowing the filter helps. Without one, closing other open
- * branches helps and there is no filter to narrow. The panel says whichever of
- * the two is true.
+ * ignored, so only narrowing the filter helps. Without one, closing an open
+ * branch drawn earlier helps. The panel says whichever is true.
  *
- * The root level has no parent row to close, so it is cut like any other level
- * and keeps its marker; that marker is paid for, spending `(left - 1) + 1`.
+ * The root level has no parent row to close, so a cut there keeps its marker,
+ * paid for like any other.
  *
  * Without a filter this is a plain walk: a node's children appear only if the
  * node is in `expanded`.
@@ -285,14 +285,6 @@ export function visibleRows<K extends string = NodeKind>(
   const keep = (node: VaultNode<K>): boolean =>
     included(node) && (query === "" || matches(node) || node.children.some(keep));
 
-  /** One parent's drawable children, with the context the emit phase needs. */
-  interface Level {
-    parent: string;
-    depth: number;
-    nodes: VaultNode<K>[];
-    insideMatch: boolean;
-  }
-
   // Inside a matched ancestor everything is shown; that is what makes a
   // parent's name a way in rather than a filter that empties it.
   const shownChildren = (nodes: readonly VaultNode<K>[], insideMatch: boolean): VaultNode<K>[] =>
@@ -302,98 +294,51 @@ export function visibleRows<K extends string = NodeKind>(
       return matches(node) || node.children.some(keep);
     });
 
-  // Phase 1: hand out the budget level by level, shallowest first.
-  const survivors = new Set<VaultNode<K>>();
-  const cut = new Map<string, number>();
-  // Parents whose children were actually admitted or accounted for. A survivor
-  // that wants to be open but is not in here is drawn closed: see `visibleRows`.
-  const opened = new Set<string>();
-  let left = budget;
-  let level: Level[] = [
-    { parent: "", depth: 0, nodes: shownChildren(tree, false), insideMatch: false },
-  ];
-
-  while (level.length > 0 && left > 0) {
-    const wanted = level.reduce((n, l) => n + l.nodes.length, 0);
-    if (wanted <= left) {
-      // The whole level fits, and nothing in it is cut, so it costs no marker.
-      for (const l of level) {
-        for (const n of l.nodes) survivors.add(n);
-        opened.add(l.parent);
-      }
-      left -= wanted;
-    } else {
-      // Split what remains evenly, so no one parent starves its siblings.
-      // Smallest first, so what a small parent does not use goes back to the
-      // pool for the larger ones rather than being wasted. An overflow row
-      // costs a slot too, which is why each cut parent reserves one.
-      let pool = left;
-      const open = level
-        .filter((l) => l.nodes.length > 0)
-        .sort((a, b) => a.nodes.length - b.nodes.length);
-      open.forEach((l, i) => {
-        const share = Math.floor(pool / (open.length - i));
-        if (l.nodes.length <= share) {
-          for (const n of l.nodes) survivors.add(n);
-          opened.add(l.parent);
-          pool -= l.nodes.length;
-          return;
-        }
-        // A cut parent needs a child AND its marker, two slots. A share of
-        // one buys only the marker, which would be a branch drawn open with
-        // nothing in it. The root level has no parent row to close, so it
-        // keeps its marker; any other parent is left closed, spending nothing.
-        if (share < 2 && l.depth > 0) return;
-        const take = Math.max(0, share - 1);
-        for (let k = 0; k < take; k++) survivors.add(l.nodes[k]);
-        opened.add(l.parent);
-        cut.set(l.parent, l.nodes.length - take);
-        pool -= take + 1;
-      });
-      level = [];
-      break;
-    }
-    // Descend only into survivors that are expanded.
-    const next: Level[] = [];
-    for (const l of level) {
-      for (const node of l.nodes) {
-        if (!survivors.has(node)) continue;
-        const kids = node.children.filter(included);
-        if (kids.length === 0) continue;
-        const expanded = query !== "" || opts.expanded.has(node.path);
-        if (!expanded) continue;
-        const selfMatches = query !== "" && matches(node);
-        const inside = l.insideMatch || selfMatches;
-        const shown = shownChildren(kids, inside);
-        if (shown.length > 0) {
-          next.push({ parent: node.path, depth: l.depth + 1, nodes: shown, insideMatch: inside });
-        }
-      }
-    }
-    level = next;
-  }
-
-  // Phase 2: emit the survivors in pre-order, which is what a tree looks like.
+  // One depth-first walk, spending `left` as rows are emitted. Siblings are
+  // emitted in order and each open one is walked into before the next sibling.
   const rows: PickerRow<K>[] = [];
-  const emit = (
+  let left = budget;
+
+  /**
+   * Emit one parent's children, cutting the list when the budget runs out and
+   * ending it with a marker that counts what was cut. The marker's slot is
+   * kept back for as long as another sibling remains, so cutting never needs a
+   * slot nobody reserved. The last sibling needs no marker and so reserves
+   * none. The root level has no parent row to close, so it is cut like any
+   * other level and keeps its marker.
+   */
+  const emitLevel = (
     nodes: readonly VaultNode<K>[],
     depth: number,
     parent: string,
     insideMatch: boolean
   ): void => {
-    for (const node of nodes) {
-      if (!survivors.has(node)) continue;
+    for (let i = 0; i < nodes.length; i++) {
+      const reserve = i < nodes.length - 1 ? 1 : 0;
+      if (left - reserve < 1) {
+        // Nothing else fits. `left` is at least 1 here except when the budget
+        // was spent before this level began, which only the root can see.
+        if (left >= 1) {
+          rows.push({ kind: "overflow", parent, hidden: nodes.length - i, depth });
+          left -= 1;
+        }
+        return;
+      }
+      const node = nodes[i];
       const kids = node.children.filter(included);
       const hasChildren = kids.length > 0;
-      // Closed when the budget never reached its children, however much the
-      // user or the filter wanted it open: an open row with nothing beneath it
-      // would tell a screen reader the branch is empty. It is also flagged, so
-      // the panel does not offer a caret that could do nothing. A row the user
-      // closed is not flagged; its caret works.
-      const wantsOpen = hasChildren && (query !== "" || opts.expanded.has(node.path));
-      const expanded = wantsOpen && opened.has(node.path);
-      const budgetClosed = wantsOpen && !expanded;
       const selfMatches = query !== "" && matches(node);
+      const shown = hasChildren ? shownChildren(kids, insideMatch || selfMatches) : [];
+      left -= 1 + reserve;
+      // A parent is opened only if its children AND, when they are more than
+      // one, a marker could follow; a share of one would be an open row with
+      // nothing under it, which tells a screen reader the branch is empty. It
+      // is returned closed and flagged `budgetClosed`, so the panel does not
+      // offer a caret. A row the user closed is not flagged: its caret works.
+      const wantsOpen = hasChildren && (query !== "" || opts.expanded.has(node.path));
+      const fits = shown.length > 0 && left >= (shown.length > 1 ? 2 : 1);
+      const expanded = wantsOpen && fits;
+      const budgetClosed = wantsOpen && shown.length > 0 && !fits;
       rows.push({
         path: node.path,
         name: node.name,
@@ -404,20 +349,10 @@ export function visibleRows<K extends string = NodeKind>(
         ...(budgetClosed ? { budgetClosed: true as const } : {}),
         selected: opts.selected.has(node.path),
       });
-      if (expanded) {
-        emit(
-          shownChildren(kids, insideMatch || selfMatches),
-          depth + 1,
-          node.path,
-          insideMatch || selfMatches
-        );
-      }
-    }
-    const hidden = cut.get(parent);
-    if (hidden !== undefined && hidden > 0) {
-      rows.push({ kind: "overflow", parent, hidden, depth });
+      if (expanded) emitLevel(shown, depth + 1, node.path, insideMatch || selfMatches);
+      left += reserve;
     }
   };
-  emit(shownChildren(tree, false), 0, "", false);
+  emitLevel(shownChildren(tree, false), 0, "", false);
   return rows;
 }

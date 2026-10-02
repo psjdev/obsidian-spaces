@@ -270,6 +270,12 @@ interface RowAdapter<K extends string> {
    * then). Joined onto any other title the row has.
    */
   budgetClosedTitle(): string;
+  /**
+   * Whether this tree's filter has text in it. The overflow row words its
+   * advice by it, as `budgetClosedTitle` does: narrowing is only advice when
+   * there is something to narrow.
+   */
+  filterActive(): boolean;
   /** Draws the row's name cell, icon included. */
   drawName(el: HTMLElement, row: Row<K>): void;
   /** Extra elements after the name, such as the tag count. */
@@ -1323,6 +1329,7 @@ export class CreateSpacePanel {
       coveredTitle: (by) =>
         `Already included by the selected folder ${by}. ` +
         "Deselect that folder to pick notes and folders under it one at a time.",
+      filterActive: () => this.itemFilter.trim() !== "",
       budgetClosedTitle: () =>
         "There is no room to show what is inside this folder. " +
         (this.itemFilter.trim() !== "" ? "Narrow the filter to make room." : "Close other folders to make room."),
@@ -1395,10 +1402,14 @@ export class CreateSpacePanel {
         el.setAttribute("aria-disabled", "true");
         el.setAttribute("aria-selected", "false");
         el.style.paddingLeft = `${row.depth * 14}px`;
-        el.textContent =
-          row.hidden === 1
-            ? "1 more, narrow the filter to see it"
-            : `${row.hidden.toLocaleString()} more, narrow the filter to see them`;
+        // Worded by the same test as the budget-closed title beside it, so two
+        // rows in one state do not give different advice. Typing is always
+        // possible and narrowing is only possible once there is a filter.
+        const count = row.hidden === 1 ? "1 more" : `${row.hidden.toLocaleString()} more`;
+        const it = row.hidden === 1 ? "it" : "them";
+        el.textContent = adapter.filterActive()
+          ? `${count}, narrow the filter to see ${it}`
+          : `${count}, type in the filter to find ${it}`;
         host.appendChild(el);
         continue;
       }
@@ -1867,6 +1878,7 @@ export class CreateSpacePanel {
       // tooltip rather than in a second control: a real remove button inside
       // a clickable row gives two targets for one action.
       selectedTitle: (row) => `Remove ${TAG_SIGIL}${row.path}`,
+      filterActive: () => query.trim() !== "",
       budgetClosedTitle: () =>
         "There is no room to show what is inside this tag. " +
         (query.trim() !== "" ? "Narrow the filter to make room." : "Close other tags to make room."),

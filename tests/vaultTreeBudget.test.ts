@@ -13,7 +13,10 @@ function vaultWithFatBranch(children: number) {
 }
 
 describe("the picker's row budget", () => {
-  it("keeps sibling roots when a branch is expanded past the budget", () => {
+  it("accounts for sibling roots a big branch used the budget of, in a root-level marker", () => {
+    // Rows are spent in order, so the expanded branch gets its children and the
+    // roots after it are cut. They are not lost silently: the root level ends
+    // with a marker that counts them.
     const tree = vaultWithFatBranch(500);
     const rows = visibleRows(tree, {
       expanded: new Set(["Afat"]),
@@ -22,8 +25,12 @@ describe("the picker's row budget", () => {
       budget: 20,
     });
     const paths = rows.filter((r) => r.kind !== "overflow").map((r) => (r as { path: string }).path);
-    expect(paths).toContain("Zebra");
-    expect(paths).toContain("zoo.md");
+    expect(paths).not.toContain("Zebra");
+    expect(rows.find((r) => r.kind === "overflow" && r.parent === "")).toMatchObject({
+      depth: 0,
+      hidden: 2,
+    });
+    expect(rows[rows.length - 1]).toMatchObject({ kind: "overflow", parent: "" });
   });
 
   it("puts the overflow row inside the branch it describes", () => {
@@ -77,8 +84,9 @@ describe("the picker's row budget", () => {
       selected: new Set(),
       budget: 20,
     });
-    // 3 roots, 16 children, 1 marker.
+    // 1 root drawn, 17 children, 1 marker for the children, 1 for the roots.
     expect(rows).toHaveLength(20);
+    expect(rows.filter((r) => r.kind === "overflow")).toHaveLength(2);
   });
 
   it("collapses a branch the budget never reached instead of drawing it open and empty", () => {
@@ -86,7 +94,8 @@ describe("the picker's row budget", () => {
     // and neither does a marker. Drawing Afat expanded with nothing under it
     // would tell a screen reader the branch is open and empty, which is false.
     // It is drawn closed and flagged `budgetClosed` instead, so the panel can
-    // draw a leaf that says why rather than a caret that does nothing.
+    // draw a leaf that says why rather than a caret that does nothing. The
+    // budget fits the three roots exactly, so no root marker is needed.
     const tree = vaultWithFatBranch(5);
     const rows = visibleRows(tree, {
       expanded: new Set(["Afat"]),
@@ -162,7 +171,7 @@ function randomEntries(rnd: () => number, maxDepth: number, maxBranch: number) {
 describe("the picker's row budget, over generated trees", () => {
   const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 
-  it("never exceeds the budget and never drops a row while drawing a deeper one", () => {
+  it("never exceeds the budget and never drops rows without a marker that counts them", () => {
     for (let seed = 1; seed <= 400; seed++) {
       const rnd = prng(seed);
       const entries = randomEntries(rnd, 1 + Math.floor(rnd() * 4), 1 + Math.floor(rnd() * 14));
@@ -183,12 +192,13 @@ describe("the picker's row budget, over generated trees", () => {
 
       const drawn = rows.flatMap((r) => (r.kind === "overflow" ? [] : [r]));
       const drawnPaths = new Set(drawn.map((r) => r.path));
-      const maxDepth = drawn.reduce((m, r) => Math.max(m, r.depth), -1);
       const markers = rows.flatMap((r) => (r.kind === "overflow" ? [r] : []));
 
-      // 2. A marker means the budget ran out at its level: nothing is drawn
-      //    deeper than the row it stands in for.
-      for (const m of markers) expect(maxDepth, where).toBeLessThanOrEqual(m.depth);
+      // 2. A marker ends its level: the row after it, if any, is shallower.
+      for (const m of markers) {
+        const next = rows[rows.indexOf(m) + 1];
+        expect(next === undefined || next.depth < m.depth, `${where}, marker after ${m.parent}`).toBe(true);
+      }
 
       // 3. Every parent drawn open (and the root) shows each of its children
       //    or says how many are missing. Nothing disappears silently.
@@ -214,18 +224,74 @@ describe("the picker's row budget, over generated trees", () => {
         expect(next && next.depth > r.depth, `${where}, open row ${r.path}`).toBe(true);
       });
 
-      // 5. A row closed by the budget (open in the reference) sits no more
-      //    than one level above the deepest row drawn.
+      // 5. A row is flagged exactly when the budget, not the user, kept it closed.
       for (const r of drawn) {
         const ref = reference.find((x) => x.path === r.path);
         // Flagged exactly when the budget, not the user, kept it closed.
         expect(Boolean(r.budgetClosed), `${where}, flag on ${r.path}`).toBe(
           Boolean(ref?.expanded && !r.expanded)
         );
-        if (ref?.expanded && !r.expanded) {
-          expect(maxDepth, `${where}, closed ${r.path}`).toBeLessThanOrEqual(r.depth + 1);
-        }
       }
     }
+  });
+});
+
+describe("the picker's row budget, on a wide root", () => {
+  /** 12 folders and 96 notes at the root; `Bd` has 150 folders, each with a note. */
+  function wideRoot() {
+    const entries: { path: string; kind: "file" | "folder" }[] = [];
+    for (let i = 0; i < 12; i++) entries.push(folder(i === 1 ? "Bd" : `F${String(i).padStart(3, "0")}`));
+    for (let i = 0; i < 96; i++) entries.push(file(`root${String(i).padStart(3, "0")}.md`));
+    for (let i = 0; i < 150; i++) {
+      entries.push(folder(`Bd/c${String(i).padStart(3, "0")}`), file(`Bd/c${String(i).padStart(3, "0")}/g.md`));
+    }
+    return buildVaultTree(entries, "folder", isBranchByKind);
+  }
+
+  it("shows a grandchild when the user opens a branch and then one of its children", () => {
+    const tree = wideRoot();
+    const rows = visibleRows(tree, {
+      expanded: new Set(["Bd", "Bd/c000"]),
+      filter: "",
+      selected: new Set(),
+      budget: 200,
+    });
+    const paths = rows.flatMap((r) => (r.kind === "overflow" ? [] : [r.path]));
+    expect(paths).toContain("Bd/c000/g.md");
+    expect(rows.length).toBeLessThanOrEqual(200);
+    // Opening a branch shows its children directly beneath it.
+    const bd = rows.findIndex((r) => r.kind !== "overflow" && r.path === "Bd");
+    expect(rows[bd + 1]).toMatchObject({ path: "Bd/c000", depth: 1 });
+    expect(rows.find((r) => r.kind !== "overflow" && r.path === "Bd/c000")).not.toHaveProperty(
+      "budgetClosed"
+    );
+  });
+
+  it("gives the root level its own marker when later roots cannot be drawn", () => {
+    const tree = wideRoot();
+    const rows = visibleRows(tree, {
+      expanded: new Set(["Bd"]),
+      filter: "",
+      selected: new Set(),
+      budget: 60,
+    });
+    expect(rows.length).toBeLessThanOrEqual(60);
+    const drawnRoots = rows.filter((r) => r.kind !== "overflow" && r.depth === 0);
+    const marker = rows.find((r) => r.kind === "overflow" && r.parent === "");
+    expect(marker).toBeDefined();
+    // 108 roots, the ones drawn plus the count the marker gives.
+    expect(drawnRoots.length + (marker as { hidden: number }).hidden).toBe(108);
+    expect(marker).toMatchObject({ depth: 0 });
+    // The branch that was cut inside says so too.
+    expect(rows.some((r) => r.kind === "overflow" && r.parent === "Bd")).toBe(true);
+  });
+
+  it("marks a root level that is wider than the budget on its own", () => {
+    const tree = wideRoot();
+    const rows = visibleRows(tree, { expanded: new Set(), filter: "", selected: new Set(), budget: 50 });
+    const markers = rows.filter((r) => r.kind === "overflow");
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({ parent: "", depth: 0, hidden: 108 - 49 });
+    expect(rows).toHaveLength(50);
   });
 });

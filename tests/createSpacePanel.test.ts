@@ -567,21 +567,24 @@ describe("the picker's row cap", () => {
   });
 
   it("draws a parent the budget could not open as a leaf with a reason, not a dead caret", () => {
-    // One folder of 199 subfolders, filtered so everything wants to be open:
-    // the first two levels use the whole budget, so none of the 199 can show
-    // what is inside it. Expanding one adds demand at a deeper level and frees
-    // nothing, so a caret there would look clickable and do nothing.
-    const WIDE: Record<string, NodeKind> = { Notes: "folder" };
-    for (let i = 0; i < 199; i++) {
-      WIDE[`Notes/d${i}`] = "folder";
-      WIDE[`Notes/d${i}/note.md`] = "file";
+    // One folder of 200 subfolders holding two matching notes each, plus a
+    // matching note beside it, filtered so everything wants to be open. Rows
+    // are spent in order, so the budget runs out part way down the folder: the
+    // subfolders near the end are drawn, but there is no room to show what is
+    // inside them, and a caret there would look clickable and do nothing.
+    const WIDE: Record<string, NodeKind> = { Notes: "folder", "z-note.md": "file" };
+    for (let i = 0; i < 200; i++) {
+      const d = `Notes/d${String(i).padStart(3, "0")}`;
+      WIDE[d] = "folder";
+      WIDE[`${d}/note1.md`] = "file";
+      WIDE[`${d}/note2.md`] = "file";
     }
     makeHarness({
       folders: { allPaths: () => Object.keys(WIDE), kindOf: (p: string) => WIDE[p] ?? null },
     });
     byKey("mode-curate").click();
     typeNote();
-    const closed = rowFor("Notes/d0");
+    const closed = rowFor("Notes/d065");
     expect(closed.querySelector(".spaces-create-tree-caret svg")).toBeNull();
     expect(closed.hasAttribute("aria-expanded")).toBe(false);
     // A filter is active, so closing other folders would change nothing and
@@ -589,28 +592,33 @@ describe("the picker's row cap", () => {
     expect(closed.getAttribute("title")).toBe(
       "There is no room to show what is inside this folder. Narrow the filter to make room."
     );
-    expect(closed.getAttribute("title")).not.toMatch(/[—–]|colour|items?|files?/i);
-    // The folder above them is open and unaffected.
+    expect(closed.getAttribute("title")).not.toMatch(/[—–]|colour|items?|files?/i);
+    // The folder above them is open and unaffected, and the one before the
+    // cut shows its notes.
     expect(rowFor("Notes").getAttribute("aria-expanded")).toBe("true");
+    expect(rowFor("Notes/d064").getAttribute("aria-expanded")).toBe("true");
   });
 
   it("offers closing other folders, not filtering, when no filter is active", () => {
-    // 198 subfolders leave exactly one slot below the root. Two opened by hand
-    // want it and one gets it (the earlier, d0, is the one left closed). With no filter, closing the first
-    // is what makes room, and narrowing a filter that is not there is not.
+    // 200 subfolders of two notes each. Opening the first spends three rows
+    // that the folder at index 195 needed, so that one is drawn but cannot be
+    // opened. With no filter, closing the first is what makes room, and
+    // narrowing a filter that is not there is not.
     const WIDE: Record<string, NodeKind> = { Notes: "folder" };
-    for (let i = 0; i < 198; i++) {
-      WIDE[`Notes/d${i}`] = "folder";
-      WIDE[`Notes/d${i}/note.md`] = "file";
+    for (let i = 0; i < 200; i++) {
+      const d = `Notes/d${String(i).padStart(3, "0")}`;
+      WIDE[d] = "folder";
+      WIDE[`${d}/note1.md`] = "file";
+      WIDE[`${d}/note2.md`] = "file";
     }
     makeHarness({
       folders: { allPaths: () => Object.keys(WIDE), kindOf: (p: string) => WIDE[p] ?? null },
     });
     byKey("mode-curate").click();
     rowFor("Notes").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
-    rowFor("Notes/d0").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
-    rowFor("Notes/d1").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
-    expect(rowFor("Notes/d0").getAttribute("title")).toBe(
+    rowFor("Notes/d195").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    rowFor("Notes/d000").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    expect(rowFor("Notes/d195").getAttribute("title")).toBe(
       "There is no room to show what is inside this folder. Close other folders to make room."
     );
   });
@@ -969,7 +977,8 @@ describe("the Vault and Tags buttons under the filter box", () => {
     makeHarness({ tags: { knownTags: () => many } });
     openCurated();
     showTags();
-    expect(overflow()).toBe("51 more, narrow the filter to see them");
+    // No filter is typed, so the advice is to type one, not to narrow it.
+    expect(overflow()).toBe("51 more, type in the filter to find them");
   });
 
   it("reaches for the index once per draw, not once per row", () => {
