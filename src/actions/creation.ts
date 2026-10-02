@@ -2,8 +2,9 @@ import { Notice, TFolder, normalizePath, type App } from "obsidian";
 import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceController } from "../controller/SpaceController";
-import { isFolderSpace } from "../visibility/folderSpace";
+import { isFolderSpace, rootOf } from "../visibility/folderSpace";
 import { pathMembers } from "../definitions/membership";
+import type { SpaceDefinition } from "../types";
 
 interface CreationContext {
   defs: DefinitionStore;
@@ -54,6 +55,27 @@ export function destinationFolder(app: App, root: string | undefined): string {
   return out.path ?? app.fileManager.getNewFileParent("").path;
 }
 
+/**
+ * Where a note or folder created inside `space` should land.
+ *
+ * Exists as a named function for one reason: it is the line the two commands
+ * below got wrong, and neither of them can be called from a test —
+ * `normalizePath` is deliberately not modelled by the `obsidian` stub, so
+ * asserting this through them is not available at this layer.
+ *
+ * `rootOf`, never `space.root`. The two disagree for a hand-edited
+ * `root: "/"`, which the schema keeps rather than deleting the space: the raw
+ * string passes `rootIsFolder` (Obsidian resolves "/" to the vault's own root
+ * folder) and sent the new file to the vault root, while `rootOf` reads the
+ * same string as "no root chosen" — which is why the tree beside it was
+ * showing the missing-root empty state. The file landed outside everything the
+ * user could see. Every other consumer of a space's root already goes through
+ * `rootOf`; this is what makes the destination agree with the tree.
+ */
+export function spaceDestination(app: App, space: SpaceDefinition): string {
+  return destinationFolder(app, rootOf(space) ?? undefined);
+}
+
 async function ensureMember(
   ctx: CreationContext,
   spaceId: string,
@@ -82,7 +104,7 @@ export async function newNoteInActiveSpace(
     new Notice("Spaces: switch to a space first.");
     return;
   }
-  const dir = destinationFolder(app, space.root);
+  const dir = spaceDestination(app, space);
   const base = dir === "/" || dir === "" ? "" : `${dir}/`;
 
   let path = normalizePath(`${base}Untitled.md`);
@@ -122,7 +144,7 @@ export async function newFolderInActiveSpace(
     new Notice("Spaces: switch to a space first.");
     return;
   }
-  const dir = destinationFolder(app, space.root);
+  const dir = spaceDestination(app, space);
   const base = dir === "/" || dir === "" ? "" : `${dir}/`;
 
   let path = normalizePath(`${base}New folder`);

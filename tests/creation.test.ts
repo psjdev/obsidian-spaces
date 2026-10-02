@@ -16,7 +16,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { App } from "obsidian";
 import { TFolder, noticeLog } from "./helpers/obsidian-stub";
-import { destinationFolder } from "../src/actions/creation";
+import { destinationFolder, spaceDestination } from "../src/actions/creation";
+import type { SpaceDefinition } from "../src/types";
 
 /**
  * The small structural slice `destinationFolder` reads: `vault.getAbstractFileByPath`
@@ -110,16 +111,62 @@ describe("destinationFolder", () => {
   // the vault's own root TFolder — the same object `getRoot()` returns, same
   // constructor as any other folder — so it PASSES `instanceof TFolder` and
   // resolves silently to "/" itself, never reaching the Notice branch at all.
-  // This is a live path, not a defensive one nobody hits: both creation call
-  // sites pass `space.root` raw (not through `rootOf`), and schema.ts keeps a
-  // persisted `root: "/"` rather than deleting the space (the hand-edited
-  // data.json case). The user-visible outcome still matches "": creation.ts's
-  // `dir === "/" || dir === "" ? "" : ...` sends both to the vault root; only
-  // the route there differs (a real TFolder match vs. a falsy short-circuit),
-  // which is exactly why both are pinned as separate tests.
+  // The two creation commands no longer reach this with "/": both now pass
+  // `rootOf(space) ?? undefined`, which reads that spelling as "no root
+  // chosen" and arrives here as `undefined` (see the command test below).
+  //
+  // Kept as a statement about THIS function, which still does its own raw
+  // `getAbstractFileByPath(root)` lookup rather than going through
+  // `isVaultRoot`/`rootOf`, so the behaviour is worth pinning even though
+  // `spaceDestination` is now its only production caller and cannot produce
+  // "/". An earlier version of this comment claimed `newFileLocation.ts`
+  // calls it with a raw string; it does not, and says in its own comment why
+  // it must not (it would recurse through the patched `getNewFileParent`).
   it("resolves the missing-root spelling \"/\" to the vault root, silently", () => {
     const app = fakeApp({ folders: [] });
     expect(destinationFolder(app, "/")).toBe("/");
     expect(noticeLog).toEqual([]);
+  });
+
+});
+
+/**
+ * The seam the two creation commands ask, for the one input where
+ * `space.root` and `rootOf(space)` disagree.
+ *
+ * A hand-edited `root: "/"` is kept by the schema rather than deleting the
+ * space, and `rootOf` reads it as "no root chosen" — so the tree renders the
+ * missing-root empty state. Asked with the raw string, `destinationFolder`
+ * answers "/" (the test above pins that), and the note was created at the
+ * vault root: outside the pinned folder, and outside anything the tree was
+ * showing.
+ *
+ * `spaceDestination` rather than `newNoteInActiveSpace` because the commands
+ * cannot be called here at all: they go through `normalizePath`, which the
+ * `obsidian` stub refuses to model. The commands hold nothing else of this
+ * decision — each is one line reading this function.
+ */
+describe("spaceDestination", () => {
+  function space(root: string | undefined): SpaceDefinition {
+    return { id: "s1", name: "Pinned", icon: "box", color: "#000000", members: [], root };
+  }
+
+  it("falls back to the default location for the missing-root spelling \"/\"", () => {
+    const app = fakeApp({ folders: [] });
+    // `fakeApp`'s fallback parent, asserted as the literal for the reason the
+    // root="" test above gives.
+    expect(spaceDestination(app, space("/"))).toBe("");
+  });
+
+  it("still creates into a real root, so the fallback above is not unconditional", () => {
+    const app = fakeApp({ folders: ["Projects/Work"] });
+    expect(spaceDestination(app, space("Projects/Work"))).toBe("Projects/Work");
+  });
+
+  it("still notices a root that is declared but gone", () => {
+    const app = fakeApp({ folders: [] });
+    noticeLog.length = 0;
+    expect(spaceDestination(app, space("Projects/Gone"))).toBe("");
+    expect(noticeLog).toHaveLength(1);
   });
 });
