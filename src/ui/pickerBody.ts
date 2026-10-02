@@ -13,7 +13,7 @@
  * then names the folders and tags that selected them, because a folder and a
  * tag are selectors: counting the members alone under-reports a selection of
  * two tags by however many notes carry them. Taking the union is
- * `previewPaths`'s job; saying it is this file's.
+ * `buildPreview`'s job; saying it is this file's.
  *
  * Pure: no DOM, no `"obsidian"`.
  */
@@ -66,7 +66,7 @@ export function countPicked(items: readonly MemberEntry[]): PickedCounts {
  *
  * It is an argument rather than something counted here because resolving a
  * selector needs the vault and the tag index, and this file has neither. See
- * `previewPaths` in `memberPreview.ts`, which takes the union and whose
+ * `buildPreview` in `previewSeam.ts`, which takes the union and whose
  * `notes` counts files only: a folder member brings in its subfolders as
  * paths, and a subfolder is not a note.
  *

@@ -26,6 +26,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Menu, TAbstractFile } from "obsidian";
 import { decorate } from "../src/actions/membership";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
+import { coveringFolderIn, memberFolderSet } from "../src/definitions/membership";
+import { createTreeVaultIndex } from "../src/visibility/VaultIndex";
 import { buildVisibilitySnapshot } from "../src/visibility/VisibilityEngine";
 import { compileIgnore } from "../src/visibility/glob";
 import type { SpaceController } from "../src/controller/SpaceController";
@@ -245,3 +247,46 @@ describe("adding does not duplicate a case-mismatched member", () => {
  * case-mismatched member visible — so the change there is consistency, not a
  * second live defect.
  */
+
+describe("coverage across a case difference", () => {
+  // Both spellings of one folder exist, as on a case-sensitive filesystem,
+  // beside a folder that exists in one spelling only.
+  const tree = createTreeVaultIndex(
+    new Map<string, "file" | "folder">([
+      ["Docs", "folder"],
+      ["Docs/a.md", "file"],
+      ["docs", "folder"],
+      ["docs/b.md", "file"],
+      ["Inbox", "folder"],
+      ["Inbox/x.md", "file"],
+    ])
+  );
+
+  it("Docs does not cover docs/b.md when both folders exist", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "Docs" }], tree);
+    expect(coveringFolderIn(set, "docs/b.md")).toBeNull();
+    expect(coveringFolderIn(set, "Docs/a.md")).toBe("Docs");
+  });
+
+  it("docs does not cover Docs/a.md either, so the answer is not one-sided", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "docs" }], tree);
+    expect(coveringFolderIn(set, "Docs/a.md")).toBeNull();
+    expect(coveringFolderIn(set, "docs/b.md")).toBe("docs");
+  });
+
+  it("a stored spelling that has drifted still covers its children", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "inbox" }], tree);
+    expect(coveringFolderIn(set, "Inbox/x.md")).toBe("Inbox");
+  });
+
+  it("a member whose folder is gone claims nothing and does not throw", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "Deleted" }], tree);
+    expect(() => coveringFolderIn(set, "Docs/a.md")).not.toThrow();
+    expect(coveringFolderIn(set, "Deleted/old.md")).toBeNull();
+  });
+
+  it("without a vault it still folds, as callers holding only a stored document need", () => {
+    const set = memberFolderSet([{ kind: "folder", path: "Inbox" }]);
+    expect(coveringFolderIn(set, "inbox/today.md")).toBe("inbox");
+  });
+});

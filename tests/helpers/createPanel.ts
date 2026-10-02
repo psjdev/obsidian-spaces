@@ -9,6 +9,9 @@
 import { CreateSpacePanel, type CreateSpacePanelDeps } from "../../src/ui/CreateSpacePanel";
 import type { CreateSpaceOptions } from "../../src/actions/spaceLifecycle";
 import type { NodeKind } from "../../src/ui/vaultTree";
+import { buildPreview } from "../../src/ui/previewSeam";
+import { createTreeVaultIndex } from "../../src/visibility/VaultIndex";
+import { compileIgnore } from "../../src/visibility/glob";
 
 /** A small vault: two folders, one nested, and two notes. */
 export const VAULT: Record<string, NodeKind> = {
@@ -52,6 +55,7 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
   const counted: string[] = [];
   let closes = 0;
   let reached = 0;
+  let engineIndex: ReturnType<typeof createTreeVaultIndex> | null = null;
 
   const deps: CreateSpacePanelDeps = {
     folders: {
@@ -68,6 +72,35 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
         },
       };
     },
+    // The real seam over the harness vault, so the summary row counts through
+    // the engine exactly as it does in the app. The tag index is reached once
+    // per tag lookup, so none is reached while no tag member is present, which
+    // is what `reached` asserts and what main.ts does. The vault index is
+    // derived from `deps.folders`, so a test that overrides the vault gets a
+    // preview and coverage over that vault, not over `VAULT`.
+    // Built once, on first use, like the engine's index which is one snapshot
+    // the panel only reads; rebuilding per draw would also count as a vault
+    // read against the "once per session" tests, which are about the panel's
+    // own reads of `folders`.
+    vaultIndex: () => {
+      if (engineIndex === null) {
+        const entries = new Map<string, NodeKind>();
+        for (const p of deps.folders.allPaths()) {
+          const k = deps.folders.kindOf(p);
+          if (k !== null) entries.set(p, k);
+        }
+        engineIndex = createTreeVaultIndex(entries);
+      }
+      return engineIndex;
+    },
+    preview: (members) =>
+      buildPreview(
+        deps.vaultIndex(),
+        compileIgnore([]),
+        {
+          pathsMatching: (tag) => deps.tagIndex().pathsMatching(tag),
+        }
+      )(members),
     customColors: [],
     useThemeIconColor: () => false,
     saveCustomColors: async (customs) => {

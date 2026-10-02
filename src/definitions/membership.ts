@@ -18,7 +18,8 @@
 
 import type { MemberEntry, PathMember, SpaceDefinition } from "../types";
 import { canonicalPath } from "../visibility/glob";
-import { ancestorsOf } from "../visibility/VaultIndex";
+import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
+import { resolveLivePath } from "../visibility/resolveLivePath";
 import { hasRoot } from "../visibility/folderSpace";
 import { normalizeTag } from "../visibility/tagMatch";
 
@@ -42,39 +43,72 @@ export function coveringFolder(
 }
 
 /**
- * The folder members, canonicalised, ready for `coveringFolderIn`.
+ * The folder members, with the rule `coveringFolderIn` must use on them.
+ *
+ * The mode travels WITH the set rather than being remembered elsewhere or
+ * passed separately to the lookup. A copy, a filter or a cache of `folders`
+ * would otherwise lose it and silently fall back to folding, which is the
+ * defect this exists to prevent; carried in the value, a copy keeps it, and a
+ * bare `Set` handed to `coveringFolderIn` is a compile error.
+ */
+export interface FolderSet {
+  folders: ReadonlySet<string>;
+  /**
+   * True when `folders` holds LIVE paths and the lookup must compare exactly.
+   * False when it holds folded spellings and the lookup folds each ancestor.
+   */
+  exact: boolean;
+}
+
+/**
+ * The folder members, ready for `coveringFolderIn`.
  *
  * Split out so a caller asking about a whole list of paths builds this once
  * instead of once per path. The create panel draws up to two hundred rows per
- * keystroke and was rebuilding it for every one of them.
+ * keystroke and builds this once per draw, never once per row.
+ *
+ * With a `vault`, each stored spelling is resolved to the LIVE path it names
+ * and the set holds those, and `coveringFolderIn` then compares exactly. A
+ * folder stored as `Inbox` still covers a live `inbox/today.md` (the path
+ * resolves to `inbox`), but `Docs` no longer covers `docs/b.md` when both
+ * folders exist: they are two folders, the engine treats them as two, and a
+ * panel that folded both sides disabled a row and named a folder that is not a
+ * member. A member whose folder no longer exists contributes nothing.
+ *
+ * Without a `vault` the set holds the folded spelling and
+ * `coveringFolderIn` folds each ancestor to match, as this has always done,
+ * so a caller holding only a stored document still gets an answer. That mode
+ * cannot tell `Docs` from `docs`.
  */
-export function memberFolderSet(members: readonly MemberEntry[]): Set<string> {
-  // Folded, so a folder stored as `Inbox` still covers a live
-  // `inbox/today.md`. Without this the row is visible — the snapshot resolves
-  // the stored path — but every caller that asks WHY it is visible gets "not
-  // inherited", so the disabled menu entry loses the folder name it exists to
-  // report.
-  //
-  // Merged by the arbiter: x5 moved this function here while x4
-  // canonicalised it in its old home. Both were wanted; this is the union.
-  return new Set(
-    members.filter((m) => m.kind === "folder").map((m) => canonicalPath(m.path))
-  );
+export function memberFolderSet(
+  members: readonly MemberEntry[],
+  vault?: Pick<VaultIndex, "exists" | "childrenOf">
+): FolderSet {
+  const folders = new Set<string>();
+  for (const m of members) {
+    if (m.kind !== "folder") continue;
+    if (vault === undefined) {
+      folders.add(canonicalPath(m.path));
+      continue;
+    }
+    const live = resolveLivePath(vault, m.path);
+    if (live !== null) folders.add(live);
+  }
+  return { folders, exact: vault !== undefined };
 }
 
 /**
  * `coveringFolder` against an already-built folder set.
  *
  * The LIVE ancestor is returned, not the stored spelling, because that is
- * what the caller is labelling.
+ * what the caller is labelling. An exact set is compared exactly; a folded one
+ * holds folded spellings, so each ancestor is folded to match it.
  */
-export function coveringFolderIn(
-  folders: ReadonlySet<string>,
-  path: string
-): string | null {
+export function coveringFolderIn(set: FolderSet, path: string): string | null {
   const ancestors = ancestorsOf(path);
   for (let i = ancestors.length - 1; i >= 0; i--) {
-    if (folders.has(canonicalPath(ancestors[i]))) return ancestors[i];
+    const key = set.exact ? ancestors[i] : canonicalPath(ancestors[i]);
+    if (set.folders.has(key)) return ancestors[i];
   }
   return null;
 }

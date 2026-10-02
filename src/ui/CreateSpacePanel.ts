@@ -46,7 +46,8 @@ import {
   memberTagSet,
 } from "../definitions/membership";
 import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
-import { previewPaths } from "./memberPreview";
+import type { Preview } from "./previewSeam";
+import type { VaultIndex } from "../visibility/VaultIndex";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -138,6 +139,28 @@ export interface CreateSpacePanelDeps {
    * twice, once for this panel and once for the engine that already has one.
    */
   tagIndex: () => TagIndex;
+  /**
+   * What the space would contain if created now, answered by the engine
+   * rather than by this panel.
+   *
+   * A function rather than a value, for the reason `tagIndex` documents: the
+   * answer is a snapshot that every metadata change replaces, and a captured
+   * one would count against the vault as it was when the panel opened.
+   */
+  preview: (members: readonly MemberEntry[]) => Preview;
+  /**
+   * The engine's vault index, so the picker can resolve a stored member to the
+   * live path it names by the engine's own rule (`resolveLivePath`) when it
+   * asks which folder covers a row. `folders` cannot answer that: it lists
+   * paths and kinds, and has no way to ask what is directly under a folder.
+   * A function for the reason `tagIndex` is one.
+   *
+   * The rows come from `folders`, the live vault, while coverage comes from
+   * this index, the engine's snapshot. For up to the coalescer's window a
+   * freshly created folder can therefore be drawn but not yet resolve, and
+   * covers nothing until the snapshot catches up. Bounded and self-correcting.
+   */
+  vaultIndex: () => VaultIndex;
   /**
    * The user's saved custom colors, and the way to persist a new one — the
    * theme button opens the same color popover the space strip uses, and that
@@ -1220,8 +1243,14 @@ export class CreateSpacePanel {
     // Built once per draw rather than once per row: the list redraws on every
     // keystroke and holds up to MAX_PICKER_ROWS rows, none of which changes the
     // member list. Folder mode takes one root and keeps no member list, so
-    // nothing there can be covered and nothing is built.
-    const coveringFolders = this.state.folderMode ? null : memberFolderSet(this.state.items);
+    // nothing there can be covered and nothing is built. The vault is passed
+    // so each member resolves to the live folder it names and a row is covered
+    // only by a folder that really is its ancestor, not by one that differs
+    // from it in case. The resolution runs once per member here, in the draw,
+    // and the per-row lookup below stays an exact set test.
+    const coveringFolders = this.state.folderMode
+      ? null
+      : memberFolderSet(this.state.items, this.deps.vaultIndex());
 
     host.replaceChildren();
     if (rows.length === 0) {
@@ -1620,15 +1649,8 @@ export class CreateSpacePanel {
     const picked = this.pickedMembers();
     const counts = countPicked(picked);
     // The total is the whole row's lead figure, so it is resolved on every
-    // draw. The index is reached lazily, once per draw and only if a tag was
-    // picked: the accessor hands back the engine's current snapshot, and a
-    // selection of notes and folders has no use for it. `previewPaths` reads
-    // the vault listing only if a folder was picked.
-    let index: ReturnType<typeof this.deps.tagIndex> | null = null;
-    const notes = previewPaths(picked, this.deps.folders, (tag) => {
-      index ??= this.deps.tagIndex();
-      return index.pathsMatching(tag);
-    }).notes;
+    // draw, by the engine's own membership rule through `deps.preview`.
+    const notes = this.deps.preview(picked).notes;
     host.textContent = pickedSummary(counts, notes);
   }
 
@@ -1638,7 +1660,7 @@ export class CreateSpacePanel {
    *
    * Expressed as members rather than as counts so the root is resolved by
    * exactly the rule a curated folder member is, and so both shapes reach
-   * `previewPaths` as the one thing it takes.
+   * `deps.preview` as the one thing it takes.
    */
   private pickedMembers(): readonly MemberEntry[] {
     if (!this.state.folderMode) return this.state.items;

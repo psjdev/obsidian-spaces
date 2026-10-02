@@ -1722,3 +1722,36 @@ describe("rows a selected tag covers", () => {
     expect(summaryText()).toBe("2 notes, 1 tag");
   });
 });
+
+describe("rows a selected folder covers, when two folders differ only in case", () => {
+  const CASE_VAULT: Record<string, NodeKind> = {
+    Docs: "folder",
+    "Docs/a.md": "file",
+    docs: "folder",
+    "docs/b.md": "file",
+  };
+  const caseSource = (): Partial<CreateSpacePanelDeps> => ({
+    folders: {
+      allPaths: () => Object.keys(CASE_VAULT),
+      kindOf: (p) => CASE_VAULT[p] ?? null,
+    },
+  });
+  const expand = (path: string): void => {
+    const caret = rowFor(path).querySelector<HTMLElement>(".spaces-create-tree-caret");
+    if (!caret) throw new Error(`no caret on ${path}`);
+    caret.click();
+  };
+
+  it("does not disable a row in the other spelling's folder", () => {
+    // Pins the argument the panel passes to `memberFolderSet`: without the
+    // vault it folds, and `Docs` would cover `docs/b.md`.
+    makeHarness(caseSource());
+    byKey("mode-curate").click();
+    rowFor("Docs").click();
+    expand("Docs");
+    expand("docs");
+    expect(rowFor("Docs/a.md").classList.contains("is-inherited")).toBe(true);
+    expect(rowFor("docs/b.md").classList.contains("is-inherited")).toBe(false);
+    expect(rowFor("docs/b.md").hasAttribute("aria-disabled")).toBe(false);
+  });
+});
