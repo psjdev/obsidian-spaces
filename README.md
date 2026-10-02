@@ -90,7 +90,7 @@ Click **All** to leave the space and see the whole vault again.
 Right-click a row in the file tree:
 
 - In **All**, **Add to space** offers each of your spaces.
-- Inside a space, **Remove from *space*** removes a member. A row that is in the space because you added its parent folder shows a disabled entry naming the folder it came from. Remove the folder, or use **Stop showing here** to dismiss a visitor.
+- Inside a space, `Remove from <space name>` removes a member. A row that is in the space because you added its parent folder shows a disabled entry naming the folder it came from. Remove the folder, or use **Stop showing here** to dismiss a visitor.
 - On a folder in **All**, **Create folder pinned space** builds a space pinned to it in one step.
 
 Right-click a space's icon in the space strip for **Rename space…**, **Change space icon…**, **Change space color…**, and **Restore saved ordering**.
@@ -107,14 +107,14 @@ A curated space can hold a tag as well as notes and folders. Every note carrying
 
 To add one:
 
-- In the creation form, switch the picker from **Items** to **Tags** and click a tag.
+- In the creation form, switch the picker from **Vault** to **Tags** and click a tag.
 - On an existing space, open Settings → Spaces, click **Contents…** beside the space, and type the tag under **Add a tag**.
 
 Nested tags match. A space holding `project` includes notes tagged `project/atlas` and `project/atlas/phase-1`. A space holding `project/atlas` includes only that tag and the tags nested under it.
 
-The space follows your notes. Add the tag to a note and it appears, change or delete the tag and it leaves. Tags written in a note's properties and tags written in its text both count.
+Add the tag to a note and it appears, change or delete the tag and it leaves. Tags written in a note's properties and tags written in its text both count.
 
-To drop a single note without dropping the tag, right-click it inside the space and choose **Remove from *space***. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
+To drop a single note without dropping the tag, right-click it inside the space and choose `Remove from <space name>`. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
 
 ## Sorting
 

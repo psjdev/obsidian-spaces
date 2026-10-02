@@ -695,7 +695,7 @@ describe("the picker reads the vault once per session", () => {
   });
 });
 
-describe("the Items and Tags buttons under the filter box", () => {
+describe("the Vault and Tags buttons under the filter box", () => {
   /**
    * Every test that reaches the tag list reaches it with an EMPTY filter box.
    *
@@ -777,7 +777,7 @@ describe("the Items and Tags buttons under the filter box", () => {
     expect(group?.nextElementSibling).toBe(window_);
   });
 
-  it("opens on Items", () => {
+  it("opens on Vault", () => {
     makeHarness();
     openCurated();
     expect(pressed("body-items")).toBe("true");
@@ -819,15 +819,17 @@ describe("the Items and Tags buttons under the filter box", () => {
       if (!el) throw new Error("the window is not a tree");
       return el;
     };
-    expect(treeBox().getAttribute("aria-label")).toBe("Choose items");
-    expect(treeBox().hasAttribute("aria-multiselectable")).toBe(false);
+    expect(treeBox().getAttribute("aria-label")).toBe("Choose notes and folders");
+    // Curated mode is multi-select. This line used to assert `false`, which was
+    // the defect: the attribute was removed in both modes.
+    expect(treeBox().getAttribute("aria-multiselectable")).toBe("true");
     showTags();
     expect(panelEl().querySelector("[role='listbox']")).toBeNull();
     expect(treeBox().getAttribute("aria-label")).toBe("Choose tags");
     expect(treeBox().getAttribute("aria-multiselectable")).toBe("true");
     byKey("body-items").click();
-    expect(treeBox().getAttribute("aria-label")).toBe("Choose items");
-    expect(treeBox().hasAttribute("aria-multiselectable")).toBe(false);
+    expect(treeBox().getAttribute("aria-label")).toBe("Choose notes and folders");
+    expect(treeBox().getAttribute("aria-multiselectable")).toBe("true");
   });
 
   it("shows every tag with the chosen ones marked, which is what the tree does", () => {
@@ -1014,7 +1016,7 @@ describe("the Items and Tags buttons under the filter box", () => {
     expect(panelEl().querySelector("[data-focus-key='body-items']")).toBeNull();
   });
 
-  it("reopens on Items when a mode button is pressed", () => {
+  it("reopens on Vault when a mode button is pressed", () => {
     // Folder mode has no tags at all, so the window reopens on the vault
     // rather than on whatever the last curated session left it showing.
     makeHarness();
@@ -1437,7 +1439,8 @@ describe("the Items and Tags buttons under the filter box", () => {
       // notes: the hand-picked one is not counted again for the tag.
       expect(summary()).toBe("2 notes, 2 tags");
       byKey("body-items").click();
-      expect(summary()).toBe("2 notes, 2 tags");
+      // The switch is announced in this same row, ahead of the figures.
+      expect(summary()).toBe("Showing notes and folders. 2 notes, 2 tags");
     });
 
     it("counts the union of what is selected, not the parts added up", () => {
@@ -1682,7 +1685,9 @@ describe("rows a selected tag covers", () => {
     typeName("Tag and note");
     byKey("mode-curate").click();
     pickTag("project");
-    const before = summaryText();
+    // `pickTag` ends on a body switch, which leads the row with its
+    // announcement; the figures after it are what a click must not move.
+    const before = summaryText().replace(/^Showing [^.]*\. /, "");
 
     rowFor("inbox.md").click();
 
@@ -1719,7 +1724,7 @@ describe("rows a selected tag covers", () => {
     makeHarness();
     byKey("mode-curate").click();
     pickTag("project");
-    expect(summaryText()).toBe("2 notes, 1 tag");
+    expect(summaryText()).toBe("Showing notes and folders. 2 notes, 1 tag");
   });
 });
 
