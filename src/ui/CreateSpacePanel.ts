@@ -213,8 +213,9 @@ const isOverflowRow = (row: PickerRow<string>): row is OverflowRow => row.kind =
  * Everything not on this list is the same for both and lives in the renderer,
  * which is the point: a row-level fix is made once. Each member is here
  * because the two bodies genuinely disagree about it, and each adapter closes
- * over what its own draw built (the covering set, the tag counts), so nothing
- * is shared between draws.
+ * over what its own draw built (the covering set, the tag counts). Nothing is
+ * shared between the two bodies; `expanded` is the one thing that outlives a
+ * draw, being the panel's own state for that body.
  */
 interface RowAdapter<K extends string> {
   /** The `data-` attribute a row is found by, which is also its focus key. */
@@ -226,11 +227,6 @@ interface RowAdapter<K extends string> {
   /** The user's own opened set for this body; a caret and the arrow keys edit it. */
   expanded: Set<string>;
   /**
-   * Whether a filter is active. Only the wording of the budget-closed title
-   * depends on it: a filter forces expansion, so only narrowing helps then.
-   */
-  filtered: boolean;
-  /**
    * What already brings this row in, or null. Asked only of a row that is not
    * itself picked, since picked wins over covered.
    */
@@ -240,11 +236,12 @@ interface RowAdapter<K extends string> {
   /** The title for a picked row, when it has one. The item tree gives none. */
   selectedTitle?(row: Row<K>): string;
   /**
-   * Why a budget-closed row has no caret, by body and by whether a filter is
-   * active. Joined onto any other title the row has.
+   * Why a budget-closed row has no caret, worded for its body and for whether
+   * a filter is active (a filter forces expansion, so only narrowing helps
+   * then). Joined onto any other title the row has.
    */
-  budgetClosedTitle(filtered: boolean): string;
-  /** Draws the row's icon and name cells. */
+  budgetClosedTitle(): string;
+  /** Draws the row's name cell, icon included. */
   drawName(el: HTMLElement, row: Row<K>): void;
   /** Extra elements after the name, such as the tag count. */
   decorate?(el: HTMLElement, row: Row<K>): void;
@@ -1158,8 +1155,9 @@ export class CreateSpacePanel {
    * and not the other; both now come through here.
    *
    * `focusKey` names the row to refocus. Left out, it is whichever row holds
-   * focus now, which is what a caret click wants: the pointer may have
-   * focused any row, and nothing is refocused when focus was not on one.
+   * focus now, which is what a caret click wants: a pointer gesture
+   * should not move focus, and nothing is refocused when focus was not on a
+   * row.
    */
   private redrawKeepingFocus(focusKey?: string): void {
     const key = focusKey ?? this.focusedRowKey();
@@ -1238,7 +1236,6 @@ export class CreateSpacePanel {
     this.renderTreeRow(host, rows, {
       datasetKey: "path",
       expanded: this.expandedFolders,
-      filtered: this.itemFilter.trim() !== "",
       markRow: (el, row) => {
         el.dataset.kind = row.kind;
       },
@@ -1257,9 +1254,9 @@ export class CreateSpacePanel {
       coveredTitle: (by) =>
         `Already included by the selected folder ${by}. ` +
         "Deselect that folder to pick items under it one at a time.",
-      budgetClosedTitle: (filtered) =>
+      budgetClosedTitle: () =>
         "There is no room to show what is inside this folder. " +
-        (filtered ? "Narrow the filter to make room." : "Close other folders to make room."),
+        (this.itemFilter.trim() !== "" ? "Narrow the filter to make room." : "Close other folders to make room."),
       drawName: (el, row) => {
         const icon = doc.win.createSpan();
         icon.className = "spaces-create-tree-icon";
@@ -1302,8 +1299,8 @@ export class CreateSpacePanel {
    * so a fix to any of them is made in one place. What the adapter supplies is
    * what genuinely differs: the key a row is found by, what covers it, the
    * wording of its titles, the name cell, and what picking changes in state.
-   * Nothing is shared between draws; the adapter closes over whatever its own
-   * draw built.
+   * Nothing is shared between the two bodies; the adapter closes over whatever
+   * its own draw built, and only `expanded` is state that outlives the draw.
    */
   private renderTreeRow<K extends string>(
     host: HTMLElement,
@@ -1373,15 +1370,17 @@ export class CreateSpacePanel {
         // forces expansion and ignores what the user opened, so closing other
         // branches changes nothing there, and with no filter there is nothing
         // to narrow. The test is `visibleRows`'s own, so the two agree.
-        const why = adapter.budgetClosedTitle(adapter.filtered);
+        const why = adapter.budgetClosedTitle();
         el.title = el.title === "" ? why : `${el.title} ${why}`;
       }
 
-      const setExpanded = (open: boolean): void => {
+      // `refocus` is for the keyboard, where this row holds focus by
+      // definition. A pointer gesture leaves focus wherever it already was.
+      const setExpanded = (open: boolean, refocus: boolean): void => {
         if (!row.hasChildren || row.budgetClosed) return;
         if (open) adapter.expanded.add(row.path);
         else adapter.expanded.delete(row.path);
-        this.redrawKeepingFocus(row.path);
+        this.redrawKeepingFocus(refocus ? row.path : undefined);
       };
 
       const caret = doc.win.createSpan();
@@ -1400,7 +1399,7 @@ export class CreateSpacePanel {
           e.stopPropagation();
           // Toggles the user's own opening, not the effective state: a filter
           // can force a branch open that the user never did.
-          setExpanded(!adapter.expanded.has(row.path));
+          setExpanded(!adapter.expanded.has(row.path), false);
         });
       }
       el.appendChild(caret);
@@ -1410,8 +1409,7 @@ export class CreateSpacePanel {
 
       const choose = (): void => {
         // A click on a covered row would store a member the selected parent
-        // already covers, the state `memberRows` calls `redundant`. Nothing is
-        // the honest answer, and the title says which one gave it.
+        // already covers. Nothing is the honest answer, and the title says which one gave it.
         if (covered !== null) return;
         adapter.choose(row);
         this.clearFault("root");
@@ -1428,7 +1426,7 @@ export class CreateSpacePanel {
         if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
           if (!row.hasChildren || row.budgetClosed) return;
           e.preventDefault();
-          setExpanded(e.key === "ArrowRight");
+          setExpanded(e.key === "ArrowRight", true);
           return;
         }
         if (e.key !== "Enter" && e.key !== " ") return;
@@ -1766,7 +1764,6 @@ export class CreateSpacePanel {
       // carries only what differs.
       rowClass: "spaces-create-tag-row",
       expanded: this.expandedTags,
-      filtered: query.trim() !== "",
       // A selected tag covers its children through `tagMatches`, and here the
       // parent is the row directly above them, so the tint states a fact about
       // the tree on screen. That is the whole difference from the item tree,
@@ -1782,9 +1779,9 @@ export class CreateSpacePanel {
       // tooltip rather than in a second control: a real remove button inside
       // a clickable row gives two targets for one action.
       selectedTitle: (row) => `Remove ${TAG_SIGIL}${row.path}`,
-      budgetClosedTitle: (filtered) =>
+      budgetClosedTitle: () =>
         "There is no room to show what is inside this tag. " +
-        (filtered ? "Narrow the filter to make room." : "Close other tags to make room."),
+        (query.trim() !== "" ? "Narrow the filter to make room." : "Close other tags to make room."),
       drawName: (el, row) => {
         const label = doc.win.createSpan();
         label.className = "spaces-create-tree-name";

@@ -70,3 +70,25 @@ describe("keyboard focus in the picker", () => {
     expect(document.activeElement).toBe(tagRowFor("project"));
   });
 });
+
+describe("a caret click", () => {
+  it("leaves focus where it was", () => {
+    makeHarness();
+    byKey("mode-curate").click();
+    const other = rowFor("inbox.md");
+    other.focus();
+    const caret = rowFor("Projects").querySelector<HTMLElement>(".spaces-create-tree-caret");
+    caret?.click();
+    expect(rowFor("Projects/Work")).toBeTruthy();
+    expect(document.activeElement).toBe(rowFor("inbox.md"));
+  });
+
+  it("does not move focus when no row had it", () => {
+    makeHarness();
+    byKey("mode-curate").click();
+    const before = document.activeElement;
+    rowFor("Projects").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    expect(rowFor("Projects/Work")).toBeTruthy();
+    expect(document.activeElement).toBe(before);
+  });
+});

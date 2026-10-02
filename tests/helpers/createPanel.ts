@@ -20,7 +20,7 @@ export const VAULT: Record<string, NodeKind> = {
 };
 
 /** What `nativeKnownTags` would hand over: Obsidian's spelling, `#` and all. */
-export const VAULT_TAGS = ["#project", "#project/console", "#archive"];
+const VAULT_TAGS = ["#project", "#project/console", "#archive"];
 
 /**
  * What the engine's `TagIndex` would answer for those tags. Ancestors are
@@ -28,7 +28,7 @@ export const VAULT_TAGS = ["#project", "#project/console", "#archive"];
  * note too, and `archive` is a tag Obsidian lists with nothing filed under it
  * yet.
  */
-export const TAG_PATHS: Record<string, string[]> = {
+const TAG_PATHS: Record<string, string[]> = {
   project: ["Projects/Work/plan.md", "inbox.md"],
   "project/console": ["inbox.md"],
   archive: [],
