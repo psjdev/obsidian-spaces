@@ -1773,4 +1773,18 @@ describe("rows a selected folder covers, when two folders differ only in case", 
     expect(rowFor("docs/b.md").getAttribute("aria-selected")).toBe("true");
     expect(panelEl().querySelector(".spaces-create-summary")?.textContent ?? "").toContain("2 notes");
   });
+
+  it("keeps a note in the other spelling's folder when that folder is picked after it", () => {
+    // The other direction reaches a different branch of `toggleItem`: the
+    // prune of members the new folder covers. Folding there dropped
+    // `docs/b.md` silently, from the list and the count.
+    makeHarness(caseSource());
+    byKey("mode-curate").click();
+    expand("docs");
+    rowFor("docs/b.md").click();
+    rowFor("Docs").click();
+    expect(rowFor("docs/b.md").getAttribute("aria-selected")).toBe("true");
+    expect(rowFor("Docs").getAttribute("aria-selected")).toBe("true");
+    expect(panelEl().querySelector(".spaces-create-summary")?.textContent ?? "").toContain("2 notes");
+  });
 });

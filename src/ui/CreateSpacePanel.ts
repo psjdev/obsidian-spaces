@@ -1833,9 +1833,10 @@ export class CreateSpacePanel {
     // The same budget the item tree uses, for the same reason. The collapsed
     // view is usually a handful of roots and fits whole. Past the budget, a
     // level is cut and ends in a marker that counts what it hid, the root level
-    // included. The common case is a branch like `topic` with its 401 children,
-    // which says how many are missing inside the branch rather than deleting
-    // the roots that sort after it.
+    // included. The common case is a branch like `topic` with its 401 children:
+    // it spends the budget inside the branch and its marker says how many of
+    // its own children are missing, while roots that sort after it may fall
+    // behind the root level's own marker, hidden but counted.
     const rows = visibleRows(tree, {
       expanded: this.expandedTags,
       filter: query,

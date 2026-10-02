@@ -95,7 +95,7 @@ describe("coveringFolder", () => {
 
   it("folds case on both sides, and hands back the LIVE ancestor", () => {
     // The reason the panel shares this rather than writing its own: a picker
-    // that compared paths as typed would leave a covered row untinted and
+    // that compared paths as typed would leave a covered row unmarked and
     // clickable on exactly the vaults this folding exists for. The folder
     // named in the row's title has to be the one the user can see in the tree,
     // which is the live spelling, not the stored one.
