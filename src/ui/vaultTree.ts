@@ -95,7 +95,8 @@ export interface ViewOptions<K extends string = NodeKind> {
   /**
    * The most rows to return, overflow rows included. Absent means no limit.
    * Spent in the order the rows are drawn, so running out hides whatever comes
-   * last, and says how many at each level it cut. See `visibleRows`.
+   * last. Rows cut from a level that was drawn are counted by an overflow row.
+   * See `visibleRows`.
    */
   budget?: number;
 }
@@ -197,30 +198,35 @@ export type PickerRow<K extends string = NodeKind> = Row<K> | OverflowRow;
  * The rows to render, in order, within a budget.
  *
  * The tree is walked depth-first and each row is emitted as it is reached, so
- * opening a branch shows its children directly beneath it and the budget goes
- * to the branches the user opened, not to rows at the same depth elsewhere.
- * The cost is that a big branch drawn early can use the budget that later
- * siblings needed. Nothing is dropped silently for it: every parent whose
- * children were cut, the root level included, ends its list with an overflow
- * row at its children's depth that counts exactly how many it hid. Typing in
- * the filter is what brings those back.
+ * opening a branch shows its children directly beneath it, ahead of rows that
+ * sort after it. The cost is that a big branch drawn early can use the budget
+ * that later siblings needed, and a branch that sorts late can be reached with
+ * nothing left. When a parent is drawn open and only some of its children fit,
+ * the list ends with an overflow row at the children's depth that counts
+ * exactly how many were cut; the root level is cut and counted the same way.
+ * A parent that wants to be open and gets no room is the other case, covered
+ * below: it carries a flag instead of a count. Typing in the filter is what
+ * brings cut rows back.
  *
  * `rows.length <= budget` always holds, overflow rows included. An overflow
  * row costs a slot like any other, so a level that is cut spends `take + 1`:
  * its marker's slot is held back while a sibling is still to come, and the
  * last sibling needs no marker and holds none. A budget of 0 returns no rows.
  *
- * A parent that wants to be open is drawn open only when its children fit
- * together with a marker (or alone, if it has one child), because an open row
- * with nothing beneath it would tell a screen reader the branch is empty.
+ * A parent that wants to be open is drawn open only when at least one child
+ * fits, together with a marker if it has more than one, because an open row
+ * with nothing beneath it would tell a screen reader the branch is empty. The
+ * rest of its children, if they do not all fit, are counted by the marker.
  * Otherwise it is returned closed (`expanded: false`) and flagged
  * `budgetClosed`, even if the user or the filter asked for it open. In
- * depth-first order that is the exception: it happens to a parent reached
- * with almost nothing left, near the end of the budget. It is not offered as
+ * depth-first order that happens to a parent reached with almost nothing
+ * left, near the end of the budget. Its children are not counted by any
+ * marker: the flag and the panel's title stand in for it. It is not offered as
  * a caret, because opening it adds demand and frees nothing. What makes room
  * depends on the state. With a filter, expansion is forced and `expanded` is
  * ignored, so only narrowing the filter helps. Without one, closing an open
- * branch drawn earlier helps. The panel says whichever is true.
+ * branch drawn earlier helps if there is one, and typing a filter always does.
+ * The panel's wording is the one that is true in both states.
  *
  * The root level has no parent row to close, so a cut there keeps its marker,
  * paid for like any other.
@@ -328,14 +334,17 @@ export function visibleRows<K extends string = NodeKind>(
       const kids = node.children.filter(included);
       const hasChildren = kids.length > 0;
       const selfMatches = query !== "" && matches(node);
-      const shown = hasChildren ? shownChildren(kids, insideMatch || selfMatches) : [];
-      left -= 1 + reserve;
-      // A parent is opened only if its children AND, when they are more than
-      // one, a marker could follow; a share of one would be an open row with
-      // nothing under it, which tells a screen reader the branch is empty. It
-      // is returned closed and flagged `budgetClosed`, so the panel does not
-      // offer a caret. A row the user closed is not flagged: its caret works.
       const wantsOpen = hasChildren && (query !== "" || opts.expanded.has(node.path));
+      // Only a parent that wants to be open needs its children worked out; a
+      // filter makes that a walk over their subtrees.
+      const shown = wantsOpen ? shownChildren(kids, insideMatch || selfMatches) : [];
+      left -= 1 + reserve;
+      // A parent is opened only if one child fits, plus a marker when there
+      // are several to follow; a share of one slot for several would be an
+      // open row with nothing under it, which tells a screen reader the branch
+      // is empty. Otherwise it is returned closed and flagged `budgetClosed`,
+      // so the panel does not offer a caret. A row the user closed is not
+      // flagged: its caret works.
       const fits = shown.length > 0 && left >= (shown.length > 1 ? 2 : 1);
       const expanded = wantsOpen && fits;
       const budgetClosed = wantsOpen && shown.length > 0 && !fits;

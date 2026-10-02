@@ -114,9 +114,9 @@ describe("the picker's row budget", () => {
   });
 
   it("holds the budget on one folder of 199 folders, filtered or opened by hand", () => {
-    // The shape that produced 399 rows: level 0 is 1 row, level 1 is 199,
-    // together exactly 200, and each of the 199 then wanted a marker nobody
-    // had paid for.
+    // A shape that once produced 399 rows: level 0 is 1 row, level 1 is 199,
+    // together exactly 200, and each of the 199 wanted a marker nobody had
+    // paid for. Kept as a ceiling check on a level that exactly fills the budget.
     const entries: { path: string; kind: "file" | "folder" }[] = [folder("Notes")];
     for (let i = 0; i < 199; i++) {
       entries.push(folder(`Notes/d${i}`), file(`Notes/d${i}/n.md`));
@@ -224,10 +224,14 @@ describe("the picker's row budget, over generated trees", () => {
         expect(next && next.depth > r.depth, `${where}, open row ${r.path}`).toBe(true);
       });
 
-      // 5. A row is flagged exactly when the budget, not the user, kept it closed.
+      // 5. A row is flagged exactly when the budget, not the user, kept it
+      //    closed: open in the reference, closed here. And the flag is honest:
+      //    a flagged row has no marker of its own, so nothing is under it.
       for (const r of drawn) {
         const ref = reference.find((x) => x.path === r.path);
-        // Flagged exactly when the budget, not the user, kept it closed.
+        if (r.budgetClosed) {
+          expect(markers.some((m) => m.parent === r.path), `${where}, marker under ${r.path}`).toBe(false);
+        }
         expect(Boolean(r.budgetClosed), `${where}, flag on ${r.path}`).toBe(
           Boolean(ref?.expanded && !r.expanded)
         );

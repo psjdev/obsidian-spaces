@@ -599,11 +599,12 @@ describe("the picker's row cap", () => {
     expect(rowFor("Notes/d064").getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("offers closing other folders, not filtering, when no filter is active", () => {
-    // 200 subfolders of two notes each. Opening the first spends three rows
+  it("offers typing a filter, not narrowing one, when no filter is active", () => {
+    // 200 subfolders of two notes each. Opening the first spends two rows
     // that the folder at index 195 needed, so that one is drawn but cannot be
-    // opened. With no filter, closing the first is what makes room, and
-    // narrowing a filter that is not there is not.
+    // opened. With no filter there is nothing to narrow, so the title says to
+    // type one. It does not say to close folders: that is only true when some
+    // other folder is open.
     const WIDE: Record<string, NodeKind> = { Notes: "folder" };
     for (let i = 0; i < 200; i++) {
       const d = `Notes/d${String(i).padStart(3, "0")}`;
@@ -619,7 +620,7 @@ describe("the picker's row cap", () => {
     rowFor("Notes/d195").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
     rowFor("Notes/d000").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
     expect(rowFor("Notes/d195").getAttribute("title")).toBe(
-      "There is no room to show what is inside this folder. Close other folders to make room."
+      "There is no room to show what is inside this folder. Type in the filter to find what is inside."
     );
   });
 

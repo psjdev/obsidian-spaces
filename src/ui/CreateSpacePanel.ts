@@ -74,8 +74,8 @@ import { SEL } from "../explorer/selectors";
  * keeps a keystroke near 20 ms while still filling a tall pane several times
  * over.
  *
- * `visibleRows` spends this breadth-first, so running out hides the deepest
- * rows rather than whatever sorted last. See its docstring.
+ * `visibleRows` spends this depth-first, in the order rows are drawn, so
+ * running out hides whatever comes last in that order. See its docstring.
  */
 const MAX_PICKER_ROWS = 200;
 
@@ -1332,7 +1332,7 @@ export class CreateSpacePanel {
       filterActive: () => this.itemFilter.trim() !== "",
       budgetClosedTitle: () =>
         "There is no room to show what is inside this folder. " +
-        (this.itemFilter.trim() !== "" ? "Narrow the filter to make room." : "Close other folders to make room."),
+        (this.itemFilter.trim() !== "" ? "Narrow the filter to make room." : "Type in the filter to find what is inside."),
       drawName: (el, row) => {
         const icon = doc.win.createSpan();
         icon.className = "spaces-create-tree-icon";
@@ -1402,9 +1402,10 @@ export class CreateSpacePanel {
         el.setAttribute("aria-disabled", "true");
         el.setAttribute("aria-selected", "false");
         el.style.paddingLeft = `${row.depth * 14}px`;
-        // Worded by the same test as the budget-closed title beside it, so two
-        // rows in one state do not give different advice. Typing is always
-        // possible and narrowing is only possible once there is a filter.
+        // Branches on the same test as the budget-closed title beside it, and
+        // both give the same advice in each state: narrow the filter when one
+        // is typed, otherwise type one. Typing a filter helps whether or not
+        // any folder is open, which closing folders does not.
         const count = row.hidden === 1 ? "1 more" : `${row.hidden.toLocaleString()} more`;
         const it = row.hidden === 1 ? "it" : "them";
         el.textContent = adapter.filterActive()
@@ -1885,7 +1886,7 @@ export class CreateSpacePanel {
       filterActive: () => query.trim() !== "",
       budgetClosedTitle: () =>
         "There is no room to show what is inside this tag. " +
-        (query.trim() !== "" ? "Narrow the filter to make room." : "Close other tags to make room."),
+        (query.trim() !== "" ? "Narrow the filter to make room." : "Type in the filter to find what is inside."),
       drawName: (el, row) => {
         const label = doc.win.createSpan();
         label.className = "spaces-create-tree-name";
