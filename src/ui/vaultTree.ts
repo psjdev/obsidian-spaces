@@ -232,8 +232,8 @@ export type PickerRow<K extends string = NodeKind> = Row<K> | OverflowRow;
  * descendant that matches, so a deep hit brings its ancestors with it rather
  * than appearing rootless, and a kept node is force-expanded, because the
  * point of typing is to be shown the thing, and honouring a stale collapsed
- * state would hide the only row that matched. A node that matches on its own
- * name keeps its whole subtree, so typing a parent's name is a way to browse
+ * state would hide the only row that matched. A node that matches itself
+ * keeps its whole subtree, so typing a parent's name is a way to browse
  * into it rather than a way to hide its children.
  *
  * The match is against a node's own NAME, which is its last segment. In the
@@ -272,6 +272,11 @@ export function visibleRows<K extends string = NodeKind>(
   // asking about nesting, so it is matched against the whole path instead:
   // `project/at` found nothing before this, while the same query worked in
   // Settings, where the chip field has always matched the full path.
+  // The two rules are believed to produce the same rows: without a separator, a
+  // substring of a path lies wholly inside one segment, which is either this
+  // node's own name or an ancestor's, and an ancestor's match already shows the
+  // whole subtree. The gate is here to say what the code means, not to change
+  // what it does, so do not "simplify" it away as an oversight.
   const deep = query.includes("/");
   const matches = (node: VaultNode<K>): boolean =>
     (deep ? node.path : node.name).toLowerCase().includes(query);

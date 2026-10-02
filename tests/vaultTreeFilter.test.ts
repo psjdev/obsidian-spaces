@@ -6,7 +6,7 @@ const file = (path: string) => ({ path, kind: "file" as const });
 const tag = (path: string) => ({ path, kind: "tag" as const });
 
 const TAGS = buildVaultTree(
-  [tag("project"), tag("project/atlas"), tag("project/console"), tag("archive")],
+  [tag("project"), tag("project/atlas"), tag("project/console"), tag("project/atlas/phase-1"), tag("archive")],
   "tag",
   isBranchByChildren
 );
@@ -44,7 +44,11 @@ describe("the picker's filter", () => {
     expect(rows).toContain("project/atlas");
     expect(rows).not.toContain("archive");
     // `project` is kept as the ancestor of its matches, not matched itself.
-    expect(rows).toEqual(["project", "project/atlas", "project/console"]);
+    expect(rows).toEqual(["project", "project/atlas", "project/atlas/phase-1", "project/console"]);
+  });
+
+  it("a deep query keeps the matched node's whole subtree", () => {
+    expect(show(TAGS, "project/atlas")).toContain("project/atlas/phase-1");
   });
 
   it("a query matching nothing returns nothing rather than throwing", () => {
