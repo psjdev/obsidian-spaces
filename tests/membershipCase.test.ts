@@ -218,20 +218,74 @@ describe("removal matches the way visibility matches", () => {
   });
 });
 
-describe("adding does not duplicate a case-mismatched member", () => {
-  it("declines to add a second entry for a path already stored in another casing", async () => {
+describe("adding does not duplicate a member the space already holds", () => {
+  /**
+   * This describe used to drive `addAll`'s own case-insensitive dedupe through
+   * the menu: the selection below produced "Add 2 to Research", and the
+   * assertion was that clicking it left `Notes/A.md` with one entry rather
+   * than two.
+   *
+   * That route is gone, and deliberately. The menu now builds its add list
+   * from the rows an add would actually CHANGE, so neither of these two rows
+   * reaches `addAll` at all: `notes/a.md` resolves to the stored `Notes/A.md`
+   * and is therefore an exact member whatever the casing, and `inbox/today.md`
+   * is in the space through the `Inbox` folder member. The guarantee the old
+   * test was protecting is now made one layer earlier and is asserted as such.
+   *
+   * `addAll`'s `samePath` comparison still stands behind it as the write-side
+   * gate, and `tests/membership.test.ts` covers which rows the menu offers.
+   */
+  it("offers no Add at all when every selected row is already in the space", async () => {
     const { defs, ctx } = await makeCtx();
     const { menu, rows } = fakeMenu();
-    // A mixed selection is what makes the menu offer Add at all: `inbox/today.md`
-    // is visible by INHERITANCE from the `Inbox` folder member, so not every row
-    // is an exact member and `decorate` falls through to "Add 2 to Research".
-    // `notes/a.md` is already stored — as `Notes/A.md` — and must not gain a
-    // second entry for the same file.
     decorate(menu, ctx, [file("notes/a.md"), file("inbox/today.md")]);
-    await clickRow(rows, "Add ");
+    expect(rows.filter((r) => r.title.startsWith("Add ")).map((r) => r.title)).toEqual([]);
+    // And nothing was written, which is the point: the old behaviour added a
+    // redundant exact member for the inherited row.
     const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
-    expect(paths.filter((p) => p.toLowerCase() === "notes/a.md")).toHaveLength(1);
-    expect(paths).toContain("inbox/today.md");
+    expect(paths).toEqual(["Notes/A.md", "Inbox"]);
+  });
+
+  it("adds the one row that is not, and leaves the case-mismatched member alone", async () => {
+    // The discriminator for the assertion above: with a visitor in the
+    // selection there IS something to add, so "no Add entry" is a statement
+    // about these rows rather than about the menu never offering one.
+    const defs = new DefinitionStore({
+      read: async () => undefined,
+      write: async () => undefined,
+    });
+    await defs.mutate((d) => {
+      d.spaces = [RESEARCH];
+    });
+    const space = defs.get().spaces[0];
+    const ctx = {
+      defs,
+      controller: {
+        activeSpace: () => space,
+        // `notes/b.md` is open, so it renders as a visitor: visible, in the
+        // space in no other way, and the only addable row here.
+        currentSnapshot: () =>
+          buildVisibilitySnapshot(
+            vault,
+            space,
+            new Set(["notes/b.md"]),
+            compileIgnore([]),
+            new Set()
+          ),
+        dismissRevealed: () => undefined,
+      } as unknown as SpaceController,
+    };
+    const { menu, rows } = fakeMenu();
+    decorate(menu, ctx, [file("notes/a.md"), file("notes/b.md"), file("inbox/today.md")]);
+    // Singular, because one of the three rows is addable.
+    await clickRow(rows, "Add to Research");
+    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    // The exact list is the assertion. A `filter(...).toHaveLength(1)` on the
+    // casing used to sit here as well, carried over from when this test drove
+    // `addAll` directly; once the menu stopped offering the already-held row
+    // it could only ever pass, because that path is no longer submitted at
+    // all. A check that cannot fail reads like coverage and is not.
+    expect(paths).toEqual(["Notes/A.md", "Inbox", "notes/b.md"]);
   });
 });
 

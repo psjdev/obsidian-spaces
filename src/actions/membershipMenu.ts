@@ -139,14 +139,39 @@ export function decorate<T extends FileLike>(
     menu.addItem((i) => i.setTitle(label).setIcon("minus-circle").setDisabled(true));
   }
 
-  menu.addItem((i) =>
-    i
-      .setTitle(
-        visible.length === 1 ? `Add to ${space.name}` : `Add ${visible.length} to ${space.name}`
-      )
-      .setIcon("plus-circle")
-      .onClick(() => handlers.addAll(visible))
+  // What an add would actually change. Two kinds of row are already in the
+  // space and have to be left out:
+  //
+  //  - an EXACT member. (Reaching here at all means not every row is one,
+  //    since `allExact` returned above when they were.)
+  //  - an INHERITED one, which is in the space through the folder the disabled
+  //    entry above names. `addAll` dedupes against the space's path members
+  //    alone and never consults `inheritedFromFolder`, so adding one writes a
+  //    redundant exact member: nothing the user can see changes, and the
+  //    folder they would later remove no longer takes the row with it.
+  //
+  // Every other add path already refuses an inherited path — `main.ts`'s
+  // `activeFileToAdd` and `joinOnCreate`, and `spaceAddTargets`' `heldBy` —
+  // so this is the one that had drifted.
+  //
+  // Indexed against `decisions`, which was built from `visible` in order.
+  const addable = visible.filter(
+    (_, n) =>
+      !decisions[n].canRemoveMembership && decisions[n].reason !== "inherited-member"
   );
+  // Omitted entirely rather than disabled. The row above already says why the
+  // path is in the space, so a greyed "Add" beneath it would be a second
+  // sentence about the same fact.
+  if (addable.length > 0) {
+    menu.addItem((i) =>
+      i
+        .setTitle(
+          addable.length === 1 ? `Add to ${space.name}` : `Add ${addable.length} to ${space.name}`
+        )
+        .setIcon("plus-circle")
+        .onClick(() => handlers.addAll(addable))
+    );
+  }
 
   // A visitor is shown only because it is open, so it gets a way to
   // stop being shown that is distinct from membership -- nothing is added to
