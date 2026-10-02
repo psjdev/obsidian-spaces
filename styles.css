@@ -397,20 +397,37 @@
    `.is-selected` uses. Both had a 10% accent background, one hardcoded and
    one via `--background-modifier-active-hover`, which stock Obsidian defines
    as the same 10% accent mix, so the two states rendered identically and only
-   text weight told them apart. A theme narrowing `--text-accent` toward
-   `--text-normal` removed even that.
+   text color and weight told them apart. A theme narrowing `--text-accent`
+   toward `--text-normal` removed the color difference.
 
    An inset box-shadow, not a border: the row's indent is a computed
    `padding-left`, so a border would shift every covered row out of its column
    against its uncovered siblings.
 
-   After `:hover`, so the mark survives the pointer passing over it, and
-   `cursor: default` because the click is a no-op. A row that looks clickable
-   and does nothing is worse than one that says so. */
+   `cursor: default` because the click is a no-op, and no hover fill for the
+   same reason: the row used to suppress it with its own background, and
+   without this it would light up under the pointer while saying it is inert.
+   A row that looks clickable and does nothing is worse than one that says so.
+   `:not(.is-selected)` so a row that is both keeps the selected fill.
+
+   The focus ring is the same inset box-shadow property, so the plain
+   `:focus-visible` rule above loses to this one at equal specificity. The
+   combined rule stacks both: covered rows stay in the tab order so a keyboard
+   user can reach the title explaining why they are inert, and they need a
+   ring. */
 .spaces-create-tree-row.is-inherited {
   box-shadow: inset 2px 0 0 0 var(--interactive-accent);
   color: var(--text-muted);
   cursor: default;
+}
+.spaces-create-tree-row.is-inherited:focus-visible {
+  box-shadow:
+    inset 2px 0 0 0 var(--interactive-accent),
+    inset 0 0 0 2px var(--text-accent);
+}
+.spaces-create-tree-row.is-inherited:not(.is-selected):hover,
+.spaces-create-tree-row.is-overflow:hover {
+  background: transparent;
 }
 .spaces-create-tree-row.is-selected {
   background: var(--background-modifier-active-hover, var(--background-modifier-hover));
@@ -418,7 +435,8 @@
   font-weight: 600;
 }
 /* Stands in for rows the budget could not draw. Reads as a note, not a row to
-   act on. */
+   act on. Sets no box-shadow, so the base `:focus-visible` ring applies
+   unchanged if it ever takes focus. */
 .spaces-create-tree-row.is-overflow {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
