@@ -184,31 +184,98 @@ describe("styles.css — the elsewhere group's boundary", () => {
 });
 
 describe("picker row states", () => {
-  it("a covered row has an edge mark and no background of any kind", () => {
-    const row = document.createElement("div");
-    row.className = "spaces-create-tree-row is-inherited";
-    const matching = rules.filter((r) => row.matches(r.selector));
-    expect(matching.length).toBeGreaterThan(0);
-    // Every rule that can reach the element, not one named selector: a
-    // background arriving through any other rule would collide with
-    // `.is-selected` just the same. The real assertion is the CDP check
-    // (e2e/tint-collision.mjs).
-    for (const r of matching) {
-      for (let k = 0; k < r.style.length; k++) {
-        expect(r.style[k], r.selector).not.toMatch(/^background/);
-      }
-    }
-    expect(matching.some((r) => r.style.getPropertyValue("box-shadow") !== "")).toBe(true);
+  it("a selected row is told from a covered one by weight, which no theme supplies", () => {
+    // Both states are tinted on purpose: the tint is what groups a picked
+    // folder with the rows it brings in, and they are drawn as one block. So
+    // the tint cannot be the thing that separates them.
+    //
+    // That leaves the selected row's accent text and its weight. The color
+    // is theme-derived and a theme can narrow `--text-accent` toward
+    // `--text-normal`, which is exactly how these two states once became
+    // indistinguishable. The WEIGHT is a literal in this stylesheet, so it
+    // survives any theme. This pins the one difference a theme cannot take
+    // away; asserting the tints differ would be wrong, because they match by
+    // design.
+    const selected = document.createElement("div");
+    selected.className = "spaces-create-tree-row is-selected";
+    const covered = document.createElement("div");
+    covered.className = "spaces-create-tree-row is-inherited";
+
+    const weightOf = (el: HTMLElement): string =>
+      rules
+        .filter((r) => el.matches(r.selector) && !r.selector.includes(":"))
+        .map((r) => r.style.getPropertyValue("font-weight"))
+        .filter((v) => v !== "")
+        .join(" ");
+
+    expect(weightOf(selected)).toBe("600");
+    expect(weightOf(covered)).toBe("");
   });
 
-  it("a covered row keeps a focus ring beside its edge mark", () => {
-    const row = document.createElement("div");
-    row.className = "spaces-create-tree-row is-inherited";
-    const focus = rules.filter((r) => r.selector.includes("is-inherited") && r.selector.includes(":focus-visible"));
-    expect(focus.length).toBeGreaterThan(0);
-    const shadow = focus.map((r) => r.style.getPropertyValue("box-shadow")).join(" ");
-    expect(shadow).toContain("--interactive-accent");
-    expect(shadow).toContain("--text-accent");
+  it("a run of tinted rows squares its interior corners, so it draws as one block", () => {
+    // Read from the stylesheet TEXT, not through `rules`, and deliberately.
+    // jsdom's CSSOM drops a rule whose selector it cannot parse, and it
+    // cannot parse `:has()`. Obsidian's Chromium can, so the rule is live at
+    // runtime and invisible to every other test in this file. A text
+    // assertion is the only thing jsdom can offer here; the CDP check
+    // measures the corners that actually get painted.
+    const bottom = /:is\(\.is-selected, \.is-inherited\):has\(\s*\+ \.spaces-create-tree-row\.is-inherited\s*\)/.test(CSS);
+    const top = /:is\(\.is-selected, \.is-inherited\)\s*\+\s*\.spaces-create-tree-row\.is-inherited/.test(CSS);
+    expect(bottom, "forward-looking rule that squares the bottom corners").toBe(true);
+    expect(top, "sibling rule that squares the top corners").toBe(true);
+    expect(CSS).toContain("border-bottom-left-radius: 0");
+    expect(CSS).toContain("border-top-left-radius: 0");
+
+    // The join is on the next row being COVERED, never merely tinted. Two
+    // folders picked separately are two selections and must stay two pills;
+    // merging them would say they are one. A `:is(.is-selected,
+    // .is-inherited)` on the RIGHT of either combinator would do exactly
+    // that, so its absence is the assertion.
+    expect(bottom && !/:has\(\s*\+ \.spaces-create-tree-row:is\(/.test(CSS)).toBe(true);
+    expect(/\+\s*\.spaces-create-tree-row:is\(\.is-selected, \.is-inherited\)\s*\{/.test(CSS)).toBe(false);
+  });
+
+  it("merging a block is paint-only, so selecting a parent never moves a row", () => {
+    // The first version of this collapsed the margin to join two rows, and
+    // that MOVED them: a block of N rows lost (N-1) separators of height, so
+    // picking a parent pulled its children up and deselecting dropped them
+    // back. The separator is filled with a shadow instead.
+    //
+    // So the assertion is not "the gap closes" but "nothing in the merge rule
+    // can affect layout". Anything that reserves or removes space -- margin,
+    // padding, height, border-width, inset, position, transform -- reopens the
+    // bug, which is why this lists them rather than naming one.
+    const base = rules.filter((r) => r.selector === ".spaces-create-tree-row");
+    expect(base).toHaveLength(1);
+    expect(base[0].style.getPropertyValue("margin-bottom")).not.toBe("");
+
+    // jsdom drops `:has()` rules, so the merge rule is unreachable through
+    // `rules` and has to be read out of the text. See the test above.
+    const merge = /:has\(\s*\+ \.spaces-create-tree-row\.is-inherited\s*\)\s*\{([^}]*)\}/.exec(CSS);
+    expect(merge, "the merge rule").not.toBeNull();
+    const body = merge![1];
+    expect(body).toMatch(/box-shadow:/);
+    for (const prop of ["margin", "padding", "height", "border-width", "border-bottom-width", "top", "transform"]) {
+      expect(body, `merge rule must not set ${prop}`).not.toMatch(new RegExp(`(^|[;\\s])${prop}\\s*:`));
+    }
+  });
+
+  it("a covered row keeps the plain focus ring, because it sets no shadow of its own", () => {
+    // Covered rows stay in the tab order so a keyboard user can reach the
+    // title explaining why they are inert, so they need a ring. The ring is
+    // an inset box-shadow on `.spaces-create-tree-row:focus-visible`, and
+    // that rule and `.spaces-create-tree-row.is-inherited` have equal
+    // specificity, so a shadow on the covered rule would win on source order
+    // and silently erase the ring. It did once. This pins the absence.
+    const covered = document.createElement("div");
+    covered.className = "spaces-create-tree-row is-inherited";
+    const own = rules.filter((r) => covered.matches(r.selector) && !r.selector.includes(":"));
+    for (const r of own) {
+      expect(r.style.getPropertyValue("box-shadow"), r.selector).toBe("");
+    }
+    const ring = rules.filter((r) => r.selector === ".spaces-create-tree-row:focus-visible");
+    expect(ring).toHaveLength(1);
+    expect(ring[0].style.getPropertyValue("box-shadow")).toContain("--text-accent");
   });
 });
 
