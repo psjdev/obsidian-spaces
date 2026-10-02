@@ -211,3 +211,17 @@ describe("picker row states", () => {
     expect(shadow).toContain("--text-accent");
   });
 });
+
+describe("picker column layout", () => {
+  it("the filter box does not shrink, so its height cannot track the list below it", () => {
+    // The shape `CreateSpacePanel` builds: the filter is a bare `.text-input`
+    // child of `.spaces-create-items`, with no class of its own.
+    const view = document.createElement("div");
+    view.className = "spaces-create-items";
+    const filter = document.createElement("input");
+    filter.className = "text-input";
+    view.appendChild(filter);
+    const matching = rules.filter((r) => filter.matches(r.selector));
+    expect(matching.some((r) => r.style.getPropertyValue("flex-shrink") === "0")).toBe(true);
+  });
+});

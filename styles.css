@@ -334,6 +334,19 @@
   flex: 1 1 auto;
 }
 
+/* The filter box is a fixed-size control, so it must not shrink. It sits in a
+   height-constrained flex column, and `flex-shrink` defaults to 1: when the
+   content below it overflowed the column, the browser shrank the input along
+   with the tree. The Vault list is marginally taller than the Tags list, so
+   the box measured 27.2px in one body and 30px in the other (Obsidian 1.13.7,
+   10,000-note vault). The tree is the child meant to absorb that: it has
+   `flex: 1 1 auto` and its own overflow handling. The Vault / Tags buttons
+   row is not given the same rule because its own content height already
+   serves as its automatic minimum size, and it measured 30px in both bodies. */
+.spaces-create-items > .text-input {
+  flex-shrink: 0;
+}
+
 /* The tree. `flex: 1` rather than a fixed max-height, so it grows into the
    pane and scrolls only when it runs out of room. */
 /* The picker is a view of the file tree, so it is typeset as one.
