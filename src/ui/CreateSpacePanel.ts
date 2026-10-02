@@ -64,16 +64,15 @@ import { SEL } from "../explorer/selectors";
  * click into alignment when an icon is nearly there, and no more.
  */
 /**
- * How many rows the item picker will draw at once.
+ * How many rows the picker will draw at once.
  *
  * Measured on a 20,000-note vault: cost tracks the row count almost exactly,
- * about 12 rows per millisecond, and a single "a" matched 18,954 rows — over a
- * second of work for one keystroke, repeated on the next. `buildVaultTree` was
- * 25 ms of that, so the rows are the cost and nothing else is worth capping.
+ * about 12 rows per millisecond, and a single "a" matched 18,954 rows. 200
+ * keeps a keystroke near 20 ms while still filling a tall pane several times
+ * over.
  *
- * 200 keeps a keystroke near 20 ms while still filling a tall pane several
- * times over. `visibleRows` still computes every match, so the count the
- * overflow row reports is exact rather than an estimate.
+ * `visibleRows` spends this breadth-first, so running out hides the deepest
+ * rows rather than whatever sorted last. See its docstring.
  */
 const MAX_PICKER_ROWS = 200;
 
@@ -1072,28 +1071,6 @@ export class CreateSpacePanel {
    * the filter field on every keystroke.
    */
   /**
-   * Tells the user how many matches were not drawn, or takes the message away
-   * when everything fits.
-   *
-   * Appended to the scroll box rather than to the row container, because that
-   * container is the `role="tree"` and a tree may own only `treeitem`s.
-   */
-  private renderOverflowNotice(hidden: number): void {
-    const box = this.treeEl?.parentElement;
-    if (!box) return;
-    const existing = box.querySelector(".spaces-create-tree-more");
-    if (hidden <= 0) {
-      existing?.remove();
-      return;
-    }
-    const el = existing ?? box.ownerDocument.win.createDiv();
-    el.className = "spaces-create-tree-more";
-    el.setAttribute("role", "status");
-    el.textContent = `${hidden.toLocaleString()} more — keep typing to narrow`;
-    if (!existing) box.appendChild(el);
-  }
-
-  /**
    * Draws whichever body the two buttons above the window ask for.
    *
    * Which one that is lives in `readPickerBody`, not here, so the rule can be
@@ -1139,14 +1116,13 @@ export class CreateSpacePanel {
       ? new Set(this.state.root === "" ? [] : [this.state.root])
       : new Set(this.state.items.flatMap((i) => (i.kind === "tag" ? [] : [i.path])));
 
-    const matched = visibleRows(tree, {
+    const rows = visibleRows(tree, {
       expanded: this.expandedFolders,
       filter: this.itemFilter,
       selected,
       onlyKind: this.state.folderMode ? "folder" : null,
+      budget: MAX_PICKER_ROWS,
     });
-    const rows = matched.slice(0, MAX_PICKER_ROWS);
-    this.renderOverflowNotice(matched.length - rows.length);
     // Built once per draw rather than once per row: the list redraws on every
     // keystroke and holds up to MAX_PICKER_ROWS rows, none of which changes the
     // member list. Folder mode takes one root and keeps no member list, so
@@ -1166,6 +1142,20 @@ export class CreateSpacePanel {
     }
 
     for (const row of rows) {
+      if (row.kind === "overflow") {
+        const el = doc.win.createDiv();
+        el.className = "spaces-create-tree-row is-overflow";
+        el.setAttribute("role", "treeitem");
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("aria-selected", "false");
+        el.style.paddingLeft = `${row.depth * 14}px`;
+        el.textContent =
+          row.hidden === 1
+            ? "1 more, narrow the filter to see it"
+            : `${row.hidden.toLocaleString()} more, narrow the filter to see them`;
+        host.appendChild(el);
+        continue;
+      }
       const el = doc.win.createDiv();
       el.className = "spaces-create-tree-row";
       el.setAttribute("role", "treeitem");
@@ -1554,7 +1544,6 @@ export class CreateSpacePanel {
     host.replaceChildren();
 
     const message = (text: string): void => {
-      this.renderOverflowNotice(0);
       const empty = doc.win.createDiv();
       empty.className = "spaces-create-tree-empty";
       empty.textContent = text;
@@ -1591,17 +1580,16 @@ export class CreateSpacePanel {
       "tag",
       isBranchByChildren
     );
-    const matched = visibleRows(tree, {
+    // The same budget the item tree uses, for the same reason. It cannot bite
+    // the collapsed view, which is a handful of roots; it is here for a branch
+    // like `topic` with its 401 children, which now says how many are missing
+    // inside the branch rather than deleting the roots that sort after it.
+    const rows = visibleRows(tree, {
       expanded: this.expandedTags,
       filter: query,
       selected: chosen,
+      budget: MAX_PICKER_ROWS,
     });
-    // The same cap and the same notice the item tree uses, for the same reason
-    // and so both bodies truncate alike. It cannot bite the collapsed view,
-    // which is a handful of roots; it is here for a branch like `topic` with
-    // its 401 children, and the notice says how many are missing.
-    const rows = matched.slice(0, MAX_PICKER_ROWS);
-    this.renderOverflowNotice(matched.length - rows.length);
     if (rows.length === 0) {
       message("No matching tag");
       return;
@@ -1610,12 +1598,30 @@ export class CreateSpacePanel {
     // Reached once per draw, not once per row: the accessor hands back the
     // engine's current snapshot, and `pathsMatching` is a map lookup on it.
     const index = this.deps.tagIndex();
+    // Overflow rows carry no tag, so they are not counted; they are drawn from
+    // `rows` in order and the counted rows are consumed alongside them.
     const counted = countTagRows(
-      rows.map((row) => ({ ...row, tag: row.path })),
+      rows.flatMap((row) => (row.kind === "overflow" ? [] : [{ ...row, tag: row.path }])),
       (tag) => index.pathsMatching(tag).length
     );
+    let nextCounted = 0;
 
-    for (const row of counted) {
+    for (const slot of rows) {
+      if (slot.kind === "overflow") {
+        const el = doc.win.createDiv();
+        el.className = "spaces-create-tree-row is-overflow";
+        el.setAttribute("role", "treeitem");
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("aria-selected", "false");
+        el.style.paddingLeft = `${slot.depth * 14}px`;
+        el.textContent =
+          slot.hidden === 1
+            ? "1 more, narrow the filter to see it"
+            : `${slot.hidden.toLocaleString()} more, narrow the filter to see them`;
+        host.appendChild(el);
+        continue;
+      }
+      const row = counted[nextCounted++];
       const el = doc.win.createDiv();
       // Both classes: the tree's row rules are the layout, and the tag class
       // carries only what differs.

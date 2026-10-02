@@ -626,52 +626,68 @@ describe("the picker's row cap", () => {
     folders: { allPaths: () => Object.keys(BIG), kindOf: (p: string) => BIG[p] ?? null },
   };
 
-  it("renders at most 200 rows", () => {
+  const typeNote = (): HTMLInputElement => {
+    const f = byKey("item-filter") as HTMLInputElement;
+    f.value = "note";
+    f.dispatchEvent(new Event("input", { bubbles: true }));
+    return f;
+  };
+  const overflowRows = (): HTMLElement[] =>
+    Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-tree-row.is-overflow"));
+
+  it("renders at most 200 rows, the overflow row among them", () => {
     makeHarness(bigDeps);
     byKey("mode-curate").click();
-    (byKey("item-filter") as HTMLInputElement).value = "note";
-    byKey("item-filter").dispatchEvent(new Event("input", { bubbles: true }));
-    expect(rows().length).toBe(200);
+    typeNote();
+    // 199 real rows and the marker that stands in for the rest: the marker
+    // spends a slot of the budget like any row.
+    expect(rows().length).toBe(199);
+    expect(rows().length + overflowRows().length).toBe(200);
   });
 
-  it("says how many it did not render", () => {
+  it("says how many it did not render, inside the branch it cut", () => {
     makeHarness(bigDeps);
     byKey("mode-curate").click();
-    (byKey("item-filter") as HTMLInputElement).value = "note";
-    byKey("item-filter").dispatchEvent(new Event("input", { bubbles: true }));
-    const more = panelEl().querySelector(".spaces-create-tree-more");
-    // 500 files + the folder that holds them, less the 200 shown.
-    expect(more?.textContent).toContain("301");
-    expect(more?.textContent).toMatch(/keep typing/i);
+    typeNote();
+    const [more] = overflowRows();
+    // 500 files + the folder that holds them, less the 198 files drawn under
+    // it and the folder itself. The folder is the one root, so every row that
+    // was cut was a child of it.
+    expect(more?.textContent).toBe("302 more, narrow the filter to see them");
+    expect(more?.style.paddingLeft).toBe("14px");
   });
 
-  it("keeps the overflow row out of the tree's own children", () => {
-    // A `role="tree"` may only own `treeitem`s; a stray child makes assistive
-    // tech miscount the list.
+  it("draws the overflow row as a disabled tree item that takes no input", () => {
+    // A `role="tree"` may only own `treeitem`s, and the marker stands in for
+    // rows rather than being one: not selectable, not focusable.
     makeHarness(bigDeps);
     byKey("mode-curate").click();
-    (byKey("item-filter") as HTMLInputElement).value = "note";
-    byKey("item-filter").dispatchEvent(new Event("input", { bubbles: true }));
-    const more = panelEl().querySelector(".spaces-create-tree-more");
+    typeNote();
+    const [more] = overflowRows();
     const treeNode = panelEl().querySelector("[role='tree']");
-    expect(more).not.toBeNull();
-    expect(more?.parentElement).not.toBe(treeNode);
+    expect(more?.parentElement).toBe(treeNode);
+    expect(more?.getAttribute("role")).toBe("treeitem");
+    expect(more?.getAttribute("aria-disabled")).toBe("true");
+    expect(more?.getAttribute("aria-selected")).toBe("false");
+    expect(more?.hasAttribute("tabindex")).toBe(false);
+    more?.click();
+    expect(overflowRows().length).toBe(1);
+    expect(panelEl().querySelector(".spaces-create-tree-more")).toBeNull();
   });
 
   it("says nothing when everything fits", () => {
     makeHarness();
     byKey("mode-curate").click();
-    expect(panelEl().querySelector(".spaces-create-tree-more")).toBeNull();
+    expect(overflowRows()).toHaveLength(0);
   });
 
-  it("drops the notice again once the filter narrows", () => {
+  it("drops the overflow row again once the filter narrows", () => {
     makeHarness(bigDeps);
     byKey("mode-curate").click();
-    const f = byKey("item-filter") as HTMLInputElement;
-    f.value = "note"; f.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(panelEl().querySelector(".spaces-create-tree-more")).not.toBeNull();
+    const f = typeNote();
+    expect(overflowRows().length).toBe(1);
     f.value = "note-499"; f.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(panelEl().querySelector(".spaces-create-tree-more")).toBeNull();
+    expect(overflowRows()).toHaveLength(0);
     expect(rows().length).toBeLessThan(200);
   });
 });
@@ -790,7 +806,7 @@ describe("the Items and Tags buttons under the filter box", () => {
     caret.click();
   };
   const overflow = (): string | null =>
-    panelEl().querySelector(".spaces-create-tree-more")?.textContent ?? null;
+    panelEl().querySelector(".spaces-create-tree-row.is-overflow")?.textContent ?? null;
   const summary = (): string =>
     panelEl().querySelector(".spaces-create-summary")?.textContent ?? "";
 
@@ -999,19 +1015,20 @@ describe("the Items and Tags buttons under the filter box", () => {
     const h = makeHarness({ tags: { knownTags: () => many } });
     openCurated();
     showTags();
-    expect(tagRows().length).toBe(200);
-    expect(h.counted.length).toBe(200);
+    // 199 tags and the overflow row that spends the 200th slot.
+    expect(tagRows().length).toBe(199);
+    expect(h.counted.length).toBe(199);
     expect(h.counted).toEqual(tagRows().map((r) => r.dataset.tag));
   });
 
-  it("says how many rows the cap kept back, in the notice the item tree uses", () => {
+  it("says how many rows the cap kept back, in an overflow row like the item tree's", () => {
     // The cap is a safety net for an expanded branch, not something the
     // collapsed view should ever meet, so the user is told when it bites.
     const many = Array.from({ length: 250 }, (_, i) => `#t${String(i).padStart(3, "0")}`);
     makeHarness({ tags: { knownTags: () => many } });
     openCurated();
     showTags();
-    expect(overflow()).toMatch(/^50 more/);
+    expect(overflow()).toBe("51 more, narrow the filter to see them");
   });
 
   it("reaches for the index once per draw, not once per row", () => {

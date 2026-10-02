@@ -52,7 +52,7 @@ export interface VaultNode<K extends string = NodeKind> {
   children: VaultNode<K>[];
 }
 
-interface Row<K extends string = NodeKind> {
+export interface Row<K extends string = NodeKind> {
   path: string;
   name: string;
   kind: K;
@@ -65,7 +65,7 @@ interface Row<K extends string = NodeKind> {
   selected: boolean;
 }
 
-interface ViewOptions<K extends string = NodeKind> {
+export interface ViewOptions<K extends string = NodeKind> {
   /** Paths the user has opened. Ignored for a branch a filter forces open. */
   expanded: ReadonlySet<string>;
   /** Free text; empty means no filtering. */
@@ -82,6 +82,12 @@ interface ViewOptions<K extends string = NodeKind> {
    * not inherit the word "folders" for rows that are not folders.
    */
   onlyKind?: K | null;
+  /**
+   * The most rows to return, overflow rows included. Absent means no limit.
+   * Spent breadth-first, so running out hides the deepest rows rather than
+   * whatever sorted last. See `visibleRows`.
+   */
+  budget?: number;
 }
 
 /**
@@ -166,15 +172,46 @@ export function buildVaultTree<K extends string = NodeKind>(
   return roots;
 }
 
+/** A row standing in for children the budget could not draw. */
+export interface OverflowRow {
+  kind: "overflow";
+  /** The parent whose children were cut, or "" for the root level. */
+  parent: string;
+  /** How many of that parent's children are not drawn. */
+  hidden: number;
+  depth: number;
+}
+export type PickerRow<K extends string = NodeKind> = Row<K> | OverflowRow;
+
 /**
- * The rows to render, in order.
+ * The rows to render, in order, within a budget.
+ *
+ * The budget is allocated BREADTH-FIRST and the survivors are emitted
+ * depth-first. That separation is the whole point. Allocating depth-first,
+ * which is what slicing a flat pre-order list does, spends the budget on one
+ * expanded branch's children and silently deletes the roots that sort after
+ * it: expanding `topic` on a real vault removed four unrelated root tags from
+ * the tree, with nothing on screen to say so and a notice that said "keep
+ * typing to narrow", which does not bring a root back.
+ *
+ * Allocating breadth-first gives the invariant instead: a row at depth N is
+ * only ever dropped once every row at depth N-1 has been drawn. A branch that
+ * cannot fit its children says so where its children would be.
+ *
+ * The budget stays at the measured 200. Its size was never the defect.
+ *
+ * An overflow row costs a slot of the budget like any other row, so a parent
+ * that is cut hands over one slot less than its share and spends it on the
+ * marker. The one exception is a level the budget never reached at all: its
+ * parents get a marker each even with nothing left to pay for it, because a
+ * branch that opens onto silence is the very defect this exists to remove.
  *
  * Without a filter this is a plain walk: a node's children appear only if the
  * node is in `expanded`.
  *
  * With one, two rules apply together. A node is KEPT if it matches or has a
- * descendant that matches — so a deep hit brings its ancestors with it rather
- * than appearing rootless — and a kept node is force-expanded, because the
+ * descendant that matches, so a deep hit brings its ancestors with it rather
+ * than appearing rootless, and a kept node is force-expanded, because the
  * point of typing is to be shown the thing, and honouring a stale collapsed
  * state would hide the only row that matched. A node that matches on its own
  * name keeps its whole subtree, so typing a parent's name is a way to browse
@@ -189,11 +226,22 @@ export function buildVaultTree<K extends string = NodeKind>(
  */
 export function visibleRows<K extends string = NodeKind>(
   tree: readonly VaultNode<K>[],
+  opts: ViewOptions<K> & { budget: number }
+): PickerRow<K>[];
+// Without a budget nothing is ever cut, so no overflow row can appear. Saying
+// so in the type spares every caller that passes none from narrowing a row
+// kind that cannot occur.
+export function visibleRows<K extends string = NodeKind>(
+  tree: readonly VaultNode<K>[],
+  opts: ViewOptions<K> & { budget?: undefined }
+): Row<K>[];
+export function visibleRows<K extends string = NodeKind>(
+  tree: readonly VaultNode<K>[],
   opts: ViewOptions<K>
-): Row<K>[] {
+): PickerRow<K>[] {
   const query = opts.filter.trim().toLowerCase();
-  const rows: Row<K>[] = [];
   const only = opts.onlyKind ?? null;
+  const budget = opts.budget ?? Number.POSITIVE_INFINITY;
 
   const included = (node: VaultNode<K>): boolean => only === null || node.kind === only;
   const matches = (node: VaultNode<K>): boolean => node.name.toLowerCase().includes(query);
@@ -202,18 +250,98 @@ export function visibleRows<K extends string = NodeKind>(
   const keep = (node: VaultNode<K>): boolean =>
     included(node) && (query === "" || matches(node) || node.children.some(keep));
 
-  const walk = (nodes: readonly VaultNode<K>[], depth: number, insideMatch: boolean): void => {
-    for (const node of nodes) {
-      if (!included(node)) continue;
-      const selfMatches = query !== "" && matches(node);
-      // Inside a matched ancestor everything is shown; that is what makes a
-      // parent's name a way in rather than a filter that empties it.
-      const shown = query === "" || insideMatch || selfMatches || node.children.some(keep);
-      if (!shown) continue;
+  /** One parent's drawable children, with the context the emit phase needs. */
+  interface Level {
+    parent: string;
+    depth: number;
+    nodes: VaultNode<K>[];
+    insideMatch: boolean;
+  }
 
-      const children = node.children.filter(included);
-      const hasChildren = children.length > 0;
+  // Inside a matched ancestor everything is shown; that is what makes a
+  // parent's name a way in rather than a filter that empties it.
+  const shownChildren = (nodes: readonly VaultNode<K>[], insideMatch: boolean): VaultNode<K>[] =>
+    nodes.filter((node) => {
+      if (!included(node)) return false;
+      if (query === "" || insideMatch) return true;
+      return matches(node) || node.children.some(keep);
+    });
+
+  // Phase 1: hand out the budget level by level, shallowest first.
+  const survivors = new Set<VaultNode<K>>();
+  const cut = new Map<string, number>();
+  let left = budget;
+  let level: Level[] = [
+    { parent: "", depth: 0, nodes: shownChildren(tree, false), insideMatch: false },
+  ];
+
+  while (level.length > 0 && left > 0) {
+    const wanted = level.reduce((n, l) => n + l.nodes.length, 0);
+    if (wanted <= left) {
+      // The whole level fits.
+      for (const l of level) for (const n of l.nodes) survivors.add(n);
+      left -= wanted;
+    } else {
+      // Split what remains evenly, so no one parent starves its siblings.
+      // Smallest first, so what a small parent does not use goes back to the
+      // pool for the larger ones rather than being wasted. An overflow row
+      // costs a slot too, which is why each cut parent reserves one.
+      let pool = left;
+      const open = level
+        .filter((l) => l.nodes.length > 0)
+        .sort((a, b) => a.nodes.length - b.nodes.length);
+      open.forEach((l, i) => {
+        const share = Math.floor(pool / (open.length - i));
+        if (l.nodes.length <= share) {
+          for (const n of l.nodes) survivors.add(n);
+          pool -= l.nodes.length;
+          return;
+        }
+        const take = Math.max(0, share - 1);
+        for (let k = 0; k < take; k++) survivors.add(l.nodes[k]);
+        cut.set(l.parent, l.nodes.length - take);
+        pool -= take + 1;
+      });
+      level = [];
+      break;
+    }
+    // Descend only into survivors that are expanded.
+    const next: Level[] = [];
+    for (const l of level) {
+      for (const node of l.nodes) {
+        if (!survivors.has(node)) continue;
+        const kids = node.children.filter(included);
+        if (kids.length === 0) continue;
+        const expanded = query !== "" || opts.expanded.has(node.path);
+        if (!expanded) continue;
+        const selfMatches = query !== "" && matches(node);
+        const inside = l.insideMatch || selfMatches;
+        const shown = shownChildren(kids, inside);
+        if (shown.length > 0) {
+          next.push({ parent: node.path, depth: l.depth + 1, nodes: shown, insideMatch: inside });
+        }
+      }
+    }
+    level = next;
+  }
+  // The budget ran out exactly at a level boundary: every parent still waiting
+  // on children gets its marker rather than silence.
+  for (const l of level) cut.set(l.parent, l.nodes.length);
+
+  // Phase 2: emit the survivors in pre-order, which is what a tree looks like.
+  const rows: PickerRow<K>[] = [];
+  const emit = (
+    nodes: readonly VaultNode<K>[],
+    depth: number,
+    parent: string,
+    insideMatch: boolean
+  ): void => {
+    for (const node of nodes) {
+      if (!survivors.has(node)) continue;
+      const kids = node.children.filter(included);
+      const hasChildren = kids.length > 0;
       const expanded = hasChildren && (query !== "" || opts.expanded.has(node.path));
+      const selfMatches = query !== "" && matches(node);
       rows.push({
         path: node.path,
         name: node.name,
@@ -223,11 +351,21 @@ export function visibleRows<K extends string = NodeKind>(
         expanded,
         selected: opts.selected.has(node.path),
       });
-      if (expanded) walk(children, depth + 1, insideMatch || selfMatches);
+      if (expanded) {
+        emit(
+          shownChildren(kids, insideMatch || selfMatches),
+          depth + 1,
+          node.path,
+          insideMatch || selfMatches
+        );
+      }
+    }
+    const hidden = cut.get(parent);
+    if (hidden !== undefined && hidden > 0) {
+      rows.push({ kind: "overflow", parent, hidden, depth });
     }
   };
-
-  walk(tree, 0, false);
+  emit(shownChildren(tree, false), 0, "", false);
   return rows;
 }
 
