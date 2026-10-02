@@ -280,6 +280,46 @@ describe("pause-filtering", () => {
     expect(h.leafLookups()).toBeGreaterThan(before);
   });
 
+  it("gates the reorder drag, so a drop while paused writes nothing", () => {
+    // `setFilteringPaused` releases the sort seam but leaves `DragOrdering`
+    // bound to the explorer. With the gesture still enabled a same-parent drop
+    // was claimed and wrote a new order, against a tree that is no longer
+    // ordered by us: nothing moved on screen and `data.json` grew anyway.
+    // `orderingScope.ts` names that failure in its header.
+    expect(h.plugin["dragDeps"]().enabled()).toBe(true);
+    invoke(h.plugin, "pause-filtering", false);
+    expect(h.plugin["dragDeps"]().enabled()).toBe(false);
+    invoke(h.plugin, "pause-filtering", false);
+    expect(h.plugin["dragDeps"]().enabled()).toBe(true);
+  });
+
+  it("clears the dimming while paused, and puts it back on resume", () => {
+    // The pause promises the whole vault. The adapter paints
+    // `spaces-scaffold`/`spaces-visitor` from the ACTIVE space's snapshot, and
+    // those words describe nothing in an unfiltered tree -- so the user was
+    // told the filter was off while rows stayed greyed and italicised for no
+    // visible reason.
+    const applied: (object | null)[] = [];
+    const snap = { visiblePaths: () => new Set<string>(), decisionFor: () => undefined };
+    h.plugin["controller"] = {
+      currentSnapshot: () => snap,
+    } as unknown as SpacesPlugin["controller"];
+    h.plugin["adapter"] = {
+      apply: (s: object | null) => {
+        applied.push(s);
+        return 0;
+      },
+    } as unknown as SpacesPlugin["adapter"];
+
+    invoke(h.plugin, "pause-filtering", false);
+    expect(applied).toEqual([null]);
+    invoke(h.plugin, "pause-filtering", false);
+    // Not merely "called again": the snapshot itself, or the dimming stays off
+    // for the rest of the session. Nothing else re-seeds the adapter -- its own
+    // MutationObserver re-reads whatever `apply` last stored.
+    expect(applied[1]).toBe(snap);
+  });
+
   it("still reports membership while paused — the data is unchanged", () => {
     invoke(h.plugin, "pause-filtering", false);
     expect(h.plugin.api.listSpaces().map((s) => s.id)).toEqual(["research"]);

@@ -423,8 +423,8 @@ export default class SpacesPlugin extends Plugin {
       // every write.
       new Notice(
         outcome.futureSchema
-          ? "Spaces: settings are from a newer version. Showing all files, and not saving changes."
-          : `Spaces: settings could not be read (${outcome.error}). Showing all files, and not saving changes.`
+          ? "Spaces: settings are from a newer version. Showing all notes and folders, and not saving changes."
+          : `Spaces: settings could not be read (${outcome.error}). Showing all notes and folders, and not saving changes.`
       );
     }
 
@@ -563,7 +563,7 @@ export default class SpacesPlugin extends Plugin {
     } catch (e) {
       console.error("Spaces: failed to start; the file tree is unfiltered", e);
       new Notice(
-        "Spaces: failed to start — the file tree is showing every note, " +
+        "Spaces: failed to start. The file tree is showing every note, " +
           "unfiltered. Your spaces are untouched. See the developer console " +
           "for the error, then reload the plugin."
       );
@@ -579,9 +579,10 @@ export default class SpacesPlugin extends Plugin {
       if (this.explorerHealthWarned) return;
       this.explorerHealthWarned = true;
       new Notice(
-        "Spaces: stopped de-emphasising scaffold and visitor rows — the file " +
-          "explorer layout was not recognised. Spaces still filter the tree; only " +
-          "the dimming stopped."
+        "Spaces: dimming is off. Parent folders, and notes you open from " +
+          "outside this space, now look the same as the space's own notes and " +
+          "folders. Filtering is unaffected. Reload Obsidian to try again, and " +
+          "check for a Spaces update if the dimming stays off."
       );
     });
 
@@ -1173,8 +1174,32 @@ export default class SpacesPlugin extends Plugin {
     this.filteringPaused = paused;
     if (paused) {
       this.teardownOrdering();
+      // The dimming is the ADAPTER's, not the seam's, so releasing the seam
+      // above does not stop it. Without this the whole vault renders (which is
+      // what the Notice below promises) with the active space's scaffold and
+      // visitor rows still greyed and italicised, against a tree where those
+      // words mean nothing: rows dimmed for a reason the user cannot see.
+      //
+      // Clearing here is only half of it: `applyAdapterSnapshot` holds the
+      // paused state, so the next recompute cannot paint them back. See its
+      // comment for why the guard lives there and not at this call site.
+      this.applyAdapterSnapshot(null);
     } else {
       this.ensureOrderingPatched();
+      // And put it back, explicitly. Nothing else re-seeds the adapter:
+      // `applyFilterAndOrdering` below only asks the explorer to re-sort, and
+      // the adapter's MutationObserver re-reads the same null this method
+      // wrote on the way in. `currentSnapshot()` is null in *All*, which is
+      // the correct answer there and the one `apply` already expects.
+      //
+      // Reached through `applyAdapterSnapshot` rather than `adapter.apply`
+      // directly, because that helper exists to stop the second argument
+      // being dropped, and because `filteringPaused` is already false by this
+      // line so its guard lets this through.
+      //
+      // Optional on the controller for the same reason `start()`'s repaint
+      // steps are: the resume can be reached before `start()` has built one.
+      this.applyAdapterSnapshot(this.controller?.currentSnapshot() ?? null);
       this.applyFilterAndOrdering();
     }
     // The marker describes what the tree IS, so it must not claim a filtered
@@ -1182,7 +1207,7 @@ export default class SpacesPlugin extends Plugin {
     this.syncSpaceSurface();
     new Notice(
       paused
-        ? "Spaces: filtering paused — the file explorer is showing the whole vault. " +
+        ? "Spaces: filtering paused. The file explorer is showing the whole vault. " +
           "Run the command again to resume."
         : "Spaces: filtering resumed."
     );
@@ -1448,7 +1473,7 @@ export default class SpacesPlugin extends Plugin {
     outcome: SwitchOutcome | { kind: "aborted"; reason: string }
   ): void {
     if (outcome.kind === "aborted") {
-      new Notice("Spaces: could not switch space — the layout change failed, so you are still in the previous space.");
+      new Notice("Spaces: could not switch space. The layout change failed, so you are still in the previous space.");
     } else if (outcome.kind === "rolled-back") {
       new Notice("Spaces: that space's saved layout could not be restored; kept the previous one.");
     } else if (outcome.kind === "failed-open") {
@@ -2121,7 +2146,21 @@ export default class SpacesPlugin extends Plugin {
    * earlier moment this method might have been created.
    */
   private applyAdapterSnapshot(snap: VisibilitySnapshot | null): void {
-    this.adapter.apply(snap, this.elsewhereFirstPath());
+    // Paused means the tree is the whole vault, so there is no space whose
+    // scaffold and visitor rows it would make sense to dim. Clearing on pause
+    // alone is not enough: `onSnapshotApplied` reaches here on every
+    // `file-open`, every coalesced vault flush and every `layout-change`, and
+    // `SpaceController` knows nothing about the pause, so it keeps handing
+    // over a live snapshot. Opening a note is the ordinary thing to do while
+    // paused, and before this guard that one gesture painted the dimming back
+    // onto an unfiltered tree.
+    //
+    // Guarded HERE, at the single call into the adapter, rather than at the
+    // several call sites, for the same reason `ensureOrderingPatched` guards
+    // itself: a new caller must not be able to reintroduce the bug by
+    // forgetting a check. Resume clears the flag before re-seeding through
+    // this method, so the classes come back with one ordinary call.
+    this.adapter.apply(this.filteringPaused ? null : snap, this.elsewhereFirstPath());
   }
 
   /**
@@ -2654,8 +2693,17 @@ export default class SpacesPlugin extends Plugin {
       // that already knows the platform. `manifest` says `isDesktopOnly`
       // today, so this is unreachable in practice; it is here so correctness
       // stops depending on that flag.
+      // Paused is inert too, and for the same coherence reason as an
+      // overridden space directly above: `setFilteringPaused` releases the
+      // sort seam but leaves `DragOrdering` bound, so a same-parent drag was
+      // still claimed and still wrote a new order through `writeOrderFor`
+      // while nothing on screen moved. `orderingScope.ts`'s header names that
+      // exact failure -- data quietly accumulating with no visible effect --
+      // and it is why this predicate, not the renderer alone, is where the
+      // gate belongs.
       enabled: () =>
         !Platform.isMobile &&
+        !this.filteringPaused &&
         orderingEnabledFor(this.runtime.getSelection(), this.defs.get().settings) &&
         !isOverridden(this.runtime.getSelection(), this.runtime.getSortOverrides()),
       // Only the override earns an explanation. A drag blocked because
@@ -2674,6 +2722,13 @@ export default class SpacesPlugin extends Plugin {
       // answer, passed as the third input so the "is this actually the
       // reason" check is real rather than assumed.
       onBlockedDrag: () => {
+        // A pause is silent, like `allowReordering` being off and unlike an
+        // override. Both of those are states the user turned on themselves and
+        // was told about at the time -- `setFilteringPaused` raises its own
+        // Notice saying the explorer is showing the whole vault -- so a toast
+        // per drag would only restate it. An override is different because
+        // nothing announces it: it is inferred from a sort-menu gesture.
+        if (this.filteringPaused) return;
         const sel = this.runtime.getSelection();
         const overridden = isOverridden(sel, this.runtime.getSortOverrides());
         const orderingEnabled = orderingEnabledFor(sel, this.defs.get().settings);
@@ -2820,7 +2875,7 @@ export default class SpacesPlugin extends Plugin {
     if (failures > 0) {
       new Notice(
         `Spaces: moved ${moved.length} of ${paths.length}. ` +
-          `${failures} could not move — see the console for details.`
+          `${failures} could not move. See the console for details.`
       );
     }
     if (moved.length === 0) return;
