@@ -700,10 +700,35 @@ describe("the picker's row cap", () => {
     const closed = rowFor("Notes/d0");
     expect(closed.querySelector(".spaces-create-tree-caret svg")).toBeNull();
     expect(closed.hasAttribute("aria-expanded")).toBe(false);
-    expect(closed.getAttribute("title")).toMatch(/no room/i);
+    // A filter is active, so closing other folders would change nothing and
+    // the title must not offer it.
+    expect(closed.getAttribute("title")).toBe(
+      "There is no room to show what is inside this folder. Narrow the filter to make room."
+    );
     expect(closed.getAttribute("title")).not.toMatch(/[—–]|colour|items?|files?/i);
     // The folder above them is open and unaffected.
     expect(rowFor("Notes").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("offers closing other folders, not filtering, when no filter is active", () => {
+    // 198 subfolders leave exactly one slot below the root. Two opened by hand
+    // want it and one gets it (the earlier, d0, is the one left closed). With no filter, closing the first
+    // is what makes room, and narrowing a filter that is not there is not.
+    const WIDE: Record<string, NodeKind> = { Notes: "folder" };
+    for (let i = 0; i < 198; i++) {
+      WIDE[`Notes/d${i}`] = "folder";
+      WIDE[`Notes/d${i}/note.md`] = "file";
+    }
+    makeHarness({
+      folders: { allPaths: () => Object.keys(WIDE), kindOf: (p: string) => WIDE[p] ?? null },
+    });
+    byKey("mode-curate").click();
+    rowFor("Notes").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    rowFor("Notes/d0").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    rowFor("Notes/d1").querySelector<HTMLElement>(".spaces-create-tree-caret")?.click();
+    expect(rowFor("Notes/d0").getAttribute("title")).toBe(
+      "There is no room to show what is inside this folder. Close other folders to make room."
+    );
   });
 
   it("keeps a working caret on a parent the user closed themselves", () => {

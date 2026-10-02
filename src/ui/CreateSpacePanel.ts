@@ -1205,9 +1205,15 @@ export class CreateSpacePanel {
         // A leaf that says why, like the covered row above: the state is
         // visible and the title carries the reason. It may share a title with
         // the covered one, so the two are joined rather than one overwriting.
+        // Said per state because only one remedy works in each: a filter
+        // forces expansion and ignores what the user opened, so closing other
+        // folders changes nothing there, and with no filter there is nothing
+        // to narrow. The test is `visibleRows`'s own, so the two agree.
         const why =
           "There is no room to show what is inside this folder. " +
-          "Narrow the filter or close other folders to make room.";
+          (this.itemFilter.trim() !== ""
+            ? "Narrow the filter to make room."
+            : "Close other folders to make room.");
         el.title = el.title === "" ? why : `${el.title} ${why}`;
       }
 
@@ -1684,9 +1690,13 @@ export class CreateSpacePanel {
         // visible and the title carries the reason. It may share a title with
         // the covered or removable one, so they are joined rather than one
         // overwriting.
+        // Said per state because only one remedy works in each. See the item
+        // tree's copy of this block.
         const why =
           "There is no room to show what is inside this tag. " +
-          "Narrow the filter or close other tags to make room.";
+          (query.trim() !== ""
+            ? "Narrow the filter to make room."
+            : "Close other tags to make room.");
         el.title = el.title === "" ? why : `${el.title} ${why}`;
       }
 

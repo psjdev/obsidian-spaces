@@ -216,8 +216,12 @@ export type PickerRow<K extends string = NodeKind> = Row<K> | OverflowRow;
  * user or the filter asked for it open. Drawing it open with nothing beneath
  * would tell a screen reader the branch is empty. It is not offered as a
  * caret either: allocation is breadth-first, so opening a deeper parent adds
- * demand and frees nothing, and the click would do nothing. Closing other open
- * branches or narrowing the filter is what makes room, and the panel says so.
+ * demand and frees nothing, and the click would do nothing. What makes room
+ * depends on the state. With a filter, expansion is forced and `expanded` is
+ * ignored, so only narrowing the filter helps. Without one, closing other open
+ * branches helps and there is no filter to narrow. The panel says whichever of
+ * the two is true.
+ *
  * The root level has no parent row to close, so it is cut like any other level
  * and keeps its marker; that marker is paid for, spending `(left - 1) + 1`.
  *
