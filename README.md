@@ -101,6 +101,21 @@ Right-click a space's icon in the space strip for **Rename space…**, **Change 
 
 Only spaces that can take the row are offered: a folder pinned space is a window onto its own folder, so it never appears in **Add to space**.
 
+## Tags
+
+A curated space can hold a tag as well as notes and folders. Every note carrying the tag appears in the space, wherever it lives in your vault.
+
+To add one:
+
+- In the creation form, switch the picker from **Items** to **Tags** and click a tag.
+- On an existing space, open Settings → Spaces, click **Contents…** beside the space, and type the tag under **Add a tag**.
+
+Nested tags match. A space holding `project` includes notes tagged `project/atlas` and `project/atlas/phase-1`. A space holding `project/atlas` includes only that tag and the tags nested under it.
+
+The space follows your notes. Add the tag to a note and it appears, change or delete the tag and it leaves. Tags written in a note's properties and tags written in its text both count.
+
+To drop a single note without dropping the tag, right-click it inside the space and choose **Remove from *space***. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
+
 ## Sorting
 
 Drag a row in the file tree and that arrangement is saved for the space you are in. Spaces keeps those orders separately for each space and for **All**, and nothing moves on disk.
