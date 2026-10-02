@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.8.0 — 2026-10-02
+
+A space can hold a tag. Every note carrying the tag appears in the space,
+wherever it lives in your vault. Nested tags match, so a space holding
+`project` includes notes tagged `project/atlas`. Add the tag to a note and it
+appears, remove it and it leaves.
+
+You can drop a single note from a space without dropping what brings it in.
+Right-click it inside the space and choose `Remove from <space name>`. It is
+listed under **Left out** in **Contents…**, where **Put back** returns it.
+
+The creation form picks everything from one window. **Vault** shows notes and
+folders, **Tags** shows your tags as a tree, and typing `#` in the filter
+switches to Tags. A row under the window counts what the space comes to.
+
+Picking a folder shows what it brings in. Those rows are tinted and grouped
+with it as one block, and the row you clicked is bolded. Rows inside a block
+are not clickable.
+
+Large vaults draw faster. The vault index is built when something reads it
+rather than when the plugin loads, and the tag index only when a space uses a
+tag.
+
+Fixes:
+
+- A tag space no longer shows your whole vault for the first moments after
+  Obsidian starts.
+- The space switcher keeps keyboard focus when its list redraws.
+- **Pause filtering** leaves your file pane alone, including its order.
+- A new note made in a folder space lands in that space's folder.
+- Adding a note to a space is no longer offered when the space already holds
+  it.
+
 ## 0.7.3 — 2026-09-28
 
 No change to how the plugin behaves. Clears three warnings from Obsidian's
