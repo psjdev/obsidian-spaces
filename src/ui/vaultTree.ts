@@ -237,7 +237,11 @@ export type PickerRow<K extends string = NodeKind> = Row<K> | OverflowRow;
  * into it rather than a way to hide its children.
  *
  * The match is against a node's own NAME, which is its last segment. In the
- * tag tree that is what makes typing `atlas` find `project/atlas`.
+ * tag tree that is what makes typing `atlas` find `project/atlas`. A query
+ * containing `/` is asking about nesting, so it is matched against the node's
+ * whole path instead, and `project/at` finds `project/atlas`. A query of only
+ * `/` therefore matches every nested node and no top-level one; the top-level
+ * parents of those nodes are still kept as ancestors.
  *
  * `onlyKind` applies FIRST, before any of that. A folder whose only matching
  * descendant was a file must disappear along with it, rather than linger as a
@@ -263,7 +267,14 @@ export function visibleRows<K extends string = NodeKind>(
   const budget = opts.budget ?? Number.POSITIVE_INFINITY;
 
   const included = (node: VaultNode<K>): boolean => only === null || node.kind === only;
-  const matches = (node: VaultNode<K>): boolean => node.name.toLowerCase().includes(query);
+  // The match is against a node's own NAME, which is its last segment, so
+  // typing `atlas` finds `project/atlas`. A query carrying a separator is
+  // asking about nesting, so it is matched against the whole path instead:
+  // `project/at` found nothing before this, while the same query worked in
+  // Settings, where the chip field has always matched the full path.
+  const deep = query.includes("/");
+  const matches = (node: VaultNode<K>): boolean =>
+    (deep ? node.path : node.name).toLowerCase().includes(query);
 
   /** Whether this node survives the filter, itself or through a descendant. */
   const keep = (node: VaultNode<K>): boolean =>
