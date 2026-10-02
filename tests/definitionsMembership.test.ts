@@ -76,7 +76,7 @@ describe("inheritedFromFolder", () => {
 
 /**
  * The same walk, asked of a member list that is not a space yet. The create
- * panel's picker holds `CreateFormState.items` and tints everything a selected
+ * panel's picker holds `CreateFormState.items` and marks everything a selected
  * folder covers, so this is the shape it needs.
  */
 describe("coveringFolder", () => {

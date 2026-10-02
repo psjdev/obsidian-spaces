@@ -1661,7 +1661,7 @@ describe("rows a selected folder already covers", () => {
 /**
  * A note only a selected tag covers is an ordinary row. A folder's coverage is
  * a fact about the tree on screen; a tag's is a rule matching notes scattered
- * anywhere, and tinting them marked a scattered majority of a broad tag's
+ * anywhere, and drawing them as covered marked a scattered majority of a broad tag's
  * folders and left no way to tell why a row was marked. Tags mode and the
  * summary row report it instead.
  */
@@ -1759,5 +1759,18 @@ describe("rows a selected folder covers, when two folders differ only in case", 
     expect(rowFor("Docs/a.md").classList.contains("is-inherited")).toBe(true);
     expect(rowFor("docs/b.md").classList.contains("is-inherited")).toBe(false);
     expect(rowFor("docs/b.md").hasAttribute("aria-disabled")).toBe(false);
+  });
+
+  it("selects a note in the other spelling's folder when it is clicked", () => {
+    // The row draws live, so the click must act. `toggleItem` used to fold
+    // case, decide `Docs` covered `docs/b.md`, and drop the click silently.
+    makeHarness(caseSource());
+    byKey("mode-curate").click();
+    rowFor("Docs").click();
+    expand("Docs");
+    expand("docs");
+    rowFor("docs/b.md").click();
+    expect(rowFor("docs/b.md").getAttribute("aria-selected")).toBe("true");
+    expect(panelEl().querySelector(".spaces-create-summary")?.textContent ?? "").toContain("2 notes");
   });
 });

@@ -1316,11 +1316,11 @@ export class CreateSpacePanel {
       },
       // Everything under a selected folder is already in the space, at every
       // depth, and the folder is the row directly above its children, so the
-      // tint states a fact about the tree on screen.
+      // mark states a fact about the tree on screen.
       //
       // Tags are deliberately not shown here. A tag is a rule that matches notes
       // scattered across the vault, not a position in the tree, so marking them
-      // tinted a scattered majority of rows at a broad tag and left no way to
+      // would mark a scattered majority of rows at a broad tag and leave no way to
       // tell why a given row was marked. Tags mode lists the selected tags with
       // their counts, and the summary row counts every note the selection
       // resolves to.
@@ -1370,7 +1370,7 @@ export class CreateSpacePanel {
    * Draws one body's rows into `host`. The adapter is the only difference
    * between the two bodies.
    *
-   * Everything a row is lives here once: the overflow row, the tint classes,
+   * Everything a row is lives here once: the overflow row, the mark classes,
    * the ARIA state, the caret, the keyboard split and the redraw after a pick,
    * so a fix to any of them is made in one place. What the adapter supplies is
    * what genuinely differs: the key a row is found by, what covers it, the
@@ -1434,9 +1434,10 @@ export class CreateSpacePanel {
       const covered = row.selected ? null : adapter.coveredBy(row);
       el.classList.toggle("is-inherited", covered !== null);
       if (covered !== null) {
-        // `aria-disabled` rather than the tint alone: covered is a third
-        // state, and neither `aria-selected="false"` nor a background color
-        // tells a screen reader it is one. Not `disabled`, which would take
+        // `aria-disabled` rather than the mark alone: covered is a third
+        // state, and `aria-selected="false"` says nothing a screen reader
+        // could use to tell it from an ordinary unselected row, while the edge
+        // and muted text are visual only. Not `disabled`, which would take
         // the row out of the tab order and leave a keyboard user with no way
         // to reach the title that explains it.
         el.setAttribute("aria-disabled", "true");
@@ -1829,10 +1830,12 @@ export class CreateSpacePanel {
       "tag",
       isBranchByChildren
     );
-    // The same budget the item tree uses, for the same reason. It cannot bite
-    // the collapsed view, which is a handful of roots; it is here for a branch
-    // like `topic` with its 401 children, which now says how many are missing
-    // inside the branch rather than deleting the roots that sort after it.
+    // The same budget the item tree uses, for the same reason. The collapsed
+    // view is usually a handful of roots and fits whole. Past the budget, a
+    // level is cut and ends in a marker that counts what it hid, the root level
+    // included. The common case is a branch like `topic` with its 401 children,
+    // which says how many are missing inside the branch rather than deleting
+    // the roots that sort after it.
     const rows = visibleRows(tree, {
       expanded: this.expandedTags,
       filter: query,
@@ -1864,7 +1867,7 @@ export class CreateSpacePanel {
       rowClass: "spaces-create-tag-row",
       expanded: this.expandedTags,
       // A selected tag covers its children through `tagMatches`, and here the
-      // parent is the row directly above them, so the tint states a fact about
+      // parent is the row directly above them, so the mark states a fact about
       // the tree on screen. That is the whole difference from the item tree,
       // which deliberately does NOT mark the notes a tag covers: a tag's reach
       // over a NOTE is a rule matching files scattered anywhere, not a

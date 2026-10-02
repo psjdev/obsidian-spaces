@@ -477,8 +477,8 @@
   min-width: 0;
 }
 /* A Lucide tag, the same mark the Tags button carries. Muted so the tag's
-   name is what the eye lands on, and separate from the name because
-   `renderResults` marks the matched characters of the STORED tag. */
+   name is what the eye lands on. It is its own element
+   so it takes its own color, and the name text stays just the last segment. */
 .spaces-create-tag-sigil {
   flex: 0 0 auto;
   display: flex;

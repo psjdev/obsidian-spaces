@@ -1,7 +1,6 @@
 import type { CreateSpaceOptions } from "../actions/spaceLifecycle";
 import type { MemberEntry } from "../types";
 import { MAX_SPACE_NAME_LENGTH } from "../definitions/schema";
-import { canonicalPath } from "../visibility/glob";
 import { normalizeTag, tagMatches } from "../visibility/tagMatch";
 
 /**
@@ -239,10 +238,12 @@ function covers(outer: MemberEntry, inner: MemberEntry): boolean {
     return inner.kind === "tag" && tagMatches(normalizeTag(outer.tag), normalizeTag(inner.tag));
   }
   if (outer.kind !== "folder" || inner.kind === "tag") return false;
-  const parent = canonicalPath(outer.path);
-  const child = canonicalPath(inner.path);
+  // Compared exactly, not folded: both were picked out of the live tree, so
+  // both are live spellings, and the panel draws a row covered only on an exact
+  // match. Folding here made `Docs` swallow `docs/b.md` on a case-sensitive
+  // filesystem while the row still looked clickable.
   // The trailing slash, so `Projects` does not swallow `Projects Archive`.
-  return child !== parent && child.startsWith(`${parent}/`);
+  return inner.path !== outer.path && inner.path.startsWith(`${outer.path}/`);
 }
 
 /**
