@@ -670,8 +670,15 @@ describe("the picker's row cap", () => {
     expect(more?.getAttribute("aria-disabled")).toBe("true");
     expect(more?.getAttribute("aria-selected")).toBe("false");
     expect(more?.hasAttribute("tabindex")).toBe(false);
+    // A listener would have chosen, expanded or redrawn something. The summary
+    // is where a choice shows, and the row set is where an expand would.
+    const summaryBefore = panelEl().querySelector(".spaces-create-summary")?.textContent;
+    const pathsBefore = rows().map((r) => r.dataset.path);
     more?.click();
-    expect(overflowRows().length).toBe(1);
+    more?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(panelEl().querySelector(".spaces-create-summary")?.textContent).toBe(summaryBefore);
+    expect(rows().map((r) => r.dataset.path)).toEqual(pathsBefore);
+    expect(overflowRows()[0]).toBe(more);
     expect(panelEl().querySelector(".spaces-create-tree-more")).toBeNull();
   });
 

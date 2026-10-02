@@ -1598,30 +1598,28 @@ export class CreateSpacePanel {
     // Reached once per draw, not once per row: the accessor hands back the
     // engine's current snapshot, and `pathsMatching` is a map lookup on it.
     const index = this.deps.tagIndex();
-    // Overflow rows carry no tag, so they are not counted; they are drawn from
-    // `rows` in order and the counted rows are consumed alongside them.
+    // Overflow rows have no tag, so they carry an empty one that `countOf`
+    // never looks up, and ride through in order alongside the tag rows.
     const counted = countTagRows(
-      rows.flatMap((row) => (row.kind === "overflow" ? [] : [{ ...row, tag: row.path }])),
-      (tag) => index.pathsMatching(tag).length
+      rows.map((row) => ({ ...row, tag: row.kind === "overflow" ? "" : row.path })),
+      (tag) => (tag === "" ? 0 : index.pathsMatching(tag).length)
     );
-    let nextCounted = 0;
 
-    for (const slot of rows) {
-      if (slot.kind === "overflow") {
+    for (const row of counted) {
+      if (row.kind === "overflow") {
         const el = doc.win.createDiv();
         el.className = "spaces-create-tree-row is-overflow";
         el.setAttribute("role", "treeitem");
         el.setAttribute("aria-disabled", "true");
         el.setAttribute("aria-selected", "false");
-        el.style.paddingLeft = `${slot.depth * 14}px`;
+        el.style.paddingLeft = `${row.depth * 14}px`;
         el.textContent =
-          slot.hidden === 1
+          row.hidden === 1
             ? "1 more, narrow the filter to see it"
-            : `${slot.hidden.toLocaleString()} more, narrow the filter to see them`;
+            : `${row.hidden.toLocaleString()} more, narrow the filter to see them`;
         host.appendChild(el);
         continue;
       }
-      const row = counted[nextCounted++];
       const el = doc.win.createDiv();
       // Both classes: the tree's row rules are the layout, and the tag class
       // carries only what differs.
