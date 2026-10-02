@@ -49,7 +49,10 @@ export function coveringFolder(
  * passed separately to the lookup. A copy, a filter or a cache of `folders`
  * would otherwise lose it and silently fall back to folding, which is the
  * defect this exists to prevent; carried in the value, a copy keeps it, and a
- * bare `Set` handed to `coveringFolderIn` is a compile error.
+ * bare `Set` handed to `coveringFolderIn` is a compile error. The fields are
+ * `readonly`, so an existing value cannot be reassigned into the other mode;
+ * that does not stop a fresh `{ folders, exact }` literal, which compiles, so
+ * the protection against a wrong-mode value is the type, not the modifier.
  */
 export interface FolderSet {
   readonly folders: ReadonlySet<string>;

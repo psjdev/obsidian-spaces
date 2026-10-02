@@ -256,8 +256,8 @@ function covers(outer: MemberEntry, inner: MemberEntry): boolean {
  * catch one of those two orders, because it reads the list as it stands.
  *
  * Minimality in the one write path makes the order irrelevant instead, which
- * is also what collapses `coveringTagIn`'s outermost-versus-innermost
- * question: at most one ancestor can be in the list at all.
+ * is also why `coveringTagIn` has only one ancestor to find: at most one
+ * ancestor can be in the list at all.
  */
 export function toggleItem(s: CreateFormState, entry: MemberEntry): CreateFormState {
   const without = s.items.filter((i) => !sameEntry(i, entry));

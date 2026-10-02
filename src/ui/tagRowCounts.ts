@@ -23,11 +23,11 @@ interface Named {
  *
  * `countOf` is called **once per row given and never otherwise**, which is the
  * whole reason this takes the rows rather than the vault's tag list. The
- * caller has already ranked and capped; counting the tags that survived that
+ * caller has already capped; counting the tags that survived that
  * is bounded by what is on screen, while counting first and capping second
  * would put a lookup against every tag in the vault behind every keystroke.
  *
- * Order is preserved, because ranking already decided it.
+ * Order is preserved, because the tree already decided it.
  */
 export function countTagRows<T extends Named>(
   rows: readonly T[],

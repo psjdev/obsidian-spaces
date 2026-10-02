@@ -20,8 +20,8 @@ describe("countTagRows", () => {
   });
 
   it("asks about the rows it was given and about nothing else", () => {
-    // The invariant the panel depends on: the caller has already ranked and
-    // capped, so counting is bounded by what is on screen. Counting first and
+    // The invariant the panel depends on: the caller has already capped,
+    // so counting is bounded by what is on screen. Counting first and
     // capping second would put one lookup per vault tag behind every keystroke.
     const countOf = vi.fn(() => 1);
     countTagRows([{ tag: "a" }, { tag: "b" }], countOf);
@@ -40,7 +40,7 @@ describe("countTagRows", () => {
     expect(countOf).not.toHaveBeenCalled();
   });
 
-  it("keeps the order it was given, because ranking already chose it", () => {
+  it("keeps the order it was given, because the tree already decided it", () => {
     const rows = [{ tag: "z" }, { tag: "a" }, { tag: "m" }];
     expect(countTagRows(rows, () => 0).map((r) => r.tag)).toEqual(["z", "a", "m"]);
   });

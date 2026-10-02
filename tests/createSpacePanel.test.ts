@@ -1285,9 +1285,8 @@ describe("the Vault and Tags buttons under the filter box", () => {
     it("shows the sigil for a moment rather than swallowing the keystroke", () => {
       vi.useFakeTimers();
       try {
-        // An empty tag source: the stub refuses to imitate `prepareFuzzySearch`
-        // on purpose, so a non-empty query against real tags throws rather than
-        // ranks. What is under test here is the box, not the ranking.
+        // An empty tag source, so the test stays about the box and not about
+        // which tags a filter would keep.
         makeHarness({ tags: { knownTags: () => [] } });
         openCurated();
         const e = typeChar("#");

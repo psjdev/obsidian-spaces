@@ -82,9 +82,8 @@ export function tagCandidates(
  * `#` row that adds nothing when picked. Dropped here rather than guarded at
  * every call site.
  *
- * Alphabetical so an unranked list is stable rather than whatever order the
- * source happened to enumerate in, and so a ranked one has a tie-break that
- * does not reshuffle between keystrokes that changed no score.
+ * Alphabetical so the list is stable rather than whatever order the source
+ * happened to enumerate in.
  *
  * Exported uncapped for the create panel's tag tree, the one caller that must
  * see every tag: a cap applied before a tree is built drops whole branches
