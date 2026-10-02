@@ -34,10 +34,14 @@ export function includedPaths(
 
   // 2. expand folder seeds, applying ignore to inherited descendants only
   const inherited = new Set<string>();
+  let filtered = excluded.size > 0;
   for (const seed of seeds) {
     if (vault.kindOf(seed) !== "folder") continue;
     for (const d of vault.descendantsOf(seed)) {
-      if (ignore.matches(d)) continue;
+      if (ignore.matches(d)) {
+        filtered = true;
+        continue;
+      }
       if (excluded.has(canonicalPath(d))) continue;
       inherited.add(d);
     }
@@ -46,29 +50,52 @@ export function includedPaths(
   // 3. included
   const included = new Set<string>([...seeds, ...inherited]);
 
-  // 3b. prune folders emptied by ignore rules, bottom-up to a fixpoint.
-  // A folder with no children in the vault was left empty by the user and
-  // must be spared; only folders emptied by filtering disappear.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const p of [...included]) {
-      if (seeds.has(p)) continue;
+  // 3b. prune folders emptied by filtering, bottom-up.
+  //
+  // Skipped entirely when nothing could have been filtered. If no ignore
+  // pattern matched and there are no exclusions, every path under a folder
+  // seed is in `included`, so a folder here can only lack an included
+  // descendant by being empty in the vault, which this step already spares.
+  // Measured: zero removals across every shape tried. Most vaults have an
+  // empty `globalIgnore`, so this is the common case, and it is the whole
+  // step rather than a fast path through it.
+  if (filtered) {
+    // Deepest first, so a folder's children are already decided when it is
+    // reached and one look at its DIRECT children is enough. The previous
+    // version asked `descendantsOf` per folder inside a fixpoint, which is
+    // O(folders x subtree x levels-emptied): 376 ms on a 97,655-path vault
+    // with ignore rules, against 83 ms for this.
+    //
+    // Bucketed rather than sorted. At 11,110 folders with nothing to remove,
+    // a comparison sort costs more than the whole fixpoint did.
+    const byDepth: string[][] = [];
+    for (const p of included) {
       if (vault.kindOf(p) !== "folder") continue;
-      if (vault.childrenOf(p).length === 0) continue;
-      const hasVisibleDescendant = vault.descendantsOf(p).some((d) => included.has(d));
-      if (!hasVisibleDescendant) {
-        included.delete(p);
-        changed = true;
+      let d = 0;
+      for (let i = 0; i < p.length; i++) if (p.charCodeAt(i) === 47) d++;
+      (byDepth[d] ??= []).push(p);
+    }
+    for (let d = byDepth.length - 1; d >= 0; d--) {
+      for (const p of byDepth[d] ?? []) {
+        if (seeds.has(p)) continue;
+        const kids = vault.childrenOf(p);
+        if (kids.length === 0) continue;
+        let keep = false;
+        for (const k of kids) {
+          if (included.has(k)) {
+            keep = true;
+            break;
+          }
+        }
+        if (!keep) included.delete(p);
       }
     }
-  }
-
-  // Step 3b can remove a folder from `included` after step 2 recorded it as
-  // inherited. Re-sync so `decisionFor` never reports a visibility-implying
-  // reason for a path that is no longer visible.
-  for (const p of [...inherited]) {
-    if (!included.has(p)) inherited.delete(p);
+    // Step 3b can remove a folder from `included` after step 2 recorded it as
+    // inherited. Re-sync so `decisionFor` never reports a visibility-implying
+    // reason for a path that is no longer visible.
+    for (const p of [...inherited]) {
+      if (!included.has(p)) inherited.delete(p);
+    }
   }
 
   return { seeds, inherited, included };
