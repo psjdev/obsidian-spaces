@@ -213,26 +213,48 @@ describe("picker row states", () => {
   });
 
   it("a run of tinted rows squares its interior corners, so it draws as one block", () => {
-    // Read from the stylesheet TEXT, not through `rules`, and deliberately.
-    // jsdom's CSSOM drops a rule whose selector it cannot parse, and it
-    // cannot parse `:has()`. Obsidian's Chromium can, so the rule is live at
-    // runtime and invisible to every other test in this file. A text
-    // assertion is the only thing jsdom can offer here; the CDP check
-    // measures the corners that actually get painted.
-    const bottom = /:is\(\.is-selected, \.is-inherited\):has\(\s*\+ \.spaces-create-tree-row\.is-inherited\s*\)/.test(CSS);
-    const top = /:is\(\.is-selected, \.is-inherited\)\s*\+\s*\.spaces-create-tree-row\.is-inherited/.test(CSS);
-    expect(bottom, "forward-looking rule that squares the bottom corners").toBe(true);
-    expect(top, "sibling rule that squares the top corners").toBe(true);
-    expect(CSS).toContain("border-bottom-left-radius: 0");
-    expect(CSS).toContain("border-top-left-radius: 0");
+    // Readable through `rules` again. This pair used to be a forward-looking
+    // parent selector, which jsdom's CSSOM drops silently, so the only thing
+    // these assertions could reach was the stylesheet TEXT. The forward look
+    // is now a class the renderer sets, so both halves of the join are
+    // ordinary selectors a parser can answer.
+    const joined = document.createElement("div");
+    joined.className = "spaces-create-tree-row is-joined-down";
+    const isJoinRule = (sel: string): boolean =>
+      sel.includes("is-joined-down") && !sel.includes(":");
+    const bottom = rules.filter((r) => joined.matches(r.selector) && isJoinRule(r.selector));
+    expect(bottom, "the rule that squares the bottom corners").toHaveLength(1);
+    expect(bottom[0].style.getPropertyValue("border-bottom-left-radius")).toBe("0");
 
-    // The join is on the next row being COVERED, never merely tinted. Two
-    // folders picked separately are two selections and must stay two pills;
-    // merging them would say they are one. A `:is(.is-selected,
-    // .is-inherited)` on the RIGHT of either combinator would do exactly
-    // that, so its absence is the assertion.
-    expect(bottom && !/:has\(\s*\+ \.spaces-create-tree-row:is\(/.test(CSS)).toBe(true);
-    expect(/\+\s*\.spaces-create-tree-row:is\(\.is-selected, \.is-inherited\)\s*\{/.test(CSS)).toBe(false);
+    // The other half still looks BACK one sibling, which is a plain
+    // combinator. Built as a real pair so the combinator is actually
+    // exercised rather than pattern-matched.
+    const host = document.createElement("div");
+    const above = document.createElement("div");
+    above.className = "spaces-create-tree-row is-selected";
+    const below = document.createElement("div");
+    below.className = "spaces-create-tree-row is-inherited";
+    host.append(above, below);
+    const top = rules.filter((r) => below.matches(r.selector) && r.selector.includes("+"));
+    expect(top, "the sibling rule that squares the top corners").toHaveLength(1);
+    expect(top[0].style.getPropertyValue("border-top-left-radius")).toBe("0");
+
+    // The join is on the next row being COVERED, never merely tinted: two
+    // folders picked separately are two selections and must stay two pills.
+    // That rule now lives in `markJoinedRows`, which decides who gets
+    // `is-joined-down`, and `pickerBlockJoin.test.ts` is where it is pinned.
+    // What CSS can still promise is that it never squares a row on the
+    // strength of the class pair alone.
+    const pair = document.createElement("div");
+    const first = document.createElement("div");
+    first.className = "spaces-create-tree-row is-selected";
+    const second = document.createElement("div");
+    second.className = "spaces-create-tree-row is-selected";
+    pair.append(first, second);
+    for (const r of rules) {
+      if (r.style.getPropertyValue("border-top-left-radius") !== "0") continue;
+      expect(second.matches(r.selector), `two picked siblings must not merge: ${r.selector}`).toBe(false);
+    }
   });
 
   it("merging a block is paint-only, so selecting a parent never moves a row", () => {
@@ -249,14 +271,15 @@ describe("picker row states", () => {
     expect(base).toHaveLength(1);
     expect(base[0].style.getPropertyValue("margin-bottom")).not.toBe("");
 
-    // jsdom drops `:has()` rules, so the merge rule is unreachable through
-    // `rules` and has to be read out of the text. See the test above.
-    const merge = /:has\(\s*\+ \.spaces-create-tree-row\.is-inherited\s*\)\s*\{([^}]*)\}/.exec(CSS);
-    expect(merge, "the merge rule").not.toBeNull();
-    const body = merge![1];
-    expect(body).toMatch(/box-shadow:/);
+    const joined = document.createElement("div");
+    joined.className = "spaces-create-tree-row is-joined-down";
+    const merge = rules.filter(
+      (r) => joined.matches(r.selector) && r.selector.includes("is-joined-down") && !r.selector.includes(":")
+    );
+    expect(merge, "the merge rule").toHaveLength(1);
+    expect(merge[0].style.getPropertyValue("box-shadow")).not.toBe("");
     for (const prop of ["margin", "padding", "height", "border-width", "border-bottom-width", "top", "transform"]) {
-      expect(body, `merge rule must not set ${prop}`).not.toMatch(new RegExp(`(^|[;\\s])${prop}\\s*:`));
+      expect(merge[0].style.getPropertyValue(prop), `merge rule must not set ${prop}`).toBe("");
     }
   });
 

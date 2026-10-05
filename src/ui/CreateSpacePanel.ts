@@ -44,7 +44,7 @@ import {
   memberFolderSet,
   memberTagSet,
 } from "../definitions/membership";
-import { countPicked, pickedSummary, readPickerBody } from "./pickerBody";
+import { countPicked, markJoinedRows, pickedSummary, readPickerBody } from "./pickerBody";
 import type { Preview } from "./previewSeam";
 import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
 import { storedTags, type TagSource } from "./tagCandidates";
@@ -1520,6 +1520,7 @@ export class CreateSpacePanel {
       });
       host.appendChild(el);
     }
+    markJoinedRows(host);
   }
 
   /**

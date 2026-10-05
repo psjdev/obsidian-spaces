@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 — 2026-10-05
+
+No change to how the plugin behaves. Clears a warning from Obsidian's plugin
+review scan: the create panel's picker drew one selection as a single block
+with a CSS selector that looks forward to the next row, and matching that
+selector costs more style recalculation than it is worth. The panel now marks
+those rows as it draws them.
+
 ## 0.8.0 — 2026-10-02
 
 A space can hold a tag. Every note carrying the tag appears in the space,
