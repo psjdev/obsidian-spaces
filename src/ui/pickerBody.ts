@@ -104,3 +104,44 @@ export function pickedSummary(picked: PickedCounts, notes: number): string {
   if (picked.notes + picked.folders + picked.tags === 0) return "Nothing selected";
   return [tagCountLabel(notes), ...selectors].join(" • ");
 }
+
+/**
+ * Marks every row that is followed by a COVERED row, which is what draws one
+ * selection as one block.
+ *
+ * This was a `:has(+ .spaces-create-tree-row.is-inherited)` pair in the
+ * stylesheet. Obsidian's plugin review flags `:has` because matching it makes
+ * the engine invalidate style for a far wider set of elements than the
+ * selector names, on every recalculation, in every pane -- not just this one.
+ * The renderer is already walking these rows in order, so the answer is
+ * cheaper to write down once, here, than to ask the style engine for it
+ * forever.
+ *
+ * Only the forward look moves. The companion rule that rounds the TOP of a
+ * covered row stays in CSS as a plain `+`, because looking back one sibling is
+ * an ordinary combinator with none of the invalidation cost.
+ *
+ * The join is decided by the NEXT row being COVERED, not merely tinted. A
+ * covered row belongs to the selection above it, so it joins. A selected row
+ * starts a selection of its own, so it does not. Anything else ends a block,
+ * including the overflow row, which should end it: it stands in for rows, it
+ * is not part of the selection.
+ *
+ * Takes the host rather than the row list because what matters is what was
+ * actually drawn, in the order it was drawn. A row the budget dropped is not
+ * in `host`, and a block must not join across the gap it left.
+ */
+export const JOINED_ROW_CLASS = "is-joined-down";
+
+export function markJoinedRows(host: HTMLElement): void {
+  const drawn = host.children;
+  for (let i = 0; i < drawn.length; i++) {
+    const el = drawn[i];
+    const next = i + 1 < drawn.length ? drawn[i + 1] : null;
+    const joins =
+      (el.classList.contains("is-selected") || el.classList.contains("is-inherited")) &&
+      next !== null &&
+      next.classList.contains("is-inherited");
+    el.classList.toggle(JOINED_ROW_CLASS, joins);
+  }
+}

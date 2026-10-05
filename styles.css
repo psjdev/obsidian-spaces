@@ -470,10 +470,14 @@
    never be a descendant of another selected row, and the two cases are
    therefore exhaustive.
 
-   `:has(+ ...)` looks forward and `+` looks back, which is what lets the
-   first and last row of a block keep their rounding without the renderer
-   having to mark them. Anything else ends a block by not matching, including
-   the overflow row, which should end it: it is not part of the selection.
+   The forward look is a class the renderer sets, `is-joined-down`, rather
+   than a forward-looking parent selector. Obsidian's plugin review flags that
+   selector because matching it invalidates style for a far wider set of
+   elements than the selector names, on every recalculation. `markJoinedRows` (pickerBody.ts) decides it while
+   it is already walking the rows in order. `+` below still looks BACK one
+   sibling, which is an ordinary combinator and costs nothing. Anything else
+   ends a block by not being covered, including the overflow row, which should
+   end it: it is not part of the selection.
 
    The separator is FILLED, not removed. Collapsing the margin to 0 was the
    obvious way to join two rows and it moved them: a block of N rows lost
@@ -486,16 +490,12 @@
    Listed before the focus ring's own rule for `.is-inherited`, which restates
    this shadow alongside the ring: `box-shadow` is one property, so a focused
    row inside a block has to set both or lose one. */
-.spaces-create-tree-row:is(.is-selected, .is-inherited):has(
-    + .spaces-create-tree-row.is-inherited
-  ) {
+.spaces-create-tree-row.is-joined-down {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   box-shadow: 0 3px 0 0 color-mix(in oklch, var(--interactive-accent) 10%, transparent);
 }
-.spaces-create-tree-row:is(.is-selected, .is-inherited):has(
-    + .spaces-create-tree-row.is-inherited
-  ):focus-visible {
+.spaces-create-tree-row.is-joined-down:focus-visible {
   box-shadow:
     0 3px 0 0 color-mix(in oklch, var(--interactive-accent) 10%, transparent),
     inset 0 0 0 2px var(--text-accent);
