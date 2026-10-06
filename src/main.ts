@@ -35,7 +35,12 @@ import {
   type VaultEventRecord,
 } from "./lifecycle/moveCorrelator";
 import { createVaultChangeCoalescer } from "./lifecycle/eventCoalescer";
-import { addToSpace, registerMembershipMenus } from "./actions/membership";
+import {
+  addToSpace,
+  alreadyInMessage,
+  registerMembershipMenus,
+  subject,
+} from "./actions/membership";
 import { CurrentDrag, type DraggedFiles } from "./order/currentDrag";
 import { CLIPPED_SELECTION, spaceDropFor } from "./ui/spaceDrop";
 import {
@@ -2682,18 +2687,6 @@ export default class SpacesPlugin extends Plugin {
   }
 
   /**
-   * A note or folder was dropped on a space icon.
-   *
-   * The drop callback carries only a `spaceId`, so this resolves the space and
-   * asks `spaceDropFor` again for the intent. That answer cannot differ from
-   * what the icon showed: the icon was only lit, and a drop only accepted, when
-   * `spaceDropFor` returned add or move for these same paths and this same
-   * space, and `spaceDropFor` is pure over the space and the paths. What must
-   * not happen is deciding by some OTHER rule than the one the icon used, which
-   * is what made the drag indicator a lie once before, where it read
-   * `destination=Travel` while the file landed at the vault root.
-   */
-  /**
    * Why a drop on a space icon was refused, said out loud.
    *
    * Only one refusal reaches here, the clipped selection; every other one is a
@@ -2720,6 +2713,25 @@ export default class SpacesPlugin extends Plugin {
     );
   }
 
+  /**
+   * A note or folder was dropped on a space icon.
+   *
+   * The drop callback carries only a `spaceId`, so this resolves the space and
+   * asks `spaceDropFor` again for the intent.
+   *
+   * It is re-asked with the SURVIVING subset, not with the paths the icon was
+   * lit for: a path can go stale between the dragstart and the drop, and those
+   * are filtered out just below. The conclusion still holds, but for a narrower
+   * reason than "same inputs, same answer". `spaceDropFor` is pure, and none of
+   * its rules can flip from refuse to act when paths are REMOVED: dropping
+   * paths cannot add an illegal one, and `truncated` is carried across
+   * unchanged. So the subset can only agree with what the icon showed, or
+   * refuse, which is the safe direction.
+   *
+   * What must not happen is deciding by some OTHER rule than the one the icon
+   * used, which is what made the drag indicator a lie once before, where it
+   * read `destination=Travel` while the file landed at the vault root.
+   */
   private async filesDroppedOnSpace(spaceId: string, drag: DraggedFiles): Promise<void> {
     const space = this.defs.get().spaces.find((s) => s.id === spaceId);
     if (!space) return;
@@ -2730,7 +2742,14 @@ export default class SpacesPlugin extends Plugin {
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TAbstractFile => f !== null);
     if (files.length === 0) {
-      new Notice("Spaces: those notes and folders no longer exist");
+      // Singular when one note was dragged, because "those notes and folders"
+      // for a single deleted file reads as though the plugin lost track of a
+      // batch that never existed.
+      new Notice(
+        drag.paths.length === 1
+          ? "Spaces: that note or folder no longer exists"
+          : "Spaces: those notes and folders no longer exist"
+      );
       return;
     }
     // The SAME record, with the surviving subset in place of the paths, and
@@ -2768,7 +2787,7 @@ export default class SpacesPlugin extends Plugin {
   ): Promise<void> {
     const moved: TAbstractFile[] = [];
     const already: TAbstractFile[] = [];
-    const blocked: string[] = [];
+    const blocked: TAbstractFile[] = [];
     // A folder carries its contents, so a dragged path inside another dragged
     // FOLDER is already handled by moving that ancestor. Renaming it as well
     // would pull it back OUT: once the folder moves, Obsidian updates the
@@ -2806,8 +2825,11 @@ export default class SpacesPlugin extends Plugin {
       } catch (e) {
         console.error(`Spaces: could not move ${f.path} into ${root}`, e);
         // The commonest cause by far is a file of that name already sitting in
-        // the root, so the name is what the user needs to hear.
-        blocked.push(f.name);
+        // the root, so the name is what the user needs to hear -- when there is
+        // one name to hear. `subject` decides that, and the console line above
+        // is unconditional, so every blocked path is recoverable whatever the
+        // toast says.
+        blocked.push(f);
       }
     }
     // A moved descendant is only counted if its ancestor actually moved.
@@ -2819,28 +2841,30 @@ export default class SpacesPlugin extends Plugin {
       )
     );
     const movedCount = moved.length + carriedMoved.length;
+    // `subject` and `alreadyInMessage` from `membership.ts`, not a fourth and
+    // fifth copy of their rules written out here. Thirty colliding notes used
+    // to produce thirty filenames in one toast, which is the exact outrunning
+    // `subject` was written to stop, and the `is`/`are` agreement was spelled
+    // out twice in one file.
+    //
+    // `movedCount` is passed explicitly because it can EXCEED `moved`: a dragged
+    // folder carries its contents, and those travelled without a rename of their
+    // own. One file moved on its own is still named.
     if (blocked.length > 0) {
-      const failed = `${blocked.join(", ")} could not move`;
+      const failed = `${subject(blocked)} could not move`;
       if (movedCount === 0) {
         new Notice(`Spaces: ${failed} into ${spaceName}`);
         return;
       }
       // Say what changed as well as what did not.
-      const some = movedCount === 1 && carriedMoved.length === 0 ? moved[0].name : `${movedCount} notes and folders`;
-      new Notice(`Moved ${some} into ${spaceName}. ${failed}.`);
+      new Notice(`Moved ${subject(moved, movedCount)} into ${spaceName}. ${failed}.`);
       return;
     }
     if (movedCount === 0 && already.length > 0) {
-      const verb = already.length === 1 ? "is" : "are";
-      new Notice(
-        `${already.length === 1 ? already[0].name : `${already.length} notes and folders`} ` +
-          `${verb} already in ${spaceName}`
-      );
+      new Notice(alreadyInMessage(already, spaceName));
       return;
     }
-    const what =
-      movedCount === 1 && carriedMoved.length === 0 ? moved[0].name : `${movedCount} notes and folders`;
-    new Notice(`Moved ${what} into ${spaceName}`);
+    new Notice(`Moved ${subject(moved, movedCount)} into ${spaceName}`);
   }
 
   /**

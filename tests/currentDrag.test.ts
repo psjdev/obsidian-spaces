@@ -44,8 +44,9 @@ describe("CurrentDrag", () => {
     expect(d.paths()).toEqual(["Notes/b.md"]);
   });
 
-  // The caller must not be able to edit the record through the array it
-  // handed in, nor through the one it gets back.
+  // The caller must not be able to edit the record through the array it handed
+  // in. The array it gets BACK is the live internal one -- only the type is
+  // readonly -- which is why the two guarantees are pinned separately below.
   it("does not alias the caller's array", () => {
     const d = new CurrentDrag();
     const given = ["Notes/a.md"];
@@ -82,5 +83,34 @@ describe("CurrentDrag", () => {
     expect(d.dragged()).toEqual({ paths: [], truncated: false });
     d.begin(["Other/c.md"], false);
     expect(d.dragged().truncated).toBe(false);
+  });
+
+  /**
+   * `paths()` hands back the live array, so what protects a reader is that
+   * `end()` REASSIGNS rather than empties in place.
+   *
+   * That is not a detail: the strip's drop handler reads the record once and
+   * holds it across the awaits of the write that follows, and a `dragend`
+   * arrives during a claimed drop. Emptying in place would clear the list that
+   * write is still working from, mid-write. Pinned here because the only thing
+   * stopping someone "simplifying" `this.current = []` into `length = 0` is
+   * knowing that.
+   */
+  it("leaves an already-handed-out array alone when the drag ends", () => {
+    const d = new CurrentDrag();
+    d.begin(["Notes/a.md", "Notes/b.md"], false);
+    const held = d.paths();
+    d.end();
+    expect(held).toEqual(["Notes/a.md", "Notes/b.md"]);
+    expect(d.paths()).toEqual([]);
+  });
+
+  // Same guarantee for the record `dragged()` returns.
+  it("leaves an already-handed-out record alone when the drag ends", () => {
+    const d = new CurrentDrag();
+    d.begin(["Notes/a.md"], true);
+    const held = d.dragged();
+    d.end();
+    expect(held).toEqual({ paths: ["Notes/a.md"], truncated: true });
   });
 });

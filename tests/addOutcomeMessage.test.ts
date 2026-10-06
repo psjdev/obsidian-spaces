@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { TAbstractFile } from "obsidian";
-import { addOutcomeMessage } from "../src/actions/membership";
+import { addOutcomeMessage, alreadyInMessage, subject } from "../src/actions/membership";
 
 /** Only `name` is read, so the fake carries only `name`. */
 function file(name: string): TAbstractFile {
@@ -47,5 +47,56 @@ describe("addOutcomeMessage", () => {
 
   it("says nothing happened when nothing was dragged", () => {
     expect(addOutcomeMessage([], [], "Work")).toBe("Nothing to add to Work");
+  });
+});
+
+/**
+ * The two rules the folder-space move used to write out by hand, four times
+ * between them.
+ *
+ * They live in `membership.ts` because they are rules, not lookups: the ledger
+ * settled that at R11 for this branch, and the drift had already begun --
+ * `moveIntoRoot` was joining every blocked filename with commas, which is the
+ * unbounded list `subject` exists to prevent.
+ */
+describe("subject", () => {
+  it("names one", () => {
+    expect(subject([file("plan.md")])).toBe("plan.md");
+  });
+
+  it("counts several rather than listing them", () => {
+    expect(subject([file("a.md"), file("b.md"), file("c.md")])).toBe("3 notes and folders");
+  });
+
+  // Thirty collisions in one toast is the case this caps.
+  it("still counts rather than listing a long batch", () => {
+    const many = Array.from({ length: 30 }, (_, i) => file(`n-${i}.md`));
+    expect(subject(many)).toBe("30 notes and folders");
+  });
+
+  /**
+   * The count can exceed the list. A dragged folder carries its contents, and
+   * those arrive without a rename of their own, so one `moved` entry can stand
+   * for a folder and everything inside it.
+   */
+  it("counts what travelled, not what was renamed", () => {
+    expect(subject([file("Clients")], 4)).toBe("4 notes and folders");
+  });
+
+  // And the name is only used when the count really is that one file.
+  it("does not name one file when more than it travelled", () => {
+    expect(subject([file("Clients")], 2)).toBe("2 notes and folders");
+  });
+});
+
+describe("alreadyInMessage", () => {
+  it("names one and agrees in number", () => {
+    expect(alreadyInMessage([file("plan.md")], "Clients")).toBe("plan.md is already in Clients");
+  });
+
+  it("counts several and agrees in number", () => {
+    expect(alreadyInMessage([file("a.md"), file("b.md")], "Clients")).toBe(
+      "2 notes and folders are already in Clients"
+    );
   });
 });

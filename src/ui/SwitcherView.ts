@@ -906,6 +906,16 @@ export class SwitcherView {
         // file drag over an icon that would do something; everything else
         // falls through untouched, so the event reaches whatever is beneath.
         const drag = this.fileDrop.dragged();
+        // Nothing published means the drag did not start in the file tree: a
+        // tab being torn off, a selection dragged out of the editor, a file
+        // from the desktop. Every one of those crosses this rail and reaches
+        // this listener, several times a second.
+        //
+        // Checked FIRST, before the auto-scroll is armed. `startScrolling`
+        // used to run for all of them, scheduling a frame whose `tick` opened
+        // by asking this same question and returning -- one wasted rAF per
+        // dragover event, for drags that have nothing to do with spaces.
+        if (drag.paths.length === 0) return;
         const over = this.spaceElAt(e.target);
         const target = dropTargetFor(null, this.spaceFor(over), drag, this.fileDrop.rootExists);
         if (target !== null && target.kind === "refuse") {

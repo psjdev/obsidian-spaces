@@ -41,9 +41,34 @@ function entryFor(f: TAbstractFile): MemberEntry {
  * Several are counted, because listing them would outrun a toast. "notes and
  * folders" rather than one kind, because a multi-select can hold both and
  * counting them separately is more words for no more meaning.
+ *
+ * Exported because this is a RULE, not a lookup, and the folder-space move in
+ * `main.ts` was writing its own copy of it three times over -- one of which had
+ * already drifted into `blocked.join(", ")`, which is the unbounded list this
+ * function exists to prevent. The ledger settled that question for this branch
+ * at R11: a duplicated rule drifts, a duplicated lookup does not.
+ *
+ * `count` is for the one caller whose count can exceed the list it holds: a
+ * folder move carries its contents, so two notes can travel on one `moved`
+ * entry. The NAME is used only when the count really is that single file.
  */
-function subject(files: TAbstractFile[]): string {
-  return files.length === 1 ? files[0].name : `${files.length} notes and folders`;
+export function subject(files: readonly TAbstractFile[], count = files.length): string {
+  return count === 1 && files.length === 1 ? files[0].name : `${count} notes and folders`;
+}
+
+/**
+ * "plan.md is already in Work", or "3 notes and folders are already in Work".
+ *
+ * The `is`/`are` agreement is the reason this is a function rather than a line
+ * repeated at each site: "3 notes and folders is already in Work" reads as a
+ * bug in the plugin rather than a fact about the space, and a second copy of
+ * the sentence is a second chance to get that wrong. Shared with the
+ * folder-space move, where "already in" means the file is already sitting in
+ * the pinned root -- different mechanism, same sentence to the user.
+ */
+export function alreadyInMessage(files: readonly TAbstractFile[], spaceName: string): string {
+  const verb = files.length === 1 ? "is" : "are";
+  return `${subject(files)} ${verb} already in ${spaceName}`;
 }
 
 /**
@@ -53,20 +78,14 @@ function subject(files: TAbstractFile[]): string {
  * used to report the whole batch regardless -- "Added plan.md to Work" for a file the
  * space already held. A drop on a space icon makes that easy to hit, so the
  * notice reports the outcome instead of the request.
- *
- * `is`/`are` rather than one spelling: "3 notes and folders is already in
- * Work" reads as a bug in the plugin rather than a fact about the space.
  */
 export function addOutcomeMessage(
   added: readonly TAbstractFile[],
   already: readonly TAbstractFile[],
   spaceName: string
 ): string {
-  if (added.length > 0) return `Added ${subject([...added])} to ${spaceName}`;
-  if (already.length > 0) {
-    const verb = already.length === 1 ? "is" : "are";
-    return `${subject([...already])} ${verb} already in ${spaceName}`;
-  }
+  if (added.length > 0) return `Added ${subject(added)} to ${spaceName}`;
+  if (already.length > 0) return alreadyInMessage(already, spaceName);
   return `Nothing to add to ${spaceName}`;
 }
 
