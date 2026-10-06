@@ -25,6 +25,19 @@ interface RowSnapshot extends GapRow {
   top: number;
 }
 
+/**
+ * What one `dragstart` turns out to be carrying.
+ *
+ * The three fields are produced together by `collectDragged` and published
+ * together by `publishDrag`, because they are only safe read together: see
+ * `DraggedFiles` in `currentDrag.ts`, the public shape this fills.
+ */
+interface Collected {
+  paths: string[];
+  truncated: boolean;
+  fromSelection: boolean;
+}
+
 /** The part of a rect the drop rules read. Undisplaced, in viewport space. */
 interface StripRect {
   top: number;
@@ -128,8 +141,21 @@ export interface DragOrderingDeps {
    * fraction of one gesture and report that as the whole of it. Anything acting
    * on these paths must decline on the same flag, for the reason recorded above
    * `movesIntoOwnSubtree` in `dropIntent.ts`.
+   *
+   * `fromSelection` travels with them for the same reason and answers a
+   * different question: not "might this list be short" but "could it be short
+   * at all". It is true only when the paths came from a multi-selection, which
+   * is the only case `truncated` has anything to say about, and unlike
+   * `truncated` it is a fact about where the list came from rather than a
+   * geometric guess about where it ends. A consumer whose action cannot be
+   * undone should refuse on this; see `currentDrag.ts` for the blind spot that
+   * made it necessary.
    */
-  onDragBegin?: (paths: readonly string[], truncated: boolean) => void;
+  onDragBegin?: (
+    paths: readonly string[],
+    truncated: boolean,
+    fromSelection: boolean
+  ) => void;
   /**
    * No drag this class published is running any more. Clear whatever you kept.
    *
@@ -380,14 +406,38 @@ export class DragOrdering {
    *
    * Having it on its own is what lets `onDragStart` publish what a drag
    * carries without taking a geometry snapshot first.
+   *
+   * Every type test here is Obsidian's cross-window `instanceOf`, never the
+   * global `instanceof`. A popped-out explorer lives in another window whose
+   * `HTMLElement` is a different constructor, so the global test refuses every
+   * node in it: this function would resolve no row, `publishDrag` would publish
+   * an empty list, and the whole drop-on-a-space-icon gesture would be dead in
+   * that window with nothing to show for it. That is the defect release 0.7.3
+   * shipped and the one `asNode` in `SwitcherView` exists to prevent, and this
+   * function is the one that feeds the feature, so it gets the same treatment.
    */
   private rowFromTarget(target: EventTarget | null): { el: HTMLElement; path: string } | null {
-    const node = target instanceof HTMLElement ? target : null;
-    const direct = node?.closest(SEL.titleWithPath);
-    if (!(direct instanceof HTMLElement)) return null;
+    const node = this.asNode(target);
+    if (!node || !node.instanceOf(HTMLElement)) return null;
+    const direct = node.closest(SEL.titleWithPath);
+    if (!direct || !direct.instanceOf(HTMLElement)) return null;
     const path = direct.getAttribute("data-path");
     const el = direct.closest(SEL.rowWrapper);
-    return path && el instanceof HTMLElement ? { el, path } : null;
+    return path && el && el.instanceOf(HTMLElement) ? { el, path } : null;
+  }
+
+  /**
+   * An event target as a `Node`, or null.
+   *
+   * The same helper, for the same reason, as `SwitcherView.asNode`: the global
+   * `Node` is a different constructor in a popout window, so `instanceof` would
+   * refuse every node there. The `typeof` test is for targets that are not
+   * nodes at all -- a `Window`, which a drag event can carry -- and which
+   * therefore have no `instanceOf` method to call.
+   */
+  private asNode(target: EventTarget | null): Node | null {
+    const node = target as Node | null;
+    return node && typeof node.instanceOf === "function" && node.instanceOf(Node) ? node : null;
   }
 
   private rowAt(target: EventTarget | null, clientY: number): { el: HTMLElement; path: string } | null {
@@ -435,12 +485,11 @@ export class DragOrdering {
    * test — so it costs no geometry snapshot and both callers below can afford
    * it.
    */
-  private publishDrag(row: { el: HTMLElement; path: string } | null): {
-    paths: string[];
-    truncated: boolean;
-  } {
-    const collected = row ? this.collectDragged(row) : { paths: [], truncated: false };
-    this.deps.onDragBegin?.(collected.paths, collected.truncated);
+  private publishDrag(row: { el: HTMLElement; path: string } | null): Collected {
+    const collected = row
+      ? this.collectDragged(row)
+      : { paths: [], truncated: false, fromSelection: false };
+    this.deps.onDragBegin?.(collected.paths, collected.truncated, collected.fromSelection);
     return collected;
   }
 
@@ -586,18 +635,31 @@ export class DragOrdering {
    * The tell is geometric and needs nothing private: a selection that reaches
    * the first or last RENDERED row may continue past it — unless the scroller
    * is already at that end of its range.
+   *
+   * **`fromSelection` is the fact that tell cannot get wrong.** Three of the
+   * four returns below are `whole(...)`: no container, the dragged row is not
+   * selected, or the selected set came back empty. Every one of them means
+   * "just this row, there is no selection to miss", and a one-row list is never
+   * short. Only the last return reads a selection, and it is therefore the only
+   * one where `truncated` has anything to be right or wrong about. A consumer
+   * that cannot afford to be wrong refuses on `fromSelection` and never has to
+   * trust the geometry at all — see the flag's own note in `currentDrag.ts` for
+   * why that matters, and `spaceDropFor` for the one place that spends it.
    */
-  private collectDragged(
-    row: { el: HTMLElement; path: string }
-  ): { paths: string[]; truncated: boolean } {
-    const whole = (paths: string[]): { paths: string[]; truncated: boolean } => ({
+  private collectDragged(row: { el: HTMLElement; path: string }): Collected {
+    const whole = (paths: string[]): Collected => ({
       paths,
       truncated: false,
+      fromSelection: false,
     });
     const c = this.container;
     if (!c) return whole([row.path]);
     const self = row.el.querySelector(SEL.titleWithPath);
-    if (!(self instanceof HTMLElement) || !self.matches(SEL.selectedRow)) {
+    // `instanceOf`, not the global `instanceof`: in a popped-out explorer the
+    // window's `HTMLElement` is a different constructor and the global test
+    // refuses every node there. Same defect class as release 0.7.3 and as
+    // `asNode` in `SwitcherView`.
+    if (!(self && self.instanceOf(HTMLElement)) || !self.matches(SEL.selectedRow)) {
       return whole([row.path]);
     }
     // DOM order, which after Slice A's sort is also the visual order. Rendered
@@ -611,7 +673,7 @@ export class DragOrdering {
       if (p) paths.push(p);
     }
     if (paths.length === 0) return whole([row.path]);
-    return { paths, truncated: this.selectionMayBeClipped(rendered) };
+    return { paths, truncated: this.selectionMayBeClipped(rendered), fromSelection: true };
   }
 
   /**

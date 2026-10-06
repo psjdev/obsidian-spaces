@@ -15,13 +15,13 @@ describe("CurrentDrag", () => {
 
   it("carries what the drag began with", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md", "Notes/b.md"], false);
+    d.begin(["Notes/a.md", "Notes/b.md"], false, false);
     expect(d.paths()).toEqual(["Notes/a.md", "Notes/b.md"]);
   });
 
   it("forgets when the drag ends", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md"], false);
+    d.begin(["Notes/a.md"], false, false);
     d.end();
     expect(d.paths()).toEqual([]);
   });
@@ -34,16 +34,16 @@ describe("CurrentDrag", () => {
   // way is the same, and it is what is pinned here.
   it("does not leak one drag's paths into the next", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md"], false);
+    d.begin(["Notes/a.md"], false, false);
     d.end();
-    d.begin(["Other/c.md"], false);
+    d.begin(["Other/c.md"], false, false);
     expect(d.paths()).toEqual(["Other/c.md"]);
   });
 
   it("replaces rather than appends when a drag begins twice", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md"], false);
-    d.begin(["Notes/b.md"], false);
+    d.begin(["Notes/a.md"], false, false);
+    d.begin(["Notes/b.md"], false, false);
     expect(d.paths()).toEqual(["Notes/b.md"]);
   });
 
@@ -53,7 +53,7 @@ describe("CurrentDrag", () => {
   it("does not alias the caller's array", () => {
     const d = new CurrentDrag();
     const given = ["Notes/a.md"];
-    d.begin(given, false);
+    d.begin(given, false, false);
     given.push("Notes/b.md");
     expect(d.paths()).toEqual(["Notes/a.md"]);
   });
@@ -68,23 +68,60 @@ describe("CurrentDrag", () => {
    */
   it("carries whether the selection may be clipped", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md"], true);
-    expect(d.dragged()).toEqual({ paths: ["Notes/a.md"], truncated: true });
+    d.begin(["Notes/a.md"], true, false);
+    expect(d.dragged()).toEqual({ paths: ["Notes/a.md"], truncated: true, fromSelection: false });
+  });
+
+  /**
+   * The flag the second data-loss finding was about.
+   *
+   * `truncated` is a geometric guess with a blind spot the consumer cannot see
+   * around; this is a fact about where the list came from. They are carried
+   * together because a reader who has one and not the other cannot tell a
+   * single-row drag from a selection trimmed to one visible row.
+   */
+  it("carries whether the paths came from a selection", () => {
+    const d = new CurrentDrag();
+    d.begin(["Notes/a.md"], false, true);
+    expect(d.dragged()).toEqual({
+      paths: ["Notes/a.md"],
+      truncated: false,
+      fromSelection: true,
+    });
+  });
+
+  // The two flags are independent: a selection the DOM holds whole is still a
+  // selection, and that is exactly the case the move path has to refuse.
+  it("reports a selection as a selection even when nothing is clipped", () => {
+    const d = new CurrentDrag();
+    d.begin(["Notes/a.md", "Notes/b.md"], false, true);
+    expect(d.dragged().fromSelection).toBe(true);
+    expect(d.dragged().truncated).toBe(false);
+  });
+
+  // A selection drag must not poison the next one any more than its paths may.
+  it("forgets the selection flag when the drag ends", () => {
+    const d = new CurrentDrag();
+    d.begin(["Notes/a.md"], false, true);
+    d.end();
+    expect(d.dragged().fromSelection).toBe(false);
+    d.begin(["Other/c.md"], false, false);
+    expect(d.dragged().fromSelection).toBe(false);
   });
 
   it("reports a whole selection as not clipped", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md"], false);
+    d.begin(["Notes/a.md"], false, false);
     expect(d.dragged().truncated).toBe(false);
   });
 
   // A clipped drag must not poison the next one any more than its paths may.
   it("forgets the clipping when the drag ends", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md"], true);
+    d.begin(["Notes/a.md"], true, false);
     d.end();
-    expect(d.dragged()).toEqual({ paths: [], truncated: false });
-    d.begin(["Other/c.md"], false);
+    expect(d.dragged()).toEqual({ paths: [], truncated: false, fromSelection: false });
+    d.begin(["Other/c.md"], false, false);
     expect(d.dragged().truncated).toBe(false);
   });
 
@@ -92,16 +129,21 @@ describe("CurrentDrag", () => {
    * `paths()` hands back the live array, so what protects a reader is that
    * `end()` REASSIGNS rather than empties in place.
    *
-   * That is not a detail: the strip's drop handler reads the record once and
-   * holds it across the awaits of the write that follows, and a `dragend`
-   * arrives during a claimed drop. Emptying in place would clear the list that
-   * write is still working from, mid-write. Pinned here because the only thing
-   * stopping someone "simplifying" `this.current = []` into `length = 0` is
-   * knowing that.
+   * Said precisely, because the first version of this note claimed more than
+   * the code does. NO consumer today holds the array across a suspension:
+   * `filesDroppedOnSpace` resolves every path to a file synchronously before
+   * its first `await`, and the drag the strip sees is one `DragOrdering`
+   * declined, so there is no synthetic `dragend` arriving mid-drop either.
+   *
+   * It is pinned anyway, and the reason is cheap to state: one `await` added
+   * above that resolution loop is all it takes to create the holder, and
+   * `length = 0` in place would then empty the list mid-write with nothing to
+   * show for it. Knowing that is the only thing stopping someone "simplifying"
+   * `this.current = []`.
    */
   it("leaves an already-handed-out array alone when the drag ends", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md", "Notes/b.md"], false);
+    d.begin(["Notes/a.md", "Notes/b.md"], false, false);
     const held = d.paths();
     d.end();
     expect(held).toEqual(["Notes/a.md", "Notes/b.md"]);
@@ -111,9 +153,9 @@ describe("CurrentDrag", () => {
   // Same guarantee for the record `dragged()` returns.
   it("leaves an already-handed-out record alone when the drag ends", () => {
     const d = new CurrentDrag();
-    d.begin(["Notes/a.md"], true);
+    d.begin(["Notes/a.md"], true, false);
     const held = d.dragged();
     d.end();
-    expect(held).toEqual({ paths: ["Notes/a.md"], truncated: true });
+    expect(held).toEqual({ paths: ["Notes/a.md"], truncated: true, fromSelection: false });
   });
 });

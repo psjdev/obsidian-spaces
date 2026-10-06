@@ -220,8 +220,14 @@ export class SwitcherView {
        * `preventDefault()`, and without that the browser fires no `drop` at
        * all. `dragover` is therefore the only moment the strip has, and it is
        * also the moment the user is still deciding.
+       *
+       * `spaceName` comes from the refusal rather than being looked up here,
+       * so the words name the same space the decision was made about. Both
+       * spoken refusals tell the user to do something else instead, and advice
+       * that does not say WHICH space it is about is not advice when four icons
+       * sit side by side.
        */
-      onRefused: (reason: string) => void;
+      onRefused: (reason: string, spaceName: string | null) => void;
     }
   ) {}
 
@@ -932,7 +938,7 @@ export class SwitcherView {
           this.markDropTarget(null);
           if (!this.refusalSpoken) {
             this.refusalSpoken = true;
-            this.fileDrop.onRefused(target.reason);
+            this.fileDrop.onRefused(target.reason, target.spaceName ?? null);
           }
           return;
         }

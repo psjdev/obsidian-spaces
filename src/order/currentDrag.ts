@@ -21,15 +21,21 @@
  */
 
 /**
- * A drag as anything outside the file tree has to see it: the paths, and
- * whether that list can be trusted to be the WHOLE selection.
+ * A drag as anything outside the file tree has to see it: the paths, whether
+ * that list can be trusted to be the WHOLE selection, and whether it came from
+ * a selection at all.
  *
- * The two travel together deliberately. `collectDragged` produces both, and
- * `DragOrdering` already refuses its own drop on the second, but a consumer
- * handed only `paths` has no way to tell a complete selection from a clipped
- * one, and a clipped one looks exactly like a small complete one. Carrying the
- * paths alone across this seam is what let a 240-note selection be half moved
- * and reported as a 48-note success: see `truncated` below.
+ * The three travel together deliberately. `collectDragged` produces all of
+ * them, and `DragOrdering` already refuses its own drop on `truncated`, but a
+ * consumer handed only `paths` has no way to tell a complete selection from a
+ * clipped one, and a clipped one looks exactly like a small complete one.
+ * Carrying the paths alone across this seam is what let a 240-note selection be
+ * half moved and reported as a 48-note success.
+ *
+ * `fromSelection` is the later and blunter of the two guards, added once
+ * `truncated` was found to be structurally blind on one edge. Read it, not the
+ * length of `paths`, wherever the cost of acting on half a gesture is
+ * irreversible.
  */
 export interface DraggedFiles {
   readonly paths: readonly string[];
@@ -51,26 +57,68 @@ export interface DraggedFiles {
    * has no undo for a file move.
    */
   readonly truncated: boolean;
+  /**
+   * True when `paths` came from the explorer's MULTI-SELECTION rather than from
+   * the one row the pointer was on.
+   *
+   * This is the discriminator `truncated` cannot be trusted to be, and it
+   * exists because `truncated` has a blind spot nothing downstream can see
+   * around. `DragOrdering.selectionMayBeClipped` reads `rendered[0]` to ask
+   * whether the selection runs off the TOP of the render window, but Obsidian's
+   * virtualiser keeps the ancestor chain of everything it renders, so inside an
+   * expanded folder `rendered[0]` is the FOLDER'S OWN ROW and never a selected
+   * note. That half of the test can never fire. Measured rather than reasoned:
+   * `e2e/drop-on-space.mjs` records it and scrolls the other way so its check
+   * can drive the bottom edge instead.
+   *
+   * So `truncated` is a half-guard, and a consumer that cannot afford to
+   * perform half a gesture must refuse on THIS. `collectDragged` cannot get it
+   * wrong the way the geometry can: it is true on exactly one of that function's
+   * return paths, the one where the dragged row was itself part of a selection,
+   * and that is also the only path on which a short list is possible at all. A
+   * single-row drag carries one path and carries all of it.
+   *
+   * Counting `paths` is NOT the same test and must never be substituted for it.
+   * A selection clipped down to its one visible row presents as
+   * `paths.length === 1`, indistinguishable from a single-row drag by count and
+   * entirely distinguishable by this flag.
+   */
+  readonly fromSelection: boolean;
 }
 
 export class CurrentDrag {
   private current: string[] = [];
   private clipped = false;
+  private selected = false;
 
   /** Copied, so the caller cannot edit the record through the array it passed. */
-  begin(paths: readonly string[], truncated: boolean): void {
+  begin(paths: readonly string[], truncated: boolean, fromSelection: boolean): void {
     this.current = [...paths];
     this.clipped = truncated;
+    this.selected = fromSelection;
   }
 
   end(): void {
-    // REASSIGNED rather than emptied in place, and that is load-bearing: the
-    // strip's drop handler reads the array out of this record and holds it
-    // across the awaits of the write that follows. Emptying in place would
-    // clear the list that drop is still working from the moment `dragend`
-    // arrives, which on a claimed drop is DURING the drop.
+    // REASSIGNED rather than emptied in place.
+    //
+    // Stated carefully, because the first version of this note overclaimed and
+    // the overclaim is the only thing that made it sound load-bearing. The
+    // strip's drop handler reads the record once and passes it on, and
+    // `filesDroppedOnSpace` resolves every path to a file SYNCHRONOUSLY before
+    // its first `await`, so no consumer today is holding this array across a
+    // suspension. The drag the strip sees is also one `DragOrdering` declined,
+    // never one it claimed, so the synthetic `dragend` that would fire DURING a
+    // drop is not in this picture either.
+    //
+    // What remains is a cheap invariant worth keeping rather than a defect
+    // narrowly averted: `paths()` hands out the live array, so anything that
+    // does start holding it across an await -- and an `await` added to
+    // `filesDroppedOnSpace` above its resolution loop is all it would take --
+    // keeps a list that still says what it said. `length = 0` in place would
+    // empty it under them. The guarantee is pinned in `currentDrag.test.ts`.
     this.current = [];
     this.clipped = false;
+    this.selected = false;
   }
 
   paths(): readonly string[] {
@@ -83,6 +131,6 @@ export class CurrentDrag {
    * complete.
    */
   dragged(): DraggedFiles {
-    return { paths: this.current, truncated: this.clipped };
+    return { paths: this.current, truncated: this.clipped, fromSelection: this.selected };
   }
 }

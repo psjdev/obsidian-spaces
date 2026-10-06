@@ -9,7 +9,13 @@
  * drop re-decided instead of honouring what was shown.
  */
 import { describe, expect, it } from "vitest";
-import { CLIPPED_SELECTION, spaceDropFor } from "../src/ui/spaceDrop";
+import {
+  CLIPPED_SELECTION,
+  MISSING_ROOT,
+  SELECTION_ONTO_FOLDER_SPACE,
+  dropTargetFor,
+  spaceDropFor,
+} from "../src/ui/spaceDrop";
 import type { SpaceDefinition } from "../src/types";
 
 /**
@@ -17,8 +23,8 @@ import type { SpaceDefinition } from "../src/types";
  * default is the ordinary case, a selection the DOM holds whole; the tests
  * that are ABOUT the clipping pass `true` and say so.
  */
-function drag(paths: readonly string[], truncated = false) {
-  return { paths, truncated };
+function drag(paths: readonly string[], truncated = false, fromSelection = false) {
+  return { paths, truncated, fromSelection };
 }
 
 /**
@@ -148,15 +154,25 @@ describe("spaceDropFor", () => {
    */
   it("refuses a drag whose selection may outrun the render window", () => {
     const d = spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md"], true), exists);
-    expect(d).toEqual({ kind: "refuse", reason: CLIPPED_SELECTION });
+    expect(d).toMatchObject({ kind: "refuse", reason: CLIPPED_SELECTION });
   });
 
   // Curated too: `addToSpace` would add only the visible rows and the notice
   // would count only those, so the add is as partial as the move.
   it("refuses a clipped drag on a curated space as well", () => {
-    expect(spaceDropFor(space(), drag(["Notes/a.md"], true), exists)).toEqual({
+    expect(spaceDropFor(space(), drag(["Notes/a.md"], true), exists)).toMatchObject({
       kind: "refuse",
       reason: CLIPPED_SELECTION,
+    });
+  });
+
+  // The space is named on the refusals that get spoken, because the strip is a
+  // row of icons and "the space" picks out none of them.
+  it("names the space on a refusal the user will be told about", () => {
+    expect(spaceDropFor(space({ name: "Archive" }), drag(["a.md"], true), exists)).toEqual({
+      kind: "refuse",
+      reason: CLIPPED_SELECTION,
+      spaceName: "Archive",
     });
   });
 
@@ -167,5 +183,113 @@ describe("spaceDropFor", () => {
       kind: "refuse",
       reason: "not a space",
     });
+  });
+});
+
+/**
+ * The second guard on the irreversible path, and why it is a different
+ * question from the first.
+ *
+ * `truncated` asks "might this list be short", and the predicate behind it is
+ * structurally blind on the top edge of the explorer's render window: an
+ * expanded folder's own row is permanently in the DOM, so `rendered[0]` is
+ * never a selected note and that half of the test cannot fire. `fromSelection`
+ * asks the question the DOM cannot get wrong -- "did this list come from a
+ * selection at all" -- and the move path refuses on it.
+ *
+ * Every test below passes `truncated: false`, which is the whole point: they
+ * pin behaviour in exactly the state where the first guard is quiet and wrong.
+ */
+describe("spaceDropFor and a selection aimed at a folder-pinned space", () => {
+  it("refuses the move, and says which space", () => {
+    expect(
+      spaceDropFor(
+        space({ name: "Archive", root: "Clients" }),
+        drag(["Notes/a.md", "Notes/b.md"], false, true),
+        exists
+      )
+    ).toEqual({
+      kind: "refuse",
+      reason: SELECTION_ONTO_FOLDER_SPACE,
+      spaceName: "Archive",
+    });
+  });
+
+  /**
+   * The mutation this exists to kill: `drag.paths.length > 1` written in place
+   * of `drag.fromSelection`.
+   *
+   * A selection clipped down to its one rendered row reaches this function
+   * carrying a single path. It is a selection, and the rest of it is invisible,
+   * so a count test waves through precisely the case that moves part of a
+   * gesture and reports it as all of it. That substitution passes every other
+   * test in this file and fails this one.
+   */
+  it("refuses a one-path selection, which a count test would let through", () => {
+    expect(
+      spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md"], false, true), exists).kind
+    ).toBe("refuse");
+  });
+
+  // The negative control for the rule as a whole. Without it, "refuse every
+  // move" would pass the two above.
+  it("still moves a single-row drag onto the same space", () => {
+    expect(
+      spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md"], false, false), exists)
+    ).toEqual({ kind: "move", spaceId: "s1", root: "Clients" });
+  });
+
+  /**
+   * The add path is deliberately untouched and keeps multi-select.
+   *
+   * `addToSpace` writes `data.json` and Remove undoes it, so collecting too few
+   * paths there is a wrong count the user can see and fix, not lost work. A
+   * version that put the `fromSelection` test above the curated/folder split
+   * would fail here while passing everything else.
+   */
+  it("still adds a selection to a curated space", () => {
+    expect(spaceDropFor(space(), drag(["a.md", "b.md"], false, true), exists)).toEqual({
+      kind: "add",
+      spaceId: "s1",
+    });
+  });
+
+  /**
+   * Order matters against the root checks. A folder space whose folder has been
+   * deleted is refused for THAT reason, which is a standing fact about the
+   * space, rather than being told to drag notes in one at a time to a folder
+   * that is not there.
+   */
+  it("reports a missing root rather than the selection limit", () => {
+    expect(
+      spaceDropFor(space({ root: "Projects" }), drag(["a.md", "b.md"], false, true), gone)
+    ).toMatchObject({ kind: "refuse", reason: MISSING_ROOT });
+  });
+
+  // And the clipped refusal still wins, because it is asked before the
+  // curated/folder split and is true of both kinds of space.
+  it("reports a clipped selection rather than the selection limit", () => {
+    expect(
+      spaceDropFor(space({ root: "Clients" }), drag(["a.md"], true, true), exists)
+    ).toMatchObject({ kind: "refuse", reason: CLIPPED_SELECTION });
+  });
+});
+
+describe("dropTargetFor and the selection limit", () => {
+  // It comes back rather than collapsing to null, which is what lets the
+  // listener speak. It still lights nothing: the caller lights for add and
+  // move only.
+  it("hands the refusal back so the listener can voice it", () => {
+    expect(
+      dropTargetFor(null, space({ root: "Clients" }), drag(["a.md"], false, true), exists)
+    ).toMatchObject({ kind: "refuse", reason: SELECTION_ONTO_FOLDER_SPACE });
+  });
+
+  // While a refusal nobody has worded still collapses to null, so the pointer
+  // passes through and the "no drop" cursor explains it for free.
+  it("still swallows a refusal that is not spoken", () => {
+    expect(
+      dropTargetFor(null, space({ root: "Clients" }), drag(["Clients"], false, false), exists)
+    ).toBeNull();
   });
 });

@@ -5,16 +5,19 @@
  * only the function both listeners ask: a reorder is ignored, a file drag over
  * a space that would act is answered, and everything else is null.
  *
- * It does NOT cover the listeners themselves: `preventDefault`, the
- * `dropEffect` mapping, `dragleave`, the drop-mark class or the scroll tick's
- * gating. That behavior is covered by the e2e task against a real browser.
+ * It does NOT cover the listeners themselves. Most of that is covered by
+ * `switcherDropListeners.test.ts`, which drives a real `SwitcherView` in a DOM:
+ * `preventDefault`, the drop-mark class, `dragleave` and the refusals that get
+ * spoken. What no unit layer covers is the `dropEffect` mapping and the scroll
+ * tick's gating, because jsdom lays nothing out and sets no effective drag
+ * data; those are the e2e task's against a real browser.
  */
 import { describe, expect, it } from "vitest";
 import { CLIPPED_SELECTION, dropTargetFor } from "../src/ui/spaceDrop";
 import type { SpaceDefinition } from "../src/types";
 
-function drag(paths: readonly string[], truncated = false) {
-  return { paths, truncated };
+function drag(paths: readonly string[], truncated = false, fromSelection = false) {
+  return { paths, truncated, fromSelection };
 }
 
 /** The vault's answer about a space's root folder. */
@@ -60,7 +63,9 @@ describe("dropTargetFor", () => {
    */
   it("returns the clipped refusal so the listener can voice it", () => {
     const t = dropTargetFor(null, space({ root: "Clients" }), drag(["Notes/a.md"], true), exists);
-    expect(t).toEqual({ kind: "refuse", reason: CLIPPED_SELECTION });
+    // `toMatchObject`, because the refusal also carries the space's name for
+    // the words to use. The reason is what this test is about.
+    expect(t).toMatchObject({ kind: "refuse", reason: CLIPPED_SELECTION });
   });
 
   it("still ignores a clipped drag during a reorder", () => {
