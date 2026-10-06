@@ -87,6 +87,12 @@ Click **All** to leave the space and see the whole vault again.
 
 ## Adding and removing things later
 
+Drag a note or folder from the file tree onto a space's icon in the strip to add it to that space. Select several and they all go in together. The icon marks itself while you hover, so the one that lights is the one that will take the drop, and a notice afterwards says what was added. Nothing moves on disk: the note stays exactly where it is and the space gains a member.
+
+A space pinned to a folder declines the drop and says why. It shows that folder's contents rather than a member list, so there is nothing for a drop to add to. To put a note inside that folder, use Obsidian's own "Move file to...".
+
+The drag needs a pointer. From the keyboard, the context menu below does the same job.
+
 Right-click a row in the file tree:
 
 - In **All**, **Add to space** offers each of your spaces.
@@ -218,8 +224,8 @@ The plugin makes no network requests. A test (`tests/noNetwork.test.ts`) scans t
 - One active space per window, applied to every file-explorer leaf.
 - A space's kind is fixed at creation: a curated space cannot become folder pinned, or the reverse.
 - Dragging to reorder rows or spaces needs a pointer; both gestures stand down on touch.
-- Dropping notes and folders on a space icon needs a pointer too. From the keyboard, use the file explorer's context menu: "Add to space" for a curated space, or Obsidian's own "Move file to..." for a space pinned to a folder.
-- A space pinned to a folder takes one note or folder per drop. To move several at once, select them and use "Move file to..." instead.
+- Dropping notes and folders on a space icon needs a pointer too. From the keyboard, use the file explorer's context menu: "Add to space".
+- A space pinned to a folder does not take the drop at all, because it has no member list. Use Obsidian's own "Move file to..." to put a note inside its folder.
 - The item picker in the creation form draws at most 200 rows at a time and tells you how many more matched. Keep typing to narrow it.
 
 ## Development
