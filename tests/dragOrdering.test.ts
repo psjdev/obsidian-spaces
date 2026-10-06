@@ -143,6 +143,57 @@ describe("DragOrdering", () => {
     return d;
   }
 
+  describe("publishing the drag", () => {
+    it("hands onDragBegin the collected paths at dragstart, and onDragDone at dragend", () => {
+      const onDragBegin = vi.fn();
+      const onDragDone = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      deps.onDragDone = onDragDone;
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      // The ARGUMENT is the point: a version that published [] every time
+      // would still satisfy "it was called".
+      expect(onDragBegin).toHaveBeenCalledTimes(1);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"]);
+      expect(onDragDone).not.toHaveBeenCalled();
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+    });
+
+    it("publishes an empty list for a dragstart that lands on no row", () => {
+      const onDragBegin = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      fire(tree.container, "dragstart", 9999);
+      expect(onDragBegin).toHaveBeenCalledTimes(2);
+      expect(onDragBegin).toHaveBeenLastCalledWith([]);
+    });
+
+    it("has not called onDragDone when a DECLINED drop reaches a bubble listener", () => {
+      // The guarantee this hook exists for. A drop on a folder's middle is
+      // declined by the capture handler (Obsidian owns that move), so it
+      // propagates on to whatever listens in the bubble phase, which is where
+      // the space strip will be. The paths must still be live there.
+      //
+      // A CLAIMED drop is different on purpose: `endNativeDrag` dispatches a
+      // synthetic dragend, so onDragDone fires during it. Nothing else should
+      // be acting on a drop this class has already consumed.
+      const onDragDone = vi.fn();
+      deps.onDragDone = onDragDone;
+      let doneAtBubble = -1;
+      tree.rows["G"].addEventListener("drop", () => {
+        doneAtBubble = onDragDone.mock.calls.length;
+      });
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      fire(tree.rows["G"], "drop", 48 + ROW_H / 2);
+      expect(doneAtBubble).toBe(0);
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("NEVER preventDefaults a dragstart", () => {
     // The constraint with the widest blast radius: suppressing dragstart breaks
     // dragging a note into the editor to make a link, onto a tab, and out of
