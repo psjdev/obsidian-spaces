@@ -1,12 +1,14 @@
 import {
   FileView,
   Menu,
+  normalizePath,
   Notice,
   Platform,
   Plugin,
   TFile,
   TFolder,
   type Command,
+  type TAbstractFile,
   type WorkspaceLeaf,
 } from "obsidian";
 import { DefinitionStore } from "./definitions/DefinitionStore";
@@ -33,7 +35,9 @@ import {
   type VaultEventRecord,
 } from "./lifecycle/moveCorrelator";
 import { createVaultChangeCoalescer } from "./lifecycle/eventCoalescer";
-import { registerMembershipMenus } from "./actions/membership";
+import { addToSpace, registerMembershipMenus } from "./actions/membership";
+import { CurrentDrag } from "./order/currentDrag";
+import { spaceDropFor } from "./ui/spaceDrop";
 import {
   createSpace,
   renameSpace,
@@ -273,6 +277,14 @@ export default class SpacesPlugin extends Plugin {
   private runtimeWriteWarned = false;
   private adapter = new ExplorerAdapter();
   private switcher: SwitcherView | null = null;
+  /**
+   * What the live drag carries, shared between the tree and the strip.
+   *
+   * Owned here rather than by either of them: `DragOrdering` publishes to it
+   * and `SwitcherView` reads it, and neither should have to know the other
+   * exists. Both reach it through callbacks for the same reason.
+   */
+  private readonly currentDrag = new CurrentDrag();
   private header: SpaceHeaderView | null = null;
   /** The one-shot gesture a native create may be attributed to. */
   private creationIntent: CreationIntent | null = null;
@@ -1644,7 +1656,9 @@ export default class SpacesPlugin extends Plugin {
               return;
             }
             this.restoreSavedOrdering();
-          }
+          },
+          () => this.currentDrag.paths(),
+          (spaceId, paths) => void this.filesDroppedOnSpace(spaceId, paths)
         );
         this.switcher.mount(leafRoot);
         this.switcher.applyPlacement(this.defs.get().settings.stripPlacement);
@@ -2664,6 +2678,87 @@ export default class SpacesPlugin extends Plugin {
    * The dependencies. Every one of them is a lookup or a write — the drag's
    * decisions live in `dropIntent.ts`, and none of them belong here.
    */
+  /**
+   * A note or folder was dropped on a space icon.
+   *
+   * `spaceDropFor` already decided this is an add or a move and the icon said
+   * so, so this does not re-decide; it resolves the paths and carries out the
+   * one answer. Asking again here is what made the drag indicator a lie once
+   * before, where it read `destination=Travel` while the file landed at the
+   * vault root.
+   */
+  private async filesDroppedOnSpace(spaceId: string, paths: readonly string[]): Promise<void> {
+    const space = this.defs.get().spaces.find((s) => s.id === spaceId);
+    if (!space) return;
+    // A path can go stale between the dragstart and the drop: the file was
+    // renamed, or deleted, or an outside change removed it. Those are skipped
+    // and the rest still land, rather than failing the whole drop.
+    const files = paths
+      .map((p) => this.app.vault.getAbstractFileByPath(p))
+      .filter((f): f is TAbstractFile => f !== null);
+    if (files.length === 0) {
+      new Notice("Spaces: nothing was left to add");
+      return;
+    }
+    const drop = spaceDropFor(space, files.map((f) => f.path));
+    if (drop.kind === "refuse") return;
+    if (drop.kind === "add") {
+      await addToSpace(
+        { defs: this.defs, controller: this.controller },
+        spaceId,
+        files
+      );
+      return;
+    }
+    await this.moveIntoRoot(files, drop.root, space.name);
+  }
+
+  /**
+   * A folder space renders from its root and never shows a member list, so
+   * adding to one would appear to do nothing. The user's answer was to move
+   * the file instead, which is what dragging into that space's tree already
+   * does. `fileManager.renameFile` is the call Obsidian uses itself, so links
+   * follow the file.
+   */
+  private async moveIntoRoot(
+    files: TAbstractFile[],
+    root: string,
+    spaceName: string
+  ): Promise<void> {
+    const moved: TAbstractFile[] = [];
+    const already: TAbstractFile[] = [];
+    const blocked: string[] = [];
+    for (const f of files) {
+      const parent = f.parent?.path === "/" ? "" : (f.parent?.path ?? "");
+      if (canonicalPath(parent) === canonicalPath(root)) {
+        already.push(f);
+        continue;
+      }
+      try {
+        await this.app.fileManager.renameFile(f, normalizePath(`${root}/${f.name}`));
+        moved.push(f);
+      } catch {
+        // The commonest cause by far is a file of that name already sitting in
+        // the root, so the name is what the user needs to hear.
+        blocked.push(f.name);
+      }
+    }
+    if (blocked.length > 0) {
+      new Notice(`Spaces: ${blocked.join(", ")} could not move into ${spaceName}`);
+      return;
+    }
+    if (moved.length === 0 && already.length > 0) {
+      const verb = already.length === 1 ? "is" : "are";
+      new Notice(
+        `${already.length === 1 ? already[0].name : `${already.length} notes and folders`} ` +
+          `${verb} already in ${spaceName}`
+      );
+      return;
+    }
+    const what = moved.length === 1 ? moved[0].name : `${moved.length} notes and folders`;
+    new Notice(`Moved ${what} into ${spaceName}`);
+  }
+
   private dragDeps(): ConstructorParameters<typeof DragOrdering>[0] {
     return {
       describeRow: (path) => {
@@ -2688,6 +2783,15 @@ export default class SpacesPlugin extends Plugin {
       },
       writeOrder: (folderPath, order) => this.writeOrderFor(folderPath, order),
       indicatorStyle: () => this.defs.get().settings.dropIndicatorStyle,
+      onDragBegin: (paths) => this.currentDrag.begin(paths),
+      // The one place that learns every drag has ended, however it ended. The
+      // strip never hears `dragend` for a file drag (its source is a tree row),
+      // so an icon lit under an Escaped drag is cleared from here, and the
+      // switcher is created lazily so it may not exist yet.
+      onDragDone: () => {
+        this.currentDrag.end();
+        this.switcher?.clearDropTarget();
+      },
       // `DragOrdering` declines the drop on its own — this hook only
       // voices it. Without it the user sees Obsidian complete the move (which
       // is the right outcome: the whole selection travels) while the ordering

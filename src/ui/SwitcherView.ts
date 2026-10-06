@@ -937,7 +937,10 @@ export class SwitcherView {
     });
 
     // Fires whether the drag ended in a drop, outside the strip, or on Escape,
-    // so it is the only teardown that is guaranteed to run.
+    // so it is the only teardown guaranteed to run for a REORDER, whose source
+    // is an icon in this rail. A file drag's source is a tree row the rail never
+    // hears `dragend` from; that one is torn down through `clearDropTarget`,
+    // called from the plugin's drag-done callback.
     rail.addEventListener("dragend", () => this.endDrag(rail, line));
 
     rail.addEventListener("dragleave", (e) => {
@@ -1015,6 +1018,9 @@ export class SwitcherView {
    */
   clearDropTarget(): void {
     this.markDropTarget(null);
+    // Stopped here so the guarantee is local: the loop would also end once the
+    // published paths go empty, but that rests on the caller's call order.
+    this.stopDragScrolling?.();
   }
 
   /** Set by `wireReorder`; torn down with the view. */
