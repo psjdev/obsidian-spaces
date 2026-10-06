@@ -41,3 +41,22 @@ export function spaceDropFor(
 
   return { kind: "move", spaceId: space.id, root };
 }
+
+/**
+ * The one question both listeners ask: is there something to do here?
+ *
+ * Null means "not ours": do not light the icon, do not call
+ * `preventDefault()`, let the event pass. That covers a reorder (which the
+ * existing branch owns), a pointer over no space, a pointer with no file drag
+ * behind it, and a refusal. Collapsing all four into one null is what keeps
+ * the two listeners from drifting apart.
+ */
+export function dropTargetFor(
+  dragFromId: string | null,
+  space: SpaceDefinition | null,
+  paths: readonly string[]
+): Exclude<SpaceDrop, { kind: "refuse" }> | null {
+  if (dragFromId !== null) return null;
+  const drop = spaceDropFor(space, paths);
+  return drop.kind === "refuse" ? null : drop;
+}

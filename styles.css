@@ -140,6 +140,20 @@
    theme; only the rung is ours. */
 .spaces-switcher .spaces-switcher-item:hover { opacity: 0.85; }
 
+/* The icon a drop would land on. Drawn from `--interactive-accent`, the same
+   source as the drag box and the picker's covered rows, so the three read as
+   one family. Applied only when `spaceDropFor` says the drop would act, so an
+   icon that lights is an icon that will do something. Scoped through
+   `.spaces-switcher` and placed after the opacity ladder so it wins on
+   specificity and order, and full opacity so the mark is not dimmed to the
+   inactive rung. */
+.spaces-switcher .spaces-switcher-item.is-drop-target,
+.spaces-switcher .spaces-switcher-item.is-drop-target:hover {
+  opacity: 1;
+  background: color-mix(in oklch, var(--interactive-accent) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
 .spaces-switcher-item:focus-visible,
 .spaces-switcher-add:focus-visible,
 .spaces-space-header-icon[role="button"]:focus-visible,

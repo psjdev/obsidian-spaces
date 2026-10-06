@@ -31,7 +31,8 @@ import { iconColorFor } from "./spaceIconColor";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { SpaceController } from "../controller/SpaceController";
-import type { ActiveSelection, StripPlacement } from "../types";
+import type { ActiveSelection, SpaceDefinition, StripPlacement } from "../types";
+import { dropTargetFor } from "./spaceDrop";
 
 /** The four candidate placements a drag can land on, in a fixed order. */
 const PLACEMENTS: readonly StripPlacement[] = ["top", "bottom", "left", "right"];
@@ -147,6 +148,12 @@ export class SwitcherView {
   private dragPointerAlong = 0;
   private dragRaf = 0;
   /**
+   * The one icon wearing `is-drop-target`, or null. Held as a field so
+   * `markDropTarget` can take the mark off the previous icon without
+   * querying the rail, and so a fast drag can never leave two icons lit.
+   */
+  private dropTargetEl: HTMLElement | null = null;
+  /**
    * The one popover this view has open, or null.
    *
    * Held because `AnchoredPopover` adds four listeners to `document` that only
@@ -164,7 +171,10 @@ export class SwitcherView {
     private onCreateClicked: () => void,
     /** Shown only while that space renders with Obsidian's sort. */
     private isSortOverridden: (key: ActiveSelection) => boolean,
-    private onRestoreOrdering: (key: ActiveSelection) => void
+    private onRestoreOrdering: (key: ActiveSelection) => void,
+    /** What the live drag carries, for a drag that did not start on the strip. */
+    private currentDragPaths: () => readonly string[],
+    private onFilesDroppedOnSpace: (spaceId: string, paths: readonly string[]) => void
   ) {}
 
   /** The axis the strip's icons run along, for the current placement. */
@@ -207,6 +217,7 @@ export class SwitcherView {
     // itself while `dragFromId` is set. Dropping the element without clearing
     // both would leave that loop running forever against a detached rail.
     this.dragFromId = null;
+    this.dropTargetEl = null;
     this.stopDragScrolling?.();
     this.stopDragScrolling = null;
     // A picker anchored to one of these icons outlives the element it points
@@ -822,7 +833,10 @@ export class SwitcherView {
 
     const tick = (): void => {
       this.dragRaf = 0;
-      if (this.dragFromId === null) return;
+      const reordering = this.dragFromId !== null;
+      // A file drag scrolls the rail too, so an icon off the end is reachable
+      // without letting go. It draws no line: there is no gap to point at.
+      if (!reordering && this.currentDragPaths().length === 0) return;
       const vertical = this.axis === "y";
       const railSpan = spanOf(rail.getBoundingClientRect(), this.axis);
       const step = edgeScrollStep(this.dragPointerAlong, railSpan);
@@ -833,7 +847,7 @@ export class SwitcherView {
       // Recomputed every frame, not only on pointer movement: the pointer can
       // be perfectly still while the rail moves under it, and the gap it points
       // at changes anyway.
-      update();
+      if (reordering) update();
       if (step !== 0) startScrolling();
     };
 
@@ -844,7 +858,24 @@ export class SwitcherView {
     };
 
     rail.addEventListener("dragover", (e) => {
-      if (this.dragFromId === null) return;
+      if (this.dragFromId === null) {
+        // A drag that did not start on the strip. The only one we act on is a
+        // file drag over an icon that would do something; everything else
+        // falls through untouched, so the event reaches whatever is beneath.
+        const over = this.spaceElAt(e.target);
+        const target = dropTargetFor(null, this.spaceFor(over), this.currentDragPaths());
+        this.markDropTarget(target === null ? null : over);
+        if (target === null) return;
+        // Same reason the reorder branch cancels: nothing permits a drop in
+        // our own strip, and without this the `drop` event never fires.
+        e.preventDefault();
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = target.kind === "move" ? "move" : "copy";
+        }
+        this.dragPointerAlong = pointerAlong(e, this.axis);
+        startScrolling();
+        return;
+      }
       // Calling `preventDefault()` here must not happen for the FILE TREE,
       // where Obsidian's own handler already permits the drop. Nothing
       // permits a drop in our own strip, though, and without cancelling here
@@ -859,7 +890,22 @@ export class SwitcherView {
     });
 
     rail.addEventListener("drop", (e) => {
-      if (this.dragFromId === null) return;
+      if (this.dragFromId === null) {
+        const over = this.spaceElAt(e.target);
+        // Re-asked HERE against the definitions as they are at the drop, the
+        // same discipline the reorder uses for its index: a space deleted
+        // while the drag was in flight resolves to null and refuses.
+        // The paths are read here, during the drop, because DragOrdering
+        // declines a drop on the strip and so the record is still live; a
+        // claimed drop would already have cleared it.
+        const paths = this.currentDragPaths();
+        const target = dropTargetFor(null, this.spaceFor(over), paths);
+        this.markDropTarget(null);
+        if (target === null) return;
+        e.preventDefault();
+        this.onFilesDroppedOnSpace(target.spaceId, paths);
+        return;
+      }
       e.preventDefault();
       const railSpan = spanOf(rail.getBoundingClientRect(), this.axis);
       const boxes = boxesOf(spaceEls(), railSpan);
@@ -885,6 +931,13 @@ export class SwitcherView {
     // Fires whether the drag ended in a drop, outside the strip, or on Escape,
     // so it is the only teardown that is guaranteed to run.
     rail.addEventListener("dragend", () => this.endDrag(rail, line));
+
+    rail.addEventListener("dragleave", (e) => {
+      // Only when the pointer actually left the rail, not when it crossed
+      // between two icons inside it.
+      if (e.relatedTarget instanceof Node && rail.contains(e.relatedTarget)) return;
+      this.markDropTarget(null);
+    });
     this.stopDragScrolling = stopScrolling;
   }
 
@@ -903,11 +956,47 @@ export class SwitcherView {
     return at < 0 ? null : at;
   }
 
+  /** The icon under the pointer, or null when the pointer is between them. */
+  private spaceElAt(target: EventTarget | null): HTMLElement | null {
+    const node = target instanceof Node ? target : null;
+    if (!node) return null;
+    const el = node.instanceOf(HTMLElement) ? node : node.parentElement;
+    const item = el?.closest<HTMLElement>(".spaces-switcher-item") ?? null;
+    // *All* and the `+` carry no `spaceId`, which is what makes them decline.
+    return item?.dataset.spaceId === undefined ? null : item;
+  }
+
+  private spaceFor(el: HTMLElement | null): SpaceDefinition | null {
+    const id = el?.dataset.spaceId;
+    if (id === undefined) return null;
+    return this.defs.get().spaces.find((s) => s.id === id) ?? null;
+  }
+
+  /** At most one icon wears the mark, so a fast drag cannot leave two lit. */
+  private markDropTarget(el: HTMLElement | null): void {
+    if (this.dropTargetEl === el) return;
+    this.dropTargetEl?.classList.remove("is-drop-target");
+    el?.classList.add("is-drop-target");
+    this.dropTargetEl = el;
+  }
+
+  /**
+   * Takes the drop mark off, for a drag that ended without the pointer ever
+   * leaving the icon -- Escape, or a drop refused elsewhere. `dragend` fires on
+   * the drag SOURCE, a row in the file tree, so the rail never hears it and
+   * `dragleave` never fires either. `main.ts` calls this from the one callback
+   * that learns every drag has ended, however it ended.
+   */
+  clearDropTarget(): void {
+    this.markDropTarget(null);
+  }
+
   /** Set by `wireReorder`; torn down with the view. */
   private stopDragScrolling: (() => void) | null = null;
 
   private endDrag(rail: HTMLElement, line: HTMLElement): void {
     this.dragFromId = null;
+    this.markDropTarget(null);
     line.hidden = true;
     this.stopDragScrolling?.();
     rail
