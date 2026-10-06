@@ -149,6 +149,10 @@ async function makeHarness(
     mount: () => undefined,
     render: () => undefined,
     applyPlacement: () => undefined,
+    // Reached from `dragDeps().onDragDone`, which runs at the top of every
+    // `dragstart`. A stand-in without it throws into `DragOrdering`'s own
+    // `guard`, which swallows it, and the drag then publishes nothing at all.
+    clearDropTarget: () => undefined,
   } as unknown as SwitcherView;
   plugin["header"] = { mount: () => undefined, render: () => undefined } as unknown as SpaceHeaderView;
   return { plugin, leaves, live };
@@ -380,5 +384,64 @@ describe("the re-sort memo", () => {
     h.plugin["controller"].refresh();
     resort(h);
     expect(view.sorts).toBeGreaterThan(after);
+  });
+});
+
+/**
+ * "Allow reordering a space's notes and folders" governs the ordering GESTURE.
+ * It does not govern whether `DragOrdering` has listeners at all.
+ *
+ * The distinction is not pedantry. `DragOrdering` also PUBLISHES what a drag is
+ * carrying, and the space strip reads that publication to decide whether a note
+ * may be dropped on a space icon. `applyFilterAndOrdering` used to `unbind()`
+ * when the setting was off and to wrap the `bind()` in the same condition, so
+ * the class had no listeners, nothing was ever published, and dropping a note
+ * on a space icon was dead outright: no icon, no drop, no notice, after one
+ * click in a settings pane that says nothing about putting notes into spaces.
+ *
+ * The harness above turns the setting OFF, which is why these tests live here:
+ * this is the exact state the defect needed.
+ */
+describe("the reordering setting gates the gesture, not the listeners", () => {
+  it("binds the drag with reordering turned off", async () => {
+    const view = makeView();
+    const h = await makeHarness([{ view }]);
+    expect(h.plugin["defs"].get().settings.allowReordering).toBe(false);
+    ensure(h);
+    expect(h.plugin["dragOrdering"]).toBeDefined();
+  });
+
+  /**
+   * And the binding is LIVE, not merely constructed. Asserted through the
+   * publication rather than by reading a private field, because the publication
+   * is what the strip consumes: a `dragstart` on a real row has to reach
+   * `currentDrag`, or the drop gesture has nothing to act on.
+   */
+  it("still publishes what a drag carries, which is what the space strip reads", async () => {
+    const view = makeView();
+    const h = await makeHarness([{ view }]);
+    ensure(h);
+    const self = containerOf(view).querySelector<HTMLElement>('[data-path="Papers/Draft.md"]');
+    if (!self) throw new Error("the fake view has no row to drag");
+    self.dispatchEvent(new MouseEvent("dragstart", { bubbles: true, cancelable: true }));
+    expect(h.plugin["currentDrag"].dragged().paths).toEqual(["Papers/Draft.md"]);
+  });
+
+  /**
+   * The negative that keeps the fix honest. Gating the binding was a real gate
+   * on a real thing, and removing it must not let a blocked drag start writing
+   * orders. It does not: the gesture is refused per `dragstart` by `enabled()`,
+   * which reads this same setting through `orderingEnabledFor`.
+   */
+  it("still refuses the ordering gesture itself", async () => {
+    const view = makeView();
+    const h = await makeHarness([{ view }]);
+    expect(h.plugin["dragDeps"]().enabled()).toBe(false);
+    await h.plugin["defs"].mutate((d) => {
+      d.settings.allowReordering = true;
+    });
+    // The discriminator: without it, an `enabled()` hard-wired to false would
+    // pass the assertion above.
+    expect(h.plugin["dragDeps"]().enabled()).toBe(true);
   });
 });

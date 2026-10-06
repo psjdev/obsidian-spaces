@@ -599,7 +599,27 @@ export class DragOrdering {
         this.publishDrag(null);
         return;
       }
-      this.armDragEnd(row.el);
+      // ARMED FROM THE EVENT TARGET, not from `rowAt`'s answer, and the
+      // difference is the original defect's exact shape surviving on the path
+      // everyone assumed was safe.
+      //
+      // `rowAt` answers "which row is this POINTER over", which is a mid-drag
+      // question: it tries the target first and then falls back to a geometric
+      // nearest-row search, because a pointer in the 2px gap between two rows
+      // still has to resolve to one. At `dragstart` that fallback can hand back
+      // a row the drag did NOT start on, and arming THAT row leaves the real
+      // source with no `dragend` listener of its own. The source is exactly
+      // what gets replaced when a drop re-renders the tree, the document
+      // listener never hears a `dragend` dispatched at a detached node, and the
+      // record then outlives its drag -- which is the chain the blocked path
+      // was fixed for.
+      //
+      // `rowFromTarget` is exact here: `dragstart` fires ON the element
+      // carrying `draggable`, so `closest()` cannot resolve a different row.
+      // The fallback to `row` is kept for the case it cannot resolve one at
+      // all, where arming something beats arming nothing, and it is the
+      // behaviour this line already had.
+      this.armDragEnd((this.rowFromTarget(e.target) ?? row).el);
       const collected = this.publishDrag(row);
       this.dragged = collected.paths;
       this.draggedTruncated = collected.truncated;
@@ -674,6 +694,41 @@ export class DragOrdering {
    * a folder the user has since COLLAPSED is not rendered and is not adjacent
    * to the window's edges either, so this cannot see it. Nothing in the public
    * DOM can.
+   *
+   * SECOND BLIND SPOT, AND A STRUCTURAL ONE: THE TOP-EDGE HALF OF THIS TEST
+   * CANNOT FIRE FOR A SELECTION INSIDE AN EXPANDED FOLDER.
+   *
+   * `rendered[0]` is read to ask whether the selection runs off the TOP of the
+   * render window. Obsidian's virtualiser keeps the ANCESTOR CHAIN of
+   * everything it renders, and a folder's own row is a sibling of the container
+   * holding its children, so an expanded folder's row stays in the DOM however
+   * far its children have scrolled away above the window. `rendered[0]` is
+   * therefore that folder's row and never one of the selected notes, so
+   * `first.matches(SEL.selectedRow)` is false no matter how much of the
+   * selection has detached above. Only the `last` half ever reports anything.
+   *
+   * Measured, not reasoned. It was driven against a running vault with a
+   * 401-note folder expanded: every step of a downward scroll reported the
+   * first rendered row as the folder's own and unselected, while the selected
+   * block drained away above the window. That harness lives outside this
+   * repository, so there is no path here to cite; the measurement is recorded
+   * at the predicate because this is where the person fixing it will look.
+   *
+   * WHAT IT COSTS TODAY. A selection clipped only at the top reports
+   * `truncated: false`, so both consumers act on the visible fraction:
+   * `onDrop` claims the reorder, and the space strip adds the rows it can see
+   * as members and reports that count as the whole gesture. Both are
+   * recoverable -- an order can be rewritten, a member removed -- which is why
+   * this is a recorded defect rather than a blocker. It was NOT recoverable for
+   * as long as a drop on a folder-pinned space moved files on disk, and that
+   * gesture is deferred partly on this.
+   *
+   * A FIX HAS TO SEE PAST THE ANCESTOR ROWS. Asking whether the first rendered
+   * row that is a LEAF of the selection's own folder is selected, or comparing
+   * the scroller's offset against the selection's own extent, are the two
+   * shapes worth trying. Neither has been attempted, and `.is-selected` is not
+   * authoritative in the first place (see `collectDragged`), so anything built
+   * here needs its own measurement against a real virtualised tree.
    */
   private selectionMayBeClipped(rendered: readonly Element[]): boolean {
     const c = this.container;

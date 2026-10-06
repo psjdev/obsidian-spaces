@@ -245,6 +245,37 @@ describe("DragOrdering", () => {
       expect(onDragDone).toHaveBeenCalledTimes(2);
     });
 
+    /**
+     * The armed path arms the row the EVENT fired on, not the row the pointer
+     * happens to be over.
+     *
+     * `rowAt` answers a mid-drag question -- which row is this pointer over --
+     * and falls back to a geometric nearest-row search to do it, because the
+     * 2px gap between rows would otherwise be a dead zone. At `dragstart` that
+     * fallback can answer with a row the drag did not start on, and arming THAT
+     * row leaves the real source with no `dragend` listener: the original
+     * stale-record defect's exact shape, on the path everyone assumed was safe.
+     *
+     * The pointer is put over the SECOND row while the event fires on the
+     * first. `rowAt` resolves the target first today, so this passes either
+     * way; what it pins is that arming stops depending on that internal
+     * precedence. Reorder `rowAt` to try geometry first and this is the test
+     * that fails.
+     */
+    it("arms the row the dragstart fired on, not the row under the pointer", () => {
+      const onDragDone = vi.fn();
+      deps.onDragBegin = vi.fn();
+      deps.onDragDone = onDragDone;
+      boundDrag();
+      const row = tree.rows["F/a.md"];
+      // Well inside `F/b.md`'s stubbed rect, so a geometric answer differs.
+      fireOnSelf(row, "dragstart", ROW_H + ROW_H / 2);
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+      row.remove();
+      row.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
+    });
+
     it("publishes an empty list for a dragstart that lands on no row", () => {
       const onDragBegin = vi.fn();
       deps.onDragBegin = onDragBegin;

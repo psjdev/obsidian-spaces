@@ -2335,16 +2335,29 @@ export default class SpacesPlugin extends Plugin {
     }
 
     if (views.length === 0) return;
-    // The setting governs the ordering GESTURE (the drag) and the
-    // ordering HALF of the transform — `orderMapFor` already returns
-    // `undefined` when this is off, which is what makes `filterAndOrderFolder`
-    // fall back to filtered-but-unordered. It must never govern visibility:
-    // filtering rides this same patch, so tearing the patch down
-    // here — as this used to do — would silently show the whole vault in
-    // every space to a user who only meant to turn off row dragging. Only the
-    // gesture is gated; the patch installs unconditionally below.
-    const allowReordering = this.defs.get().settings.allowReordering;
-    if (!allowReordering) this.dragOrdering?.unbind();
+    // "Allow reordering a space's notes and folders" governs the ordering
+    // GESTURE (the drag) and the ordering HALF of the transform -- `orderMapFor`
+    // already returns `undefined` when this is off, which is what makes
+    // `filterAndOrderFolder` fall back to filtered-but-unordered. It must never
+    // govern visibility: filtering rides this same patch, so tearing the patch
+    // down here -- as this used to do -- would silently show the whole vault in
+    // every space to a user who only meant to turn off row dragging.
+    //
+    // AND IT MUST NOT GOVERN THE LISTENERS EITHER, which is the half this code
+    // got wrong for longer. It used to `unbind()` here and wrap the `bind()`
+    // below in the same condition, so with the setting off `DragOrdering` had
+    // no listeners at all. That is a coarser gate than the setting describes:
+    // the class also PUBLISHES what a drag is carrying, which is what the space
+    // strip reads to decide whether a note may be dropped on an icon. With no
+    // listeners nothing is published, so the drop gesture was dead outright --
+    // no icon, no drop, no notice -- after one click in a settings pane that
+    // says nothing about spaces taking notes.
+    //
+    // The gesture is gated where it belongs, per `dragstart`, by `enabled()` in
+    // `dragDeps()`: `orderingEnabledFor` reads this exact setting, so a blocked
+    // drag still never writes an order. Both the patch and the listeners now
+    // install unconditionally below. The one thing that still unbinds is the
+    // lost sort seam, which is a different fact about a different thing.
 
     // The seam is a property of the Obsidian BUILD, not of one pane, so one
     // "ok" is enough to say the build still exposes it. Taking the
@@ -2370,26 +2383,25 @@ export default class SpacesPlugin extends Plugin {
       return;
     }
 
-    if (allowReordering) {
-      // The drag binds to the same container the adapter does, and for
-      // the same reason — `changeLayout()` replaces it on every switch, so
-      // anything bound once at load would be listening to a detached node.
-      // Gated the same as the unbind above: only the gesture is governed by
-      // the setting.
-      // The PRIMARY pane only, and deliberately. A drag is one
-      // gesture in one pane; what it writes is an order in `defs`, which the
-      // re-sort below then applies to every patched pane, so the RESULT is
-      // multi-leaf even though the gesture is not. Binding a second
-      // `DragOrdering` would need a second instance to own its listeners and
-      // a second teardown in `onunload` to take them off, which is a listener
-      // -ownership change rather than part of this seam.
-      const container = (views[0] as { containerEl?: HTMLElement }).containerEl?.querySelector<HTMLElement>(
-        SEL.container
-      );
-      if (container) {
-        this.dragOrdering ??= new DragOrdering(this.dragDeps());
-        this.dragOrdering.bind(container);
-      }
+    // The drag binds to the same container the adapter does, and for
+    // the same reason — `changeLayout()` replaces it on every switch, so
+    // anything bound once at load would be listening to a detached node.
+    // UNCONDITIONAL, for the reason written out above: these listeners feed the
+    // space strip as well as the reorder, and only the reorder is the setting's
+    // business.
+    // The PRIMARY pane only, and deliberately. A drag is one
+    // gesture in one pane; what it writes is an order in `defs`, which the
+    // re-sort below then applies to every patched pane, so the RESULT is
+    // multi-leaf even though the gesture is not. Binding a second
+    // `DragOrdering` would need a second instance to own its listeners and
+    // a second teardown in `onunload` to take them off, which is a listener
+    // -ownership change rather than part of this seam.
+    const container = (views[0] as { containerEl?: HTMLElement }).containerEl?.querySelector<HTMLElement>(
+      SEL.container
+    );
+    if (container) {
+      this.dragOrdering ??= new DragOrdering(this.dragDeps());
+      this.dragOrdering.bind(container);
     }
 
     for (const view of views) {
