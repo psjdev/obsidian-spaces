@@ -2749,6 +2749,10 @@ export default class SpacesPlugin extends Plugin {
     const carried = files.filter(insideDraggedFolder);
     const toMove = files.filter((f) => !insideDraggedFolder(f));
     for (const f of toMove) {
+      // The one live read in this loop. It is safe BECAUSE of the prune above
+      // (`insideDraggedFolder`): no file left in `toMove` sits inside another, so
+      // no earlier rename can have moved this file's parent. Loosen the prune
+      // and this starts answering "already in the root" from a stale parent.
       const parent = f.parent?.path === "/" ? "" : (f.parent?.path ?? "");
       if (canonicalPath(parent) === canonicalPath(root)) {
         already.push(f);
