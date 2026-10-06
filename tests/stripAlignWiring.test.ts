@@ -114,6 +114,7 @@ async function build(withHeader = true) {
     () => undefined,
     {
       dragged: () => ({ paths: [], truncated: false }),
+      rootExists: () => true,
       onDropped: () => undefined,
       onRefused: () => undefined,
     }

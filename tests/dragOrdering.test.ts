@@ -82,6 +82,18 @@ function visibleLines(): number {
   return document.querySelectorAll(".spaces-drop-line:not([hidden])").length;
 }
 
+/**
+ * Fire on the row's `.tree-item-self`, which is where Obsidian puts `data-path`
+ * and `draggable` and therefore where the browser fires a real `dragstart`.
+ * `fire` below targets the WRAPPER, which carries neither, so a handler that
+ * resolves its row from the event target cannot answer from it. Both are kept:
+ * the wrapper form exercises the geometry hit test, this one the target form.
+ */
+function fireOnSelf(el: HTMLElement, type: string, clientY: number): Event {
+  const self = el.querySelector(".tree-item-self") as HTMLElement;
+  return fire(self, type, clientY);
+}
+
 function fire(el: HTMLElement, type: string, clientY: number): Event {
   const e = new MouseEvent(type, { bubbles: true, cancelable: true, clientY });
   el.dispatchEvent(e);
@@ -207,6 +219,55 @@ describe("DragOrdering", () => {
       boundDrag();
       fire(tree.rows["F/a.md"], "dragstart", 4);
       expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], false);
+    });
+
+    /**
+     * Reordering being switched off does not make the drag invisible.
+     *
+     * `enabled()` answers one question: may a new ORDER be written. It is false
+     * for the reordering setting, for *All* when `allowReorderingAll` is off,
+     * for a space under an Obsidian sort override, and while filtering is
+     * paused. None of those is a statement about whether a note may be put
+     * into a space, so publishing what the drag carries used to sit below this
+     * gate and the whole drop-on-a-space-icon gesture died silently after one
+     * click in the explorer's sort menu.
+     */
+    it("publishes what a drag carries even when reordering is disabled", () => {
+      const onDragBegin = vi.fn();
+      const onBlockedDrag = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      deps.onBlockedDrag = onBlockedDrag;
+      enabled = false;
+      boundDrag();
+      fireOnSelf(tree.rows["F/a.md"], "dragstart", 4);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false);
+      // The gate itself still holds: the drag is published, not armed.
+      expect(onBlockedDrag).toHaveBeenCalledTimes(1);
+      fire(tree.rows["F/b.md"], "drop", ROW_H * 2 - 2);
+      expect(writeOrder).not.toHaveBeenCalled();
+    });
+
+    /**
+     * And it costs nothing to do so.
+     *
+     * The early return exists so a blocked drag does not measure the tree.
+     * `syncGeometry` begins by measuring the CONTAINER, so counting that one
+     * call is an exact test of whether the snapshot was taken: a version that
+     * published by hoisting `rowAt` above the gate would fail this while
+     * passing the test above.
+     */
+    it("takes no geometry snapshot on the blocked path", () => {
+      deps.onDragBegin = vi.fn();
+      enabled = false;
+      boundDrag();
+      let measured = 0;
+      const real = tree.container.getBoundingClientRect.bind(tree.container);
+      tree.container.getBoundingClientRect = () => {
+        measured++;
+        return real();
+      };
+      fireOnSelf(tree.rows["F/a.md"], "dragstart", 4);
+      expect(measured).toBe(0);
     });
 
     it("has not called onDragDone when a DECLINED drop reaches a bubble listener", () => {

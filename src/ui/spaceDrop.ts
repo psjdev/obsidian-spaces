@@ -2,7 +2,7 @@ import { movesIntoOwnSubtree } from "../order/dropIntent";
 import type { DraggedFiles } from "../order/currentDrag";
 import type { SpaceDefinition } from "../types";
 import { canonicalPath } from "../visibility/glob";
-import { rootOf } from "../visibility/folderSpace";
+import { hasRoot, rootOf } from "../visibility/folderSpace";
 
 /**
  * What a drop on a space icon means.
@@ -32,7 +32,20 @@ export type SpaceDrop =
  */
 export const CLIPPED_SELECTION = "part of the selection is outside the render window";
 
-export function spaceDropFor(space: SpaceDefinition | null, drag: DraggedFiles): SpaceDrop {
+/**
+ * What a drop on this space would do.
+ *
+ * Pure, and asked twice per drag with the same inputs, so the icon can never
+ * promise something the drop will not deliver. `rootExists` is injected for
+ * exactly that reason: whether a folder named by a space is really there is a
+ * vault question, this module has no `app`, and answering it by guessing would
+ * reintroduce the two-answers problem the seam exists to close.
+ */
+export function spaceDropFor(
+  space: SpaceDefinition | null,
+  drag: DraggedFiles,
+  rootExists: (path: string) => boolean
+): SpaceDrop {
   // *All* and the `+` control both arrive here as no space. Neither holds
   // members, so neither is a target.
   if (!space) return { kind: "refuse", reason: "not a space" };
@@ -52,10 +65,32 @@ export function spaceDropFor(space: SpaceDefinition | null, drag: DraggedFiles):
   // moved would report it as a complete success.
   if (drag.truncated) return { kind: "refuse", reason: CLIPPED_SELECTION };
 
-  // `rootOf` reads "" and "/" as "no root chosen", so a space in the
-  // missing-root state is curated here rather than an unusable move target.
+  // Split on `hasRoot`, not on `rootOf`, and `isFolderSpace` is bound to the
+  // same function for the same reason. `rootOf` answers null for two different
+  // states -- "curated, no root at all" and "a root was declared and cannot be
+  // honoured" -- and collapsing them here made a space in the missing-root
+  // state look curated.
+  if (!hasRoot(space)) return { kind: "add", spaceId: space.id };
+
+  // A space that DECLARES a root renders from that folder and never shows a
+  // member list, so adding to one would appear to do nothing. The user's answer
+  // to that was to move the file instead, which needs a folder to move it into.
+  //
+  // Three states reach here and only one of them has one. `rootOf` nulls the
+  // two unusable spellings, `""` and `"/"`. It does NOT null a root like
+  // `Projects` whose folder has since been deleted: it hands that string back
+  // happily, which is why the icon used to light for such a space and then
+  // throw on every single rename. `rootExists` is the only thing that can tell
+  // those apart, and it is why this function takes it.
+  //
+  // Refused in silence, unlike the clipped selection above: a missing root is a
+  // standing fact about the space rather than something about this gesture, the
+  // space already shows its own empty-state-with-repair, and `MissingRootNotice`
+  // already says it where saying it belongs.
   const root = rootOf(space);
-  if (root === null) return { kind: "add", spaceId: space.id };
+  if (root === null || !rootExists(root)) {
+    return { kind: "refuse", reason: "the space's folder is missing" };
+  }
 
   // Folded before the test because `movesIntoOwnSubtree` compares with `===`
   // and `startsWith`. On a case insensitive filesystem `Clients` and `clients`
@@ -91,10 +126,11 @@ export function spaceDropFor(space: SpaceDefinition | null, drag: DraggedFiles):
 export function dropTargetFor(
   dragFromId: string | null,
   space: SpaceDefinition | null,
-  drag: DraggedFiles
+  drag: DraggedFiles,
+  rootExists: (path: string) => boolean
 ): SpaceDrop | null {
   if (dragFromId !== null) return null;
-  const drop = spaceDropFor(space, drag);
+  const drop = spaceDropFor(space, drag, rootExists);
   if (drop.kind !== "refuse") return drop;
   return drop.reason === CLIPPED_SELECTION ? drop : null;
 }

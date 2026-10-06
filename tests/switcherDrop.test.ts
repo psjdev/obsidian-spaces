@@ -17,33 +17,37 @@ function drag(paths: readonly string[], truncated = false) {
   return { paths, truncated };
 }
 
+/** The vault's answer about a space's root folder. */
+const exists = (): boolean => true;
+const gone = (): boolean => false;
+
 function space(o: Partial<SpaceDefinition> = {}): SpaceDefinition {
   return { id: "s1", name: "Work", icon: "box", color: "#808080", members: [], ...o };
 }
 
 describe("dropTargetFor", () => {
   it("ignores a reorder drag, whatever is under the pointer", () => {
-    expect(dropTargetFor("s2", space(), drag(["Notes/a.md"]))).toBeNull();
+    expect(dropTargetFor("s2", space(), drag(["Notes/a.md"]), exists)).toBeNull();
   });
 
   it("acts on a file drag over a curated space", () => {
-    expect(dropTargetFor(null, space(), drag(["Notes/a.md"]))?.kind).toBe("add");
+    expect(dropTargetFor(null, space(), drag(["Notes/a.md"]), exists)?.kind).toBe("add");
   });
 
   it("moves a file drag over a folder-pinned space", () => {
-    expect(dropTargetFor(null, space({ root: "Clients" }), drag(["Notes/a.md"]))?.kind).toBe("move");
+    expect(dropTargetFor(null, space({ root: "Clients" }), drag(["Notes/a.md"]), exists)?.kind).toBe("move");
   });
 
   it("ignores a file drag over no space", () => {
-    expect(dropTargetFor(null, null, drag(["Notes/a.md"]))).toBeNull();
+    expect(dropTargetFor(null, null, drag(["Notes/a.md"]), exists)).toBeNull();
   });
 
   it("ignores a pointer with no drag behind it", () => {
-    expect(dropTargetFor(null, space(), drag([]))).toBeNull();
+    expect(dropTargetFor(null, space(), drag([]), exists)).toBeNull();
   });
 
   it("ignores a refusal, so the icon never lights for it", () => {
-    expect(dropTargetFor(null, space({ root: "Clients" }), drag(["Clients"]))).toBeNull();
+    expect(dropTargetFor(null, space({ root: "Clients" }), drag(["Clients"]), exists)).toBeNull();
   });
 
   /**
@@ -55,15 +59,21 @@ describe("dropTargetFor", () => {
    * does not work.
    */
   it("returns the clipped refusal so the listener can voice it", () => {
-    const t = dropTargetFor(null, space({ root: "Clients" }), drag(["Notes/a.md"], true));
+    const t = dropTargetFor(null, space({ root: "Clients" }), drag(["Notes/a.md"], true), exists);
     expect(t).toEqual({ kind: "refuse", reason: CLIPPED_SELECTION });
   });
 
   it("still ignores a clipped drag during a reorder", () => {
-    expect(dropTargetFor("s2", space(), drag(["Notes/a.md"], true))).toBeNull();
+    expect(dropTargetFor("s2", space(), drag(["Notes/a.md"], true), exists)).toBeNull();
   });
 
   it("ignores a clipped drag over no space, which has nothing to explain", () => {
-    expect(dropTargetFor(null, null, drag(["Notes/a.md"], true))).toBeNull();
+    expect(dropTargetFor(null, null, drag(["Notes/a.md"], true), exists)).toBeNull();
+  });
+
+  // The icon must not light for a space whose folder is gone: it would promise
+  // a move into a folder that is not there, and every rename behind it throws.
+  it("ignores a folder space whose root has been deleted", () => {
+    expect(dropTargetFor(null, space({ root: "Clients" }), drag(["Notes/a.md"]), gone)).toBeNull();
   });
 });

@@ -52,6 +52,7 @@ async function mount(style: ActiveSpaceStyle) {
     () => undefined,
     {
       dragged: () => ({ paths: [], truncated: false }),
+      rootExists: () => true,
       onDropped: () => undefined,
       onRefused: () => undefined,
     }

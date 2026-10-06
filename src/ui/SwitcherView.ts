@@ -195,6 +195,16 @@ export class SwitcherView {
     private fileDrop: {
       /** The live drag's paths AND whether that list may be short. */
       dragged: () => DraggedFiles;
+      /**
+       * Whether that path names a real folder in the vault right now.
+       *
+       * Asked rather than assumed because a folder space keeps its root string
+       * after the folder is deleted -- the definition is kept so the space can
+       * offer to repair itself -- and `spaceDropFor` is pure, has no `app`, and
+       * so cannot find out on its own. Without it the icon lit for such a space
+       * and every rename behind the drop then threw.
+       */
+      rootExists: (path: string) => boolean;
       /** Act on a drop this seam has already approved. */
       onDropped: (spaceId: string, drag: DraggedFiles) => void;
       /**
@@ -897,7 +907,7 @@ export class SwitcherView {
         // falls through untouched, so the event reaches whatever is beneath.
         const drag = this.fileDrop.dragged();
         const over = this.spaceElAt(e.target);
-        const target = dropTargetFor(null, this.spaceFor(over), drag);
+        const target = dropTargetFor(null, this.spaceFor(over), drag, this.fileDrop.rootExists);
         if (target !== null && target.kind === "refuse") {
           // Aimed at a space, and refused for a reason the user cannot see.
           // The icon stays dark -- lighting one that then refuses is the
@@ -954,7 +964,7 @@ export class SwitcherView {
         // declines a drop on the strip and so it is still live; a claimed drop
         // would already have cleared it.
         const drag = this.fileDrop.dragged();
-        const target = dropTargetFor(null, this.spaceFor(over), drag);
+        const target = dropTargetFor(null, this.spaceFor(over), drag, this.fileDrop.rootExists);
         this.markDropTarget(null);
         // A refusal cannot reach here -- `dragover` never called
         // `preventDefault()` for one, so the browser fired no `drop` -- but it

@@ -61,6 +61,7 @@ async function build(spaces: SpaceDefinition[]) {
     () => undefined,
     {
       dragged: () => ({ paths: [], truncated: false }),
+      rootExists: () => true,
       onDropped: () => undefined,
       onRefused: () => undefined,
     }

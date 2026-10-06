@@ -349,17 +349,35 @@ export class DragOrdering {
     return pane === null || !pane.contains(node);
   }
 
+  /**
+   * The row an event FIRED ON, from the target alone. No measuring, no
+   * snapshot, no container needed.
+   *
+   * Split out of `rowAt` because the two answer different questions. This one
+   * asks "which row is this event about", which is the only question a
+   * `dragstart` has: the browser fires it on the element carrying `draggable`,
+   * so `closest()` is exact. `rowAt` asks "which row is this POINTER over",
+   * which needs geometry and a nearest-row fallback, and is the mid-drag
+   * question.
+   *
+   * Having it on its own is what lets `onDragStart` publish what a drag
+   * carries without taking a geometry snapshot first.
+   */
+  private rowFromTarget(target: EventTarget | null): { el: HTMLElement; path: string } | null {
+    const node = target instanceof HTMLElement ? target : null;
+    const direct = node?.closest(SEL.titleWithPath);
+    if (!(direct instanceof HTMLElement)) return null;
+    const path = direct.getAttribute("data-path");
+    const el = direct.closest(SEL.rowWrapper);
+    return path && el instanceof HTMLElement ? { el, path } : null;
+  }
+
   private rowAt(target: EventTarget | null, clientY: number): { el: HTMLElement; path: string } | null {
     const c = this.container;
     if (!c) return null;
 
-    const node = target instanceof HTMLElement ? target : null;
-    const direct = node?.closest(SEL.titleWithPath);
-    if (direct instanceof HTMLElement) {
-      const path = direct.getAttribute("data-path");
-      const el = direct.closest(SEL.rowWrapper);
-      if (path && el instanceof HTMLElement) return { el, path };
-    }
+    const direct = this.rowFromTarget(target);
+    if (direct) return direct;
 
     // Hit test, then nearest-row fallback, bounded by the render window (~49
     // rows). The fallback is not defensive padding: rows are separated by a real
@@ -392,6 +410,22 @@ export class DragOrdering {
     return best;
   }
 
+  /**
+   * Hand `onDragBegin` what this drag carries, once.
+   *
+   * Reading the selection is DOM work only — `querySelectorAll` and a class
+   * test — so it costs no geometry snapshot and both callers below can afford
+   * it.
+   */
+  private publishDrag(row: { el: HTMLElement; path: string } | null): {
+    paths: string[];
+    truncated: boolean;
+  } {
+    const collected = row ? this.collectDragged(row) : { paths: [], truncated: false };
+    this.deps.onDragBegin?.(collected.paths, collected.truncated);
+    return collected;
+  }
+
   private readonly onDragStart = (e: Event): void =>
     this.guard(() => {
       // Checked per gesture rather than once at bind time — see `bind()`. A
@@ -399,20 +433,37 @@ export class DragOrdering {
       // silent because `this.dragged` is never populated below.
       if (!this.deps.enabled()) {
         this.deps.onBlockedDrag?.();
+        // ...but what the drag CARRIES is published anyway, because this gate
+        // is not about that. `enabled()` is false when the user turned
+        // reordering off, when `allowReorderingAll` is off and they are in
+        // *All*, when the space renders under an Obsidian sort override, and
+        // while filtering is paused. Every one of those is a statement about
+        // whether a new ORDER may be written. None of them says anything about
+        // whether a note may be put into a space, and gating the publish on
+        // them left the whole drop-on-a-space-icon gesture silently dead — no
+        // icon, no drop, no notice — after one click in the explorer's sort
+        // menu.
+        //
+        // Resolved from the event target alone, which is the honest resolution
+        // for this moment rather than a cheap substitute for one: `dragstart`
+        // fires ON the element carrying `draggable`, so `closest()` is exact.
+        // `rowAt`'s geometry hit test answers "which row is this POINTER over",
+        // a mid-drag question, and asking it here would mean taking the
+        // snapshot this early return exists to avoid paying for.
+        this.publishDrag(this.rowFromTarget(e.target));
         return;
       }
       // Deliberately no preventDefault and no stopPropagation: Obsidian owns
       // the drag, we only observe what is being dragged.
-      // The first snapshot of the drag. `rowAt` answers from it, so without
-      // this the gesture never resolves a row and never registers at all.
-      // A fresh drag measures the tree as it is now, never as a previous drag
-      // left it.
+      // The first snapshot of the drag. `rowAt` falls back to it when the
+      // target resolves no row, and every later handler reads it. A fresh drag
+      // measures the tree as it is now, never as a previous drag left it.
       this.geo.clear();
       this.syncGeometry();
       const row = this.rowAt(e.target, (e as MouseEvent).clientY ?? 0);
       if (!row) {
         this.dragged = [];
-        this.deps.onDragBegin?.([], false);
+        this.publishDrag(null);
         return;
       }
       this.sourceEl = row.el;
@@ -431,10 +482,9 @@ export class DragOrdering {
       // row cannot accumulate one per drag, and removed again below for the
       // ordinary case where the document listener got there first.
       row.el.addEventListener("dragend", this.onDragEnd, { once: true });
-      const collected = this.collectDragged(row);
+      const collected = this.publishDrag(row);
       this.dragged = collected.paths;
       this.draggedTruncated = collected.truncated;
-      this.deps.onDragBegin?.(collected.paths, collected.truncated);
     });
 
   /**

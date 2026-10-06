@@ -140,21 +140,6 @@
    theme; only the rung is ours. */
 .spaces-switcher .spaces-switcher-item:hover { opacity: 0.85; }
 
-/* The icon a drop would land on. Drawn from `--interactive-accent`, the same
-   source as the drag box and the picker's covered rows, so the three read as
-   one family. Applied only when `spaceDropFor` says the drop would act, so an
-   icon that lights is an icon that will do something. Scoped through
-   `.spaces-switcher` and placed after the opacity ladder so it wins on
-   specificity and order. `opacity: 1` because the base rule above dims every
-   non-active icon to 0.55 (0.85 on hover), and a target drawn dimmed would
-   not read as one. */
-.spaces-switcher .spaces-switcher-item.is-drop-target,
-.spaces-switcher .spaces-switcher-item.is-drop-target:hover {
-  opacity: 1;
-  background: color-mix(in oklch, var(--interactive-accent) 22%, transparent);
-  box-shadow: inset 0 0 0 2px var(--interactive-accent);
-}
-
 .spaces-switcher-item:focus-visible,
 .spaces-switcher-add:focus-visible,
 .spaces-space-header-icon[role="button"]:focus-visible,
@@ -212,6 +197,43 @@
 }
 .spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-active {
   --icon-stroke: calc(var(--spaces-base-stroke) + 1px);
+}
+
+/* The icon a drop would land on. Drawn from `--interactive-accent`, the same
+   source as the drag box and the picker's covered rows, so the three read as
+   one family. Applied only when `spaceDropFor` says the drop would act, so an
+   icon that lights is an icon that will do something. `opacity: 1` because the
+   base rule dims every non-active icon to 0.55 (0.85 on hover), and a target
+   drawn dimmed would not read as one.
+
+   LAST, and with one selector per active-space style, because the opacity
+   ladder is not the only thing it has to beat. All three active-space rules
+   above are about the icon you are STANDING on, which is also an icon you can
+   drop on, and each of them is more specific than a plain
+   `.spaces-switcher .spaces-switcher-item.is-drop-target`:
+
+     - Shaded sets `background-color` at an equal weight, so order alone
+       decides, and this rule used to come first and lose the tint.
+     - Boxed adds `.spaces-active-boxed` and so outranks it outright, taking
+       both the tint and the ring with it: no feedback at all on the active
+       icon.
+     - Bolded sets `background: transparent; box-shadow: none` on EVERY item,
+       active or not, so under that style no icon in the strip could light.
+       Bolded is one of three shipped options, so that was a third of users
+       with a dead highlight.
+
+   Matching each style's scope rather than reaching for `!important` keeps the
+   weight argument visible: a fourth active style added later needs a fourth
+   line here, which is exactly the review this rule should get. */
+.spaces-switcher .spaces-switcher-item.is-drop-target,
+.spaces-switcher .spaces-switcher-item.is-drop-target:hover,
+.spaces-switcher.spaces-active-boxed .spaces-switcher-item.is-drop-target,
+.spaces-switcher.spaces-active-boxed .spaces-switcher-item.is-drop-target:hover,
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-drop-target,
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-drop-target:hover {
+  opacity: 1;
+  background: color-mix(in oklch, var(--interactive-accent) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }
 .spaces-switcher-item.is-pending { opacity: 1; animation: spaces-pulse 0.6s ease-in-out infinite; }
 @keyframes spaces-pulse { 50% { opacity: 0.4; } }

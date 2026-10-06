@@ -1659,6 +1659,10 @@ export default class SpacesPlugin extends Plugin {
           },
           {
             dragged: () => this.currentDrag.dragged(),
+            // The same question `creation.ts` asks before writing a new note
+            // into a pinned space, through the same helper, so a space whose
+            // folder has been deleted answers one way to both.
+            rootExists: (path) => rootIsFolder(this.app, path),
             onDropped: (spaceId, drag) => void this.filesDroppedOnSpace(spaceId, drag),
             onRefused: (reason) => this.reportRefusedDrop(reason),
           }
@@ -2733,7 +2737,11 @@ export default class SpacesPlugin extends Plugin {
     // `truncated` carried through untouched: a selection the explorer may have
     // clipped is still clipped after the stale paths are filtered out, and that
     // is the one answer this re-ask must not lose.
-    const drop = spaceDropFor(space, { paths: files.map((f) => f.path), truncated: drag.truncated });
+    const drop = spaceDropFor(
+      space,
+      { paths: files.map((f) => f.path), truncated: drag.truncated },
+      (path) => rootIsFolder(this.app, path)
+    );
     if (drop.kind === "refuse") return;
     if (drop.kind === "add") {
       await addToSpace(
