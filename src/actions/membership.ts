@@ -73,6 +73,13 @@ export function addOutcomeMessage(
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
   const space = ctx.controller.activeSpace();
   if (!space) return;
+  // Split BEFORE the write, against the space as it is now, for the same
+  // reason as in `addToSpace`: reading it back afterwards cannot tell a path
+  // this call added from one that was already there.
+  const current = ctx.defs.get().spaces.find((s) => s.id === space.id);
+  const held = current ? pathMembers(current) : [];
+  const already = files.filter((f) => held.some((m) => samePath(m.path, f.path)));
+  const added = files.filter((f) => !already.includes(f));
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === space.id);
@@ -87,7 +94,7 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
     new Notice(`Spaces: could not add to ${space.name} (${String(e)})`);
     return;
   }
-  new Notice(`Added ${subject(files)} to ${space.name}`);
+  new Notice(addOutcomeMessage(added, already, space.name));
 }
 
 /**
