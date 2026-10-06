@@ -110,6 +110,19 @@ export interface DragOrderingDeps {
    * stands whether or not it is supplied.
    */
   onSelectionOutsideWindow?(): void;
+  /**
+   * Told what this drag carries, once, at `dragstart`.
+   *
+   * This class already knows -- `collectDragged` works it out, selection and
+   * all -- but it keeps that in a private field it clears at the TOP of its own
+   * drop handler, before the guards that decline a drop outside the tree. That
+   * handler runs in capture on the document, so anything listening on the
+   * strip in the bubble phase would find the field empty. Publishing here and
+   * clearing in `onDragDone` is what makes the paths outlive the decline.
+   */
+  onDragBegin?: (paths: readonly string[]) => void;
+  /** The drag is over, however it ended: dropped, cancelled, or abandoned. */
+  onDragDone?: () => void;
 }
 
 export class DragOrdering {
@@ -383,6 +396,7 @@ export class DragOrdering {
       const row = this.rowAt(e.target, (e as MouseEvent).clientY ?? 0);
       if (!row) {
         this.dragged = [];
+        this.deps.onDragBegin?.([]);
         return;
       }
       this.sourceEl = row.el;
@@ -404,6 +418,7 @@ export class DragOrdering {
       const collected = this.collectDragged(row);
       this.dragged = collected.paths;
       this.draggedTruncated = collected.truncated;
+      this.deps.onDragBegin?.(collected.paths);
     });
 
   /**
@@ -658,6 +673,7 @@ export class DragOrdering {
       this.clearIndicator(true);
       this.dragged = [];
       this.draggedTruncated = false;
+      this.deps.onDragDone?.();
       // Taken off explicitly as well as by `once`: this handler is reached
       // from the document listener too, and that path leaves the row's own
       // listener armed for a drag that is already over.
