@@ -73,6 +73,8 @@ async function build() {
     controller,
     () => undefined,
     () => false,
+    () => undefined,
+    () => [],
     () => undefined
   );
   const host = document.createElement("div");

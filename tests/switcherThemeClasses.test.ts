@@ -50,6 +50,8 @@ async function mount(): Promise<HTMLElement> {
     controller,
     () => undefined,
     () => false,
+    () => undefined,
+    () => [],
     () => undefined
   );
   const host = document.createElement("div");

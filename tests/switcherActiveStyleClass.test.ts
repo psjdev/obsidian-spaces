@@ -49,6 +49,8 @@ async function mount(style: ActiveSpaceStyle) {
     controller,
     () => undefined,
     () => false,
+    () => undefined,
+    () => [],
     () => undefined
   );
   const host = document.createElement("div");

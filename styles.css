@@ -145,8 +145,9 @@
    one family. Applied only when `spaceDropFor` says the drop would act, so an
    icon that lights is an icon that will do something. Scoped through
    `.spaces-switcher` and placed after the opacity ladder so it wins on
-   specificity and order, and full opacity so the mark is not dimmed to the
-   inactive rung. */
+   specificity and order. `opacity: 1` because the base rule above dims every
+   non-active icon to 0.55 (0.85 on hover), and a target drawn dimmed would
+   not read as one. */
 .spaces-switcher .spaces-switcher-item.is-drop-target,
 .spaces-switcher .spaces-switcher-item.is-drop-target:hover {
   opacity: 1;

@@ -66,6 +66,8 @@ async function stripIcon(useThemeIconColor: boolean): Promise<HTMLElement> {
     controller,
     () => undefined,
     () => false,
+    () => undefined,
+    () => [],
     () => undefined
   );
   const host = document.createElement("div");
@@ -142,6 +144,8 @@ describe("forcing theme colors on every surface that draws a space icon", () => 
       controller,
       () => undefined,
       () => false,
+      () => undefined,
+      () => [],
       () => undefined
     );
     const host = document.createElement("div");

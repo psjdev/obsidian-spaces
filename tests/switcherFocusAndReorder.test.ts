@@ -58,6 +58,8 @@ async function build(spaces: SpaceDefinition[]) {
     controller,
     () => undefined,
     () => false,
+    () => undefined,
+    () => [],
     () => undefined
   );
   const host = document.createElement("div");

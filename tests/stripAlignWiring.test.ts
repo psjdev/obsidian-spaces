@@ -111,6 +111,8 @@ async function build(withHeader = true) {
     controller,
     () => undefined,
     () => false,
+    () => undefined,
+    () => [],
     () => undefined
   );
 
