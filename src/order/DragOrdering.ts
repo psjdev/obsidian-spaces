@@ -119,8 +119,17 @@ export interface DragOrderingDeps {
    * handler runs in capture on the document, so anything listening on the
    * strip in the bubble phase would find the field empty. Publishing here and
    * clearing in `onDragDone` is what makes the paths outlive the decline.
+   *
+   * `truncated` is published WITH the paths, never separately. It is
+   * `collectDragged`'s own answer to "might this list be short" (see
+   * `selectionMayBeClipped`), and it is why `onDrop` below declines a drop this
+   * class would otherwise have claimed. A consumer handed only the paths cannot
+   * tell a clipped selection from a small complete one, so it would act on a
+   * fraction of one gesture and report that as the whole of it. Anything acting
+   * on these paths must decline on the same flag, for the reason recorded above
+   * `movesIntoOwnSubtree` in `dropIntent.ts`.
    */
-  onDragBegin?: (paths: readonly string[]) => void;
+  onDragBegin?: (paths: readonly string[], truncated: boolean) => void;
   /**
    * The drag is over, however it ended: dropped, cancelled, or abandoned.
    *
@@ -403,7 +412,7 @@ export class DragOrdering {
       const row = this.rowAt(e.target, (e as MouseEvent).clientY ?? 0);
       if (!row) {
         this.dragged = [];
-        this.deps.onDragBegin?.([]);
+        this.deps.onDragBegin?.([], false);
         return;
       }
       this.sourceEl = row.el;
@@ -425,7 +434,7 @@ export class DragOrdering {
       const collected = this.collectDragged(row);
       this.dragged = collected.paths;
       this.draggedTruncated = collected.truncated;
-      this.deps.onDragBegin?.(collected.paths);
+      this.deps.onDragBegin?.(collected.paths, collected.truncated);
     });
 
   /**

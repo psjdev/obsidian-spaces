@@ -154,7 +154,7 @@ describe("DragOrdering", () => {
       // The ARGUMENT is the point: a version that published [] every time
       // would still satisfy "it was called".
       expect(onDragBegin).toHaveBeenCalledTimes(1);
-      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"]);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false);
       expect(onDragDone).not.toHaveBeenCalled();
       document.dispatchEvent(new Event("dragend", { bubbles: true }));
       expect(onDragDone).toHaveBeenCalledTimes(1);
@@ -167,7 +167,46 @@ describe("DragOrdering", () => {
       fire(tree.rows["F/a.md"], "dragstart", 4);
       fire(tree.container, "dragstart", 9999);
       expect(onDragBegin).toHaveBeenCalledTimes(2);
-      expect(onDragBegin).toHaveBeenLastCalledWith([]);
+      expect(onDragBegin).toHaveBeenLastCalledWith([], false);
+    });
+
+    /**
+     * The flag travels WITH the paths, and that is the merge blocker.
+     *
+     * `collectDragged` already answers "this list may be short" and `onDrop`
+     * already declines its own drop on it. A consumer given only the paths
+     * cannot tell a clipped selection from a small complete one, so it acts on
+     * the visible fraction of one gesture and reports that as the whole of it.
+     * On the space strip that fraction is a `renameFile` per path.
+     */
+    it("publishes the clipping answer alongside the paths", () => {
+      const onDragBegin = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      // The tell `selectionMayBeClipped` reads: the FIRST rendered row is
+      // selected while the scroller is away from the top, so the selection may
+      // continue above the render window into rows the DOM does not hold.
+      const aSelf = tree.rows["F/a.md"].querySelector(".tree-item-self") as HTMLElement;
+      const bSelf = tree.rows["F/b.md"].querySelector(".tree-item-self") as HTMLElement;
+      aSelf.classList.add(SEL.selectedRow.slice(1));
+      bSelf.classList.add(SEL.selectedRow.slice(1));
+      tree.container.scrollTop = 50;
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], true);
+    });
+
+    // The negative control. Without it a version that published `true` for
+    // every multi-selection would pass the test above.
+    it("publishes false when the scroller is at the top and nothing can be hidden", () => {
+      const onDragBegin = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      const aSelf = tree.rows["F/a.md"].querySelector(".tree-item-self") as HTMLElement;
+      const bSelf = tree.rows["F/b.md"].querySelector(".tree-item-self") as HTMLElement;
+      aSelf.classList.add(SEL.selectedRow.slice(1));
+      bSelf.classList.add(SEL.selectedRow.slice(1));
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], false);
     });
 
     it("has not called onDragDone when a DECLINED drop reaches a bubble listener", () => {
@@ -195,7 +234,7 @@ describe("DragOrdering", () => {
       fire(tree.rows["F/a.md"], "dragstart", 4);
       fire(tree.rows["G"], "drop", 48 + ROW_H / 2);
       expect(doneAtBubble).toBe(0);
-      expect(begunAtBubble).toEqual([[["F/a.md"]]]);
+      expect(begunAtBubble).toEqual([[["F/a.md"], false]]);
       document.dispatchEvent(new Event("dragend", { bubbles: true }));
       expect(onDragDone).toHaveBeenCalledTimes(1);
     });

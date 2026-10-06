@@ -51,8 +51,11 @@ async function mount(): Promise<HTMLElement> {
     () => undefined,
     () => false,
     () => undefined,
-    () => [],
-    () => undefined
+    {
+      dragged: () => ({ paths: [], truncated: false }),
+      onDropped: () => undefined,
+      onRefused: () => undefined,
+    }
   );
   const host = document.createElement("div");
   document.body.appendChild(host);

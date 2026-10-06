@@ -36,8 +36,8 @@ import {
 } from "./lifecycle/moveCorrelator";
 import { createVaultChangeCoalescer } from "./lifecycle/eventCoalescer";
 import { addToSpace, registerMembershipMenus } from "./actions/membership";
-import { CurrentDrag } from "./order/currentDrag";
-import { spaceDropFor } from "./ui/spaceDrop";
+import { CurrentDrag, type DraggedFiles } from "./order/currentDrag";
+import { CLIPPED_SELECTION, spaceDropFor } from "./ui/spaceDrop";
 import {
   createSpace,
   renameSpace,
@@ -1657,8 +1657,11 @@ export default class SpacesPlugin extends Plugin {
             }
             this.restoreSavedOrdering();
           },
-          () => this.currentDrag.paths(),
-          (spaceId, paths) => void this.filesDroppedOnSpace(spaceId, paths)
+          {
+            dragged: () => this.currentDrag.dragged(),
+            onDropped: (spaceId, drag) => void this.filesDroppedOnSpace(spaceId, drag),
+            onRefused: (reason) => this.reportRefusedDrop(reason),
+          }
         );
         this.switcher.mount(leafRoot);
         this.switcher.applyPlacement(this.defs.get().settings.stripPlacement);
@@ -2686,20 +2689,51 @@ export default class SpacesPlugin extends Plugin {
    * is what made the drag indicator a lie once before, where it read
    * `destination=Travel` while the file landed at the vault root.
    */
-  private async filesDroppedOnSpace(spaceId: string, paths: readonly string[]): Promise<void> {
+  /**
+   * Why a drop on a space icon was refused, said out loud.
+   *
+   * Only one refusal reaches here, the clipped selection; every other one is a
+   * pointer somewhere that was never a target, and the "no drop" cursor says so
+   * for free. Logged rather than shown if it is anything else, because a
+   * refusal nobody has worded would otherwise surface a raw internal string.
+   *
+   * The copy is deliberately the same voice as `onSelectionOutsideWindow` in
+   * `dragDeps()`, which raises the file tree's version of this: same cause,
+   * same opening clause. The second clause differs because the outcomes do. A
+   * tree drop is handed back to Obsidian and still happens; a drop on a space
+   * icon simply does not, so this one has to say that nothing moved and what
+   * would make it work.
+   */
+  private reportRefusedDrop(reason: string): void {
+    if (reason !== CLIPPED_SELECTION) {
+      console.warn("Spaces: a drop on a space icon was refused:", reason);
+      return;
+    }
+    new Notice(
+      "Spaces: some of that selection was scrolled out of view, so nothing " +
+        "was dropped on the space. Scroll the whole selection into view and " +
+        "drag again."
+    );
+  }
+
+  private async filesDroppedOnSpace(spaceId: string, drag: DraggedFiles): Promise<void> {
     const space = this.defs.get().spaces.find((s) => s.id === spaceId);
     if (!space) return;
     // A path can go stale between the dragstart and the drop: the file was
     // renamed, or deleted, or an outside change removed it. Those are skipped
     // and the rest still land, rather than failing the whole drop.
-    const files = paths
+    const files = drag.paths
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TAbstractFile => f !== null);
     if (files.length === 0) {
       new Notice("Spaces: those notes and folders no longer exist");
       return;
     }
-    const drop = spaceDropFor(space, files.map((f) => f.path));
+    // The SAME record, with the surviving subset in place of the paths, and
+    // `truncated` carried through untouched: a selection the explorer may have
+    // clipped is still clipped after the stale paths are filtered out, and that
+    // is the one answer this re-ask must not lose.
+    const drop = spaceDropFor(space, { paths: files.map((f) => f.path), truncated: drag.truncated });
     if (drop.kind === "refuse") return;
     if (drop.kind === "add") {
       await addToSpace(
@@ -2829,7 +2863,7 @@ export default class SpacesPlugin extends Plugin {
       },
       writeOrder: (folderPath, order) => this.writeOrderFor(folderPath, order),
       indicatorStyle: () => this.defs.get().settings.dropIndicatorStyle,
-      onDragBegin: (paths) => this.currentDrag.begin(paths),
+      onDragBegin: (paths, truncated) => this.currentDrag.begin(paths, truncated),
       // The one place that learns every drag has ended, however it ended. The
       // strip never hears `dragend` for a file drag (its source is a tree row),
       // so an icon lit under an Escaped drag is cleared from here, and the

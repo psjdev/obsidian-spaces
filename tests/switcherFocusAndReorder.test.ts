@@ -59,8 +59,11 @@ async function build(spaces: SpaceDefinition[]) {
     () => undefined,
     () => false,
     () => undefined,
-    () => [],
-    () => undefined
+    {
+      dragged: () => ({ paths: [], truncated: false }),
+      onDropped: () => undefined,
+      onRefused: () => undefined,
+    }
   );
   const host = document.createElement("div");
   document.body.replaceChildren(host);
