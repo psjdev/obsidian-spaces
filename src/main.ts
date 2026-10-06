@@ -2675,17 +2675,16 @@ export default class SpacesPlugin extends Plugin {
   }
 
   /**
-   * The dependencies. Every one of them is a lookup or a write — the drag's
-   * decisions live in `dropIntent.ts`, and none of them belong here.
-   */
-  /**
    * A note or folder was dropped on a space icon.
    *
-   * `spaceDropFor` already decided this is an add or a move and the icon said
-   * so, so this does not re-decide; it resolves the paths and carries out the
-   * one answer. Asking again here is what made the drag indicator a lie once
-   * before, where it read `destination=Travel` while the file landed at the
-   * vault root.
+   * The drop callback carries only a `spaceId`, so this resolves the space and
+   * asks `spaceDropFor` again for the intent. That answer cannot differ from
+   * what the icon showed: the icon was only lit, and a drop only accepted, when
+   * `spaceDropFor` returned add or move for these same paths and this same
+   * space, and `spaceDropFor` is pure over the space and the paths. What must
+   * not happen is deciding by some OTHER rule than the one the icon used, which
+   * is what made the drag indicator a lie once before, where it read
+   * `destination=Travel` while the file landed at the vault root.
    */
   private async filesDroppedOnSpace(spaceId: string, paths: readonly string[]): Promise<void> {
     const space = this.defs.get().spaces.find((s) => s.id === spaceId);
@@ -2697,7 +2696,7 @@ export default class SpacesPlugin extends Plugin {
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TAbstractFile => f !== null);
     if (files.length === 0) {
-      new Notice("Spaces: nothing was left to add");
+      new Notice("Spaces: those notes and folders no longer exist");
       return;
     }
     const drop = spaceDropFor(space, files.map((f) => f.path));
@@ -2728,7 +2727,23 @@ export default class SpacesPlugin extends Plugin {
     const moved: TAbstractFile[] = [];
     const already: TAbstractFile[] = [];
     const blocked: string[] = [];
-    for (const f of files) {
+    // A folder carries its contents, so a dragged path inside another dragged
+    // FOLDER is already handled by moving that ancestor. Renaming it as well
+    // would pull it back OUT: once the folder moves, Obsidian updates the
+    // child's live parent, which is no longer the root, so the child would be
+    // renamed again to the root itself. Computed from the paths BEFORE any
+    // rename, because renames change them. A pruned descendant counts as moved:
+    // it did move, with its folder.
+    const folderPaths = files
+      .filter((f) => f instanceof TFolder)
+      .map((f) => canonicalPath(f.path));
+    const insideDraggedFolder = (f: TAbstractFile): boolean => {
+      const own = canonicalPath(f.path);
+      return folderPaths.some((d) => d !== own && own.startsWith(`${d}/`));
+    };
+    const carried = files.filter(insideDraggedFolder);
+    const toMove = files.filter((f) => !insideDraggedFolder(f));
+    for (const f of toMove) {
       const parent = f.parent?.path === "/" ? "" : (f.parent?.path ?? "");
       if (canonicalPath(parent) === canonicalPath(root)) {
         already.push(f);
@@ -2737,17 +2752,30 @@ export default class SpacesPlugin extends Plugin {
       try {
         await this.app.fileManager.renameFile(f, normalizePath(`${root}/${f.name}`));
         moved.push(f);
-      } catch {
+      } catch (e) {
+        console.error(`Spaces: could not move ${f.path} into ${root}`, e);
         // The commonest cause by far is a file of that name already sitting in
         // the root, so the name is what the user needs to hear.
         blocked.push(f.name);
       }
     }
+    // A moved descendant is only counted if its ancestor actually moved.
+    const carriedMoved = carried.filter((c) =>
+      moved.some((m) => m instanceof TFolder && canonicalPath(c.path).startsWith(`${canonicalPath(m.path)}/`))
+    );
+    const movedCount = moved.length + carriedMoved.length;
     if (blocked.length > 0) {
-      new Notice(`Spaces: ${blocked.join(", ")} could not move into ${spaceName}`);
+      const failed = `${blocked.join(", ")} could not move`;
+      if (movedCount === 0) {
+        new Notice(`Spaces: ${failed} into ${spaceName}`);
+        return;
+      }
+      // Say what changed as well as what did not.
+      const some = movedCount === 1 && carriedMoved.length === 0 ? moved[0].name : `${movedCount} notes and folders`;
+      new Notice(`Moved ${some} into ${spaceName}. ${failed}.`);
       return;
     }
-    if (moved.length === 0 && already.length > 0) {
+    if (movedCount === 0 && already.length > 0) {
       const verb = already.length === 1 ? "is" : "are";
       new Notice(
         `${already.length === 1 ? already[0].name : `${already.length} notes and folders`} ` +
@@ -2755,10 +2783,15 @@ export default class SpacesPlugin extends Plugin {
       );
       return;
     }
-    const what = moved.length === 1 ? moved[0].name : `${moved.length} notes and folders`;
+    const what =
+      movedCount === 1 && carriedMoved.length === 0 ? moved[0].name : `${movedCount} notes and folders`;
     new Notice(`Moved ${what} into ${spaceName}`);
   }
 
+  /**
+   * The dependencies. Every one of them is a lookup or a write — the drag's
+   * decisions live in `dropIntent.ts`, and none of them belong here.
+   */
   private dragDeps(): ConstructorParameters<typeof DragOrdering>[0] {
     return {
       describeRow: (path) => {
