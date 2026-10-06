@@ -49,8 +49,8 @@ function subject(files: TAbstractFile[]): string {
 /**
  * What to say after an add, counting only what changed.
  *
- * The dedupe in `addToSpace` is silent by design, and the notice used to
- * report the whole batch regardless -- "Added plan.md to Work" for a file the
+ * The dedupe in `addToSpace` and `addAll` is silent by design, and the notice
+ * used to report the whole batch regardless -- "Added plan.md to Work" for a file the
  * space already held. A drop on a space icon makes that easy to hit, so the
  * notice reports the outcome instead of the request.
  *
@@ -70,6 +70,32 @@ export function addOutcomeMessage(
   return `Nothing to add to ${spaceName}`;
 }
 
+/**
+ * Splits a batch into what an add would change and what the space already
+ * holds, each counting DISTINCT paths.
+ *
+ * Distinct by `canonicalPath`, the same fold `samePath` uses, because the
+ * write loop skips a path it has just written: a batch of `[a.md, a.md]` (or
+ * `A.md` and `a.md` on a filesystem that allows both) writes one member, so
+ * counting both as added would make the notice say "Added 2 notes and folders"
+ * for a single change.
+ */
+function splitBatch(
+  files: readonly TAbstractFile[],
+  held: readonly { path: string }[]
+): { added: TAbstractFile[]; already: TAbstractFile[] } {
+  const seen = new Set<string>();
+  const added: TAbstractFile[] = [];
+  const already: TAbstractFile[] = [];
+  for (const f of files) {
+    const key = canonicalPath(f.path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    (held.some((m) => samePath(m.path, f.path)) ? already : added).push(f);
+  }
+  return { added, already };
+}
+
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
   const space = ctx.controller.activeSpace();
   if (!space) return;
@@ -78,8 +104,7 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
   // this call added from one that was already there.
   const current = ctx.defs.get().spaces.find((s) => s.id === space.id);
   const held = current ? pathMembers(current) : [];
-  const already = files.filter((f) => held.some((m) => samePath(m.path, f.path)));
-  const added = files.filter((f) => !already.includes(f));
+  const { added, already } = splitBatch(files, held);
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === space.id);
@@ -115,8 +140,7 @@ export async function addToSpace(
   // there.
   const current = ctx.defs.get().spaces.find((s) => s.id === spaceId);
   const held = current ? pathMembers(current) : [];
-  const already = files.filter((f) => held.some((m) => samePath(m.path, f.path)));
-  const added = files.filter((f) => !already.includes(f));
+  const { added, already } = splitBatch(files, held);
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === spaceId);
