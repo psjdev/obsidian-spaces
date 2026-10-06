@@ -865,6 +865,12 @@ export class SwitcherView {
         const over = this.spaceElAt(e.target);
         const target = dropTargetFor(null, this.spaceFor(over), this.currentDragPaths());
         this.markDropTarget(target === null ? null : over);
+        // Refreshed on EVERY file-drag dragover, lit icon or not. The scroll
+        // tick reads this value every frame, and a pointer over the gap
+        // between two icons is still a real position. Left stale, the tick
+        // would keep scrolling against wherever the pointer last lit an icon.
+        this.dragPointerAlong = pointerAlong(e, this.axis);
+        startScrolling();
         if (target === null) return;
         // Same reason the reorder branch cancels: nothing permits a drop in
         // our own strip, and without this the `drop` event never fires.
@@ -872,8 +878,6 @@ export class SwitcherView {
         if (e.dataTransfer) {
           e.dataTransfer.dropEffect = target.kind === "move" ? "move" : "copy";
         }
-        this.dragPointerAlong = pointerAlong(e, this.axis);
-        startScrolling();
         return;
       }
       // Calling `preventDefault()` here must not happen for the FILE TREE,
@@ -891,6 +895,10 @@ export class SwitcherView {
 
     rail.addEventListener("drop", (e) => {
       if (this.dragFromId === null) {
+        // Stopped here rather than left to end when `onDragDone` clears the
+        // paths a frame later, so this does not depend on another
+        // component's timing.
+        stopScrolling();
         const over = this.spaceElAt(e.target);
         // Re-asked HERE against the definitions as they are at the drop, the
         // same discipline the reorder uses for its index: a space deleted
@@ -935,8 +943,15 @@ export class SwitcherView {
     rail.addEventListener("dragleave", (e) => {
       // Only when the pointer actually left the rail, not when it crossed
       // between two icons inside it.
-      if (e.relatedTarget instanceof Node && rail.contains(e.relatedTarget)) return;
+      // Through `asNode`, not `instanceof Node`: a node from a popout window
+      // fails the global check, which would clear the mark on every crossing.
+      const into = this.asNode(e.relatedTarget);
+      if (into && rail.contains(into)) return;
       this.markDropTarget(null);
+      // The pointer has left, so `dragPointerAlong` is now stale. Without
+      // this the tick keeps scrolling against it, re-arming every frame even
+      // at the scroll limit, for as long as the drag lives over the tree.
+      stopScrolling();
     });
     this.stopDragScrolling = stopScrolling;
   }
@@ -956,9 +971,20 @@ export class SwitcherView {
     return at < 0 ? null : at;
   }
 
+  /**
+   * An event target as a `Node`, or null. Uses Obsidian's cross-window
+   * `instanceOf`: the global `Node` is a different constructor in a popout
+   * window, so `instanceof` would refuse every node there. The typeof test
+   * is for targets that are not nodes at all (a `Window`), which lack it.
+   */
+  private asNode(target: EventTarget | null): Node | null {
+    const node = target as Node | null;
+    return node && typeof node.instanceOf === "function" && node.instanceOf(Node) ? node : null;
+  }
+
   /** The icon under the pointer, or null when the pointer is between them. */
   private spaceElAt(target: EventTarget | null): HTMLElement | null {
-    const node = target instanceof Node ? target : null;
+    const node = this.asNode(target);
     if (!node) return null;
     const el = node.instanceOf(HTMLElement) ? node : node.parentElement;
     const item = el?.closest<HTMLElement>(".spaces-switcher-item") ?? null;

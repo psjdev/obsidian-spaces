@@ -1,11 +1,13 @@
 /**
- * Which drag the strip's rail is looking at.
+ * The pure `dropTargetFor` decision, and nothing else.
  *
- * `spaceDropFor` is tested on its own in `spaceDrop.test.ts`; what is pinned
- * here is the branch decision, as a pure function of plain values: a reorder
- * takes the old path untouched, a file drag takes the new one, and anything
- * else is left alone so the drop passes through to whatever is underneath.
- * Nothing here touches the DOM; the painted target state is an e2e question.
+ * `spaceDropFor` is tested on its own in `spaceDrop.test.ts`. This file pins
+ * only the function both listeners ask: a reorder is ignored, a file drag over
+ * a space that would act is answered, and everything else is null.
+ *
+ * It does NOT cover the listeners themselves: `preventDefault`, the
+ * `dropEffect` mapping, `dragleave`, the drop-mark class or the scroll tick's
+ * gating. That behavior is covered by the e2e task against a real browser.
  */
 import { describe, expect, it } from "vitest";
 import { dropTargetFor } from "../src/ui/spaceDrop";
@@ -22,6 +24,10 @@ describe("dropTargetFor", () => {
 
   it("acts on a file drag over a curated space", () => {
     expect(dropTargetFor(null, space(), ["Notes/a.md"])?.kind).toBe("add");
+  });
+
+  it("moves a file drag over a folder-pinned space", () => {
+    expect(dropTargetFor(null, space({ root: "Clients" }), ["Notes/a.md"])?.kind).toBe("move");
   });
 
   it("ignores a file drag over no space", () => {
