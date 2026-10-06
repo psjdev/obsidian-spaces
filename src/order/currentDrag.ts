@@ -9,6 +9,12 @@
  * This record exists to survive that: it is cleared on `dragend`, which fires
  * AFTER `drop`.
  *
+ * That holds only for a drop `DragOrdering` DECLINES, which is the only kind the
+ * strip ever sees. A drop it CLAIMS calls `endNativeDrag()`, which dispatches a
+ * synthetic `dragend` during the drop, so the record is already empty by the
+ * bubble phase. `endNativeDrag()` sitting below the decline guards is what makes
+ * this work, so anyone moving it above them breaks the strip's drops.
+ *
  * An instance rather than module state, and reached through callbacks rather
  * than imported, so neither `DragOrdering` nor `SwitcherView` has to know the
  * other exists. `main.ts` owns the one instance.
