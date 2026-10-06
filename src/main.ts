@@ -2734,11 +2734,16 @@ export default class SpacesPlugin extends Plugin {
     // renamed again to the root itself. Computed from the paths BEFORE any
     // rename, because renames change them. A pruned descendant counts as moved:
     // it did move, with its folder.
+    //
+    // The snapshot is deliberate and is read for everything below, the count
+    // included: live `TFile.path` values mutate as folders move, which is what
+    // the prune exists to survive, so nothing after the loop may read them.
+    const original = new Map<TAbstractFile, string>(files.map((f) => [f, canonicalPath(f.path)]));
     const folderPaths = files
       .filter((f) => f instanceof TFolder)
-      .map((f) => canonicalPath(f.path));
+      .map((f) => original.get(f) as string);
     const insideDraggedFolder = (f: TAbstractFile): boolean => {
-      const own = canonicalPath(f.path);
+      const own = original.get(f) as string;
       return folderPaths.some((d) => d !== own && own.startsWith(`${d}/`));
     };
     const carried = files.filter(insideDraggedFolder);
@@ -2761,7 +2766,11 @@ export default class SpacesPlugin extends Plugin {
     }
     // A moved descendant is only counted if its ancestor actually moved.
     const carriedMoved = carried.filter((c) =>
-      moved.some((m) => m instanceof TFolder && canonicalPath(c.path).startsWith(`${canonicalPath(m.path)}/`))
+      moved.some(
+        (m) =>
+          m instanceof TFolder &&
+          (original.get(c) as string).startsWith(`${original.get(m) as string}/`)
+      )
     );
     const movedCount = moved.length + carriedMoved.length;
     if (blocked.length > 0) {
