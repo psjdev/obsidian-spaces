@@ -46,6 +46,30 @@ function subject(files: TAbstractFile[]): string {
   return files.length === 1 ? files[0].name : `${files.length} notes and folders`;
 }
 
+/**
+ * What to say after an add, counting only what changed.
+ *
+ * The dedupe in `addToSpace` is silent by design, and the notice used to
+ * report the whole batch regardless -- "Added plan.md to Work" for a file the
+ * space already held. A drop on a space icon makes that easy to hit, so the
+ * notice reports the outcome instead of the request.
+ *
+ * `is`/`are` rather than one spelling: "3 notes and folders is already in
+ * Work" reads as a bug in the plugin rather than a fact about the space.
+ */
+export function addOutcomeMessage(
+  added: readonly TAbstractFile[],
+  already: readonly TAbstractFile[],
+  spaceName: string
+): string {
+  if (added.length > 0) return `Added ${subject([...added])} to ${spaceName}`;
+  if (already.length > 0) {
+    const verb = already.length === 1 ? "is" : "are";
+    return `${subject([...already])} ${verb} already in ${spaceName}`;
+  }
+  return `Nothing to add to ${spaceName}`;
+}
+
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
   const space = ctx.controller.activeSpace();
   if (!space) return;
@@ -72,13 +96,20 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
  * `addAll` beyond `entryFor`, deliberately: `addAll` reads the active space
  * and must keep doing so.
  */
-async function addToSpace(
+export async function addToSpace(
   ctx: MembershipContext,
   spaceId: string,
   files: TAbstractFile[]
 ): Promise<void> {
   const name = ctx.defs.get().spaces.find((s) => s.id === spaceId)?.name ?? spaceId;
   if (files.length === 0) return;
+  // Split BEFORE the write, against the space as it is now. Reading it back
+  // afterwards cannot tell a path this call added from one that was already
+  // there.
+  const current = ctx.defs.get().spaces.find((s) => s.id === spaceId);
+  const held = current ? pathMembers(current) : [];
+  const already = files.filter((f) => held.some((m) => samePath(m.path, f.path)));
+  const added = files.filter((f) => !already.includes(f));
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === spaceId);
@@ -93,7 +124,7 @@ async function addToSpace(
     new Notice(`Spaces: could not add to ${name} (${String(e)})`);
     return;
   }
-  new Notice(`Added ${subject(files)} to ${name}`);
+  new Notice(addOutcomeMessage(added, already, name));
 }
 
 /**
