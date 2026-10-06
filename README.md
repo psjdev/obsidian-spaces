@@ -218,6 +218,8 @@ The plugin makes no network requests. A test (`tests/noNetwork.test.ts`) scans t
 - One active space per window, applied to every file-explorer leaf.
 - A space's kind is fixed at creation: a curated space cannot become folder pinned, or the reverse.
 - Dragging to reorder rows or spaces needs a pointer; both gestures stand down on touch.
+- Dropping notes and folders on a space icon needs a pointer too. From the keyboard, use the file explorer's context menu: "Add to space" for a curated space, or Obsidian's own "Move file to..." for a space pinned to a folder.
+- A space pinned to a folder takes one note or folder per drop. To move several at once, select them and use "Move file to..." instead.
 - The item picker in the creation form draws at most 200 rows at a time and tells you how many more matched. Keep typing to narrow it.
 
 ## Development
