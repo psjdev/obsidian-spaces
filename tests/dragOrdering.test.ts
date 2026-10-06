@@ -179,16 +179,23 @@ describe("DragOrdering", () => {
       // A CLAIMED drop is different on purpose: `endNativeDrag` dispatches a
       // synthetic dragend, so onDragDone fires during it. Nothing else should
       // be acting on a drop this class has already consumed.
+      const onDragBegin = vi.fn();
       const onDragDone = vi.fn();
+      deps.onDragBegin = onDragBegin;
       deps.onDragDone = onDragDone;
       let doneAtBubble = -1;
+      // Read INSIDE the bubble listener, the window the strip reads in. Checking
+      // after the fact would not prove the paths were live at that moment.
+      let begunAtBubble: unknown[][] = [];
       tree.rows["G"].addEventListener("drop", () => {
         doneAtBubble = onDragDone.mock.calls.length;
+        begunAtBubble = onDragBegin.mock.calls.map((c) => [...c]);
       });
       boundDrag();
       fire(tree.rows["F/a.md"], "dragstart", 4);
       fire(tree.rows["G"], "drop", 48 + ROW_H / 2);
       expect(doneAtBubble).toBe(0);
+      expect(begunAtBubble).toEqual([[["F/a.md"]]]);
       document.dispatchEvent(new Event("dragend", { bubbles: true }));
       expect(onDragDone).toHaveBeenCalledTimes(1);
     });

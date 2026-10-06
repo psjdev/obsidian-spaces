@@ -121,7 +121,14 @@ export interface DragOrderingDeps {
    * clearing in `onDragDone` is what makes the paths outlive the decline.
    */
   onDragBegin?: (paths: readonly string[]) => void;
-  /** The drag is over, however it ended: dropped, cancelled, or abandoned. */
+  /**
+   * The drag is over, however it ended: dropped, cancelled, or abandoned.
+   *
+   * It can fire more than once for a single drag: on a claimed drop the
+   * synthetic `dragend` reaches the row's own listener and the document's, and
+   * the browser's real `dragend` can follow. A consumer must make its handler
+   * idempotent.
+   */
   onDragDone?: () => void;
 }
 
