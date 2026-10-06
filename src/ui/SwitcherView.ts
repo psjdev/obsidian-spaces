@@ -193,23 +193,13 @@ export class SwitcherView {
      *
      * One object rather than three loose parameters because they are a single
      * seam: the same record has to reach the `dragover` that lights the icon,
-     * the `drop` that acts, and the explanation for the one refusal that is
+     * the `drop` that acts, and the explanation for the two refusals that are
      * voiced. Handing the paths alone to one of them and not the others is how
      * a clipped selection came to be half moved and reported as complete.
      */
     private fileDrop: {
       /** The live drag's paths AND whether that list may be short. */
       dragged: () => DraggedFiles;
-      /**
-       * Whether that path names a real folder in the vault right now.
-       *
-       * Asked rather than assumed because a folder space keeps its root string
-       * after the folder is deleted -- the definition is kept so the space can
-       * offer to repair itself -- and `spaceDropFor` is pure, has no `app`, and
-       * so cannot find out on its own. Without it the icon lit for such a space
-       * and every rename behind the drop then threw.
-       */
-      rootExists: (path: string) => boolean;
       /** Act on a drop this seam has already approved. */
       onDropped: (spaceId: string, drag: DraggedFiles) => void;
       /**
@@ -928,7 +918,7 @@ export class SwitcherView {
         // dragover event, for drags that have nothing to do with spaces.
         if (drag.paths.length === 0) return;
         const over = this.spaceElAt(e.target);
-        const target = dropTargetFor(null, this.spaceFor(over), drag, this.fileDrop.rootExists);
+        const target = dropTargetFor(null, this.spaceFor(over), drag);
         if (target !== null && target.kind === "refuse") {
           // Aimed at a space, and refused for a reason the user cannot see.
           // The icon stays dark -- lighting one that then refuses is the
@@ -953,9 +943,14 @@ export class SwitcherView {
         // Same reason the reorder branch cancels: nothing permits a drop in
         // our own strip, and without this the `drop` event never fires.
         e.preventDefault();
-        if (e.dataTransfer) {
-          e.dataTransfer.dropEffect = target.kind === "move" ? "move" : "copy";
-        }
+        // Always "copy". The strip's one outcome is a membership write, which
+        // adds nothing to the vault and takes nothing out of where the note
+        // already lives, so "copy" is the cursor badge that describes it. It
+        // used to be chosen per target, "move" for a space pinned to a folder,
+        // and that badge was the ONLY thing distinguishing two visually
+        // identical icons with two very different outcomes. The move is gone;
+        // so is the choice.
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
         return;
       }
       // Calling `preventDefault()` here must not happen for the FILE TREE,
@@ -985,12 +980,14 @@ export class SwitcherView {
         // declines a drop on the strip and so it is still live; a claimed drop
         // would already have cleared it.
         const drag = this.fileDrop.dragged();
-        const target = dropTargetFor(null, this.spaceFor(over), drag, this.fileDrop.rootExists);
+        const target = dropTargetFor(null, this.spaceFor(over), drag);
         this.markDropTarget(null);
         // A refusal cannot reach here -- `dragover` never called
         // `preventDefault()` for one, so the browser fired no `drop` -- but it
-        // is checked rather than assumed, because the cost of being wrong is an
-        // irreversible move and the cost of checking is one comparison.
+        // is checked rather than assumed. The strip's one outcome is reversible
+        // now, so this is no longer the last guard before a `renameFile`; it is
+        // one comparison standing between a stale hover and a membership write
+        // the user did not ask for, which is still worth having.
         if (target === null || target.kind === "refuse") return;
         e.preventDefault();
         this.fileDrop.onDropped(target.spaceId, drag);

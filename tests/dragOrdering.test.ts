@@ -166,7 +166,7 @@ describe("DragOrdering", () => {
       // The ARGUMENT is the point: a version that published [] every time
       // would still satisfy "it was called".
       expect(onDragBegin).toHaveBeenCalledTimes(1);
-      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false, false);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false);
       // ONE, not zero: `dragstart` clears whatever a previous drag left behind
       // before it publishes anything. See the ordering test below.
       expect(onDragDone).toHaveBeenCalledTimes(1);
@@ -252,7 +252,7 @@ describe("DragOrdering", () => {
       fire(tree.rows["F/a.md"], "dragstart", 4);
       fire(tree.container, "dragstart", 9999);
       expect(onDragBegin).toHaveBeenCalledTimes(2);
-      expect(onDragBegin).toHaveBeenLastCalledWith([], false, false);
+      expect(onDragBegin).toHaveBeenLastCalledWith([], false);
     });
 
     /**
@@ -277,7 +277,7 @@ describe("DragOrdering", () => {
       tree.container.scrollTop = 50;
       boundDrag();
       fire(tree.rows["F/a.md"], "dragstart", 4);
-      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], true, true);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], true);
     });
 
     // The negative control. Without it a version that published `true` for
@@ -291,7 +291,7 @@ describe("DragOrdering", () => {
       bSelf.classList.add(SEL.selectedRow.slice(1));
       boundDrag();
       fire(tree.rows["F/a.md"], "dragstart", 4);
-      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], false, true);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], false);
     });
 
     /**
@@ -313,7 +313,7 @@ describe("DragOrdering", () => {
       enabled = false;
       boundDrag();
       fireOnSelf(tree.rows["F/a.md"], "dragstart", 4);
-      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false, false);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false);
       // The gate itself still holds: the drag is published, not armed.
       expect(onBlockedDrag).toHaveBeenCalledTimes(1);
       fire(tree.rows["F/b.md"], "drop", ROW_H * 2 - 2);
@@ -348,19 +348,14 @@ describe("DragOrdering", () => {
     });
 
     /**
-     * The discriminator the move path refuses on, and the four returns of
-     * `collectDragged` that set it.
+     * The branch of `collectDragged` that reads other rows, and the three that
+     * do not.
      *
-     * It is true on exactly one of them -- the dragged row was itself part of a
-     * selection -- and that is also the only return where the list can be short
-     * at all. The three single-row returns carry one path and carry all of it.
-     *
-     * Pinned separately from `truncated` because the two must not be allowed to
-     * collapse into each other: `truncated` is a geometric guess that cannot
-     * see the top edge of the render window, and the whole point of this flag
-     * is that it never has to.
+     * A selection is collected only when the DRAGGED row is itself part of it.
+     * A selection sitting elsewhere in the tree is not this drag's business,
+     * and a drag that resolves no row carries nothing at all.
      */
-    it("publishes fromSelection only when the drag came from a selection", () => {
+    it("collects a selection only when the dragged row is part of it", () => {
       const onDragBegin = vi.fn();
       deps.onDragBegin = onDragBegin;
       const aSelf = tree.rows["F/a.md"].querySelector(".tree-item-self") as HTMLElement;
@@ -370,32 +365,11 @@ describe("DragOrdering", () => {
       boundDrag();
       // Dragged row IS selected: the only branch that reads other rows.
       fire(tree.rows["F/a.md"], "dragstart", 4);
-      expect(onDragBegin).toHaveBeenLastCalledWith(["F/a.md", "F/b.md"], false, true);
+      expect(onDragBegin).toHaveBeenLastCalledWith(["F/a.md", "F/b.md"], false);
       // Dragged row is NOT selected, though a selection exists elsewhere. One
       // row, whole, and not a selection as far as this drag is concerned.
       fire(tree.rows["G"], "dragstart", ROW_H * 2 + 4);
-      expect(onDragBegin).toHaveBeenLastCalledWith(["G"], false, false);
-    });
-
-    // A single selected row is still a selection. The mutation this kills is
-    // `fromSelection: paths.length > 1`, which would publish false here and
-    // hand the move path exactly the case it cannot afford.
-    it("publishes fromSelection for a selection of one", () => {
-      const onDragBegin = vi.fn();
-      deps.onDragBegin = onDragBegin;
-      const aSelf = tree.rows["F/a.md"].querySelector(".tree-item-self") as HTMLElement;
-      aSelf.classList.add(SEL.selectedRow.slice(1));
-      boundDrag();
-      fire(tree.rows["F/a.md"], "dragstart", 4);
-      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false, true);
-    });
-
-    it("publishes fromSelection false for a dragstart that lands on no row", () => {
-      const onDragBegin = vi.fn();
-      deps.onDragBegin = onDragBegin;
-      boundDrag();
-      fire(tree.container, "dragstart", 9999);
-      expect(onDragBegin).toHaveBeenLastCalledWith([], false, false);
+      expect(onDragBegin).toHaveBeenLastCalledWith(["G"], false);
     });
 
     it("has not called onDragDone when a DECLINED drop reaches a bubble listener", () => {
@@ -428,7 +402,7 @@ describe("DragOrdering", () => {
       const doneAtStart = onDragDone.mock.calls.length;
       fire(tree.rows["G"], "drop", 48 + ROW_H / 2);
       expect(doneAtBubble).toBe(doneAtStart);
-      expect(begunAtBubble).toEqual([[["F/a.md"], false, false]]);
+      expect(begunAtBubble).toEqual([[["F/a.md"], false]]);
       document.dispatchEvent(new Event("dragend", { bubbles: true }));
       expect(onDragDone).toHaveBeenCalledTimes(doneAtStart + 1);
     });

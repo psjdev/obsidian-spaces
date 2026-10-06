@@ -75,8 +75,7 @@ async function build() {
     () => false,
     () => undefined,
     {
-      dragged: () => ({ paths: [], truncated: false, fromSelection: false }),
-      rootExists: () => true,
+      dragged: () => ({ paths: [], truncated: false }),
       onDropped: () => undefined,
       onRefused: () => undefined,
     }

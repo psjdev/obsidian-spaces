@@ -1,7 +1,6 @@
 import {
   FileView,
   Menu,
-  normalizePath,
   Notice,
   Platform,
   Plugin,
@@ -35,19 +34,9 @@ import {
   type VaultEventRecord,
 } from "./lifecycle/moveCorrelator";
 import { createVaultChangeCoalescer } from "./lifecycle/eventCoalescer";
-import {
-  addToSpace,
-  alreadyInMessage,
-  registerMembershipMenus,
-  subject,
-} from "./actions/membership";
+import { addToSpace, registerMembershipMenus } from "./actions/membership";
 import { CurrentDrag, type DraggedFiles } from "./order/currentDrag";
-import {
-  CLIPPED_SELECTION,
-  MISSING_ROOT,
-  SELECTION_ONTO_FOLDER_SPACE,
-  spaceDropFor,
-} from "./ui/spaceDrop";
+import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE, spaceDropFor } from "./ui/spaceDrop";
 import {
   createSpace,
   renameSpace,
@@ -58,7 +47,6 @@ import { setStripPlacement } from "./actions/stripPlacement";
 import {
   newNoteInActiveSpace,
   newFolderInActiveSpace,
-  noticeMissingRoot,
   rootIsFolder,
 } from "./actions/creation";
 import { installNewFileRedirect } from "./actions/newFileLocation";
@@ -1670,10 +1658,6 @@ export default class SpacesPlugin extends Plugin {
           },
           {
             dragged: () => this.currentDrag.dragged(),
-            // The same question `creation.ts` asks before writing a new note
-            // into a pinned space, through the same helper, so a space whose
-            // folder has been deleted answers one way to both.
-            rootExists: (path) => rootIsFolder(this.app, path),
             onDropped: (spaceId, drag) => void this.filesDroppedOnSpace(spaceId, drag),
             onRefused: (reason, spaceName) => this.reportRefusedDrop(reason, spaceName),
           }
@@ -2706,9 +2690,14 @@ export default class SpacesPlugin extends Plugin {
    * telling them "nothing was dropped" at that moment describes an event that
    * has not occurred. Both also name the space, because the strip is a row of
    * icons and "the space" identifies none of them. And both end with something
-   * the user can actually do -- the earlier clipped-selection wording told them
-   * to "scroll the whole selection into view and drag again", which is
-   * impossible for the ~49-row selection it takes to trigger it.
+   * the user can actually do.
+   *
+   * The clipped-selection wording used to tell the user to "scroll the whole
+   * selection into view and drag again", which they often cannot. The tell is
+   * geometric, so it fires for any selection whose end sits at the edge of the
+   * explorer's render window with more tree beyond it, from two rows upward,
+   * and a selection big enough to be genuinely clipped will not fit on screen
+   * at all. Selecting fewer works in both cases.
    */
   private reportRefusedDrop(reason: string, spaceName: string | null): void {
     // A name is always carried for these two (see `SpaceDrop`), but the copy
@@ -2717,20 +2706,24 @@ export default class SpacesPlugin extends Plugin {
     if (reason === CLIPPED_SELECTION) {
       new Notice(
         `Spaces: this selection may be too large to drop on ${where}. If you ` +
-          "release now, nothing will be added or moved. Select fewer notes and " +
+          "release now, nothing will be added. Select fewer notes and " +
           "folders, then drag again."
       );
       return;
     }
-    if (reason === SELECTION_ONTO_FOLDER_SPACE) {
-      // Says the limit, then the two ways round it. The second is Obsidian's
-      // own command, which is the honest answer for a large selection: this
-      // gesture delegates to the same `renameFile` either way.
+    if (reason === FOLDER_PINNED_SPACE) {
+      // Says what the space IS, which is the fact that explains the refusal,
+      // and then where the user can go instead. Deliberately not worded as a
+      // limit waiting to be lifted ("takes one at a time", "not supported
+      // yet"): a pinned space has no member list at all, it is a window onto a
+      // folder, and the same fact is why it never appears in "Add to space".
+      //
+      // Obsidian's own command is named exactly as Obsidian names it, quotes
+      // and ellipsis included, so the user can find it by reading.
       new Notice(
-        `Spaces: ${where} is pinned to a folder, and a space pinned to a ` +
-          "folder takes one note or folder at a time. Drag them onto " +
-          `${where} one at a time, or use Obsidian's "Move file to..." to ` +
-          "move the whole selection at once."
+        `Spaces: ${where} is pinned to a folder, so it shows that folder's ` +
+          "contents and has no member list to add to. To put a note or folder " +
+          `inside ${where}, use Obsidian's "Move file to..." instead.`
       );
       return;
     }
@@ -2738,49 +2731,48 @@ export default class SpacesPlugin extends Plugin {
   }
 
   /**
-   * The same question at RELEASE, where silence is not defensible.
+   * The same question at RELEASE.
    *
-   * A refusal cannot normally reach the drop at all: refusing means never
-   * calling `preventDefault()` at `dragover`, so the browser fires no `drop`.
-   * What CAN reach it is a refusal that became true between the last hover and
-   * the release -- the space deleted from another window, its pinned folder
-   * moved or trashed by a sync. The icon was lit, the user let go, and the
-   * gesture then did nothing and said nothing, which is indistinguishable from
-   * a feature that is broken.
+   * UNREACHABLE TODAY, and kept deliberately rather than deleted. That is worth
+   * stating plainly, because the version of this comment that described it as a
+   * live safety net was false and stayed false through several reviews.
    *
-   * The missing-root case reuses the plugin's existing wording rather than
-   * inventing a second phrasing for the same fact.
+   * Refusing means never calling `preventDefault()` at `dragover`, so the
+   * browser fires no `drop`, and the rail's own drop listener re-asks and
+   * returns before `onDropped` runs. Below that, the only input that can change
+   * between the hover and the release is the path list, which can only shrink
+   * as stale paths are filtered out, and an empty list has its own notice
+   * above. Nothing else `spaceDropFor` reads can move: the space is resolved
+   * from the same `defs` snapshot in the same tick, and the function no longer
+   * consults the live vault at all.
+   *
+   * What it buys is that the drop path narrows `SpaceDrop` by ASKING the seam
+   * rather than by assuming the answer, so a rule added to `spaceDropFor` that
+   * genuinely can flip between hover and release arrives here with words
+   * already written for it instead of landing in a silent `return`.
    */
   private reportDropDidNothing(reason: string, spaceName: string | null): void {
-    if (reason === MISSING_ROOT) {
-      noticeMissingRoot();
-      return;
-    }
     console.warn("Spaces: a drop on a space icon was refused at release:", reason);
     const where = spaceName ?? "that space";
-    new Notice(`Spaces: nothing was added or moved. ${where} cannot take this drop now.`);
+    new Notice(`Spaces: nothing was added. ${where} cannot take this drop now.`);
   }
 
   /**
    * A note or folder was dropped on a space icon.
    *
-   * The drop callback hands over a `spaceId` and the drag record. What it does
-   * NOT hand over is the INTENT -- whether this drop adds or moves -- because
-   * the strip deliberately does not carry a decision across the seam. So this
-   * resolves the space and asks `spaceDropFor` again.
+   * The drop callback hands over a `spaceId` and the drag record, not a
+   * decision: the strip deliberately does not carry one across the seam. So
+   * this resolves the space and asks `spaceDropFor` again.
    *
    * It is re-asked with the SURVIVING subset, not with the paths the icon was
    * lit for: a path can go stale between the dragstart and the drop, and those
-   * are filtered out just below. The conclusion still holds, but for a narrower
-   * reason than "same inputs, same answer", and the property that carries it is
-   * the opposite of the one first written here. Removing paths CAN flip a rule
-   * from refuse to act -- the any-illegal-path rule does exactly that, since
-   * dropping the one illegal path makes the rest legal. What matters is the
-   * other direction: removing paths can never flip a rule from act to a
-   * DIFFERENT act. Every flag that chooses between adding and moving
-   * (`truncated`, `fromSelection`, the space's own root) is carried across
-   * untouched, so the subset can only agree with what the icon showed or refuse,
-   * and refusing is the safe direction.
+   * are filtered out just below. Removing paths CAN flip a rule from refuse to
+   * act -- a rule that refuses when ANY path is illegal does exactly that, and
+   * one lived here until the move was removed. What matters is the other
+   * direction: removing paths can never flip a rule from act to a DIFFERENT
+   * act. `truncated`, the one flag that chooses anything, is carried across
+   * untouched, so the subset can only agree with what the icon showed or
+   * refuse, and refusing is the safe direction.
    *
    * What must not happen is deciding by some OTHER rule than the one the icon
    * used, which is what made the drag indicator a lie once before, where it
@@ -2812,165 +2804,17 @@ export default class SpacesPlugin extends Plugin {
       );
       return;
     }
-    // The SAME record, with the surviving subset in place of the paths. Both
-    // flags are carried through untouched: a selection the explorer may have
-    // clipped is still clipped after the stale paths are filtered out, and a
-    // drag that came from a selection still came from one however many of its
-    // paths survive. Those are the answers this re-ask must not lose, and
-    // recomputing either from the surviving list is how a clipped selection
-    // would sneak back in looking like a single-row drag.
-    const drop = spaceDropFor(
-      space,
-      {
-        paths: files.map((f) => f.path),
-        truncated: drag.truncated,
-        fromSelection: drag.fromSelection,
-      },
-      (path) => rootIsFolder(this.app, path)
-    );
+    // The SAME record, with the surviving subset in place of the paths.
+    // `truncated` is carried through untouched: a selection the explorer may
+    // have clipped is still clipped after the stale paths are filtered out, and
+    // recomputing it from the surviving list is how a clipped selection would
+    // sneak back in looking like a complete one.
+    const drop = spaceDropFor(space, { paths: files.map((f) => f.path), truncated: drag.truncated });
     if (drop.kind === "refuse") {
       this.reportDropDidNothing(drop.reason, drop.spaceName ?? space.name);
       return;
     }
-    if (drop.kind === "add") {
-      await addToSpace(
-        { defs: this.defs, controller: this.controller },
-        spaceId,
-        files
-      );
-      return;
-    }
-    await this.moveIntoRoot(files, drop.root, space.name);
-  }
-
-  /**
-   * A folder space renders from its root and never shows a member list, so
-   * adding to one would appear to do nothing. The user's answer was to move
-   * the file instead, which is what dragging into that space's tree already
-   * does. `fileManager.renameFile` is the call Obsidian uses itself, so links
-   * follow the file.
-   *
-   * `files` holds exactly one entry through the live gesture, and has done
-   * since `spaceDropFor` began refusing a move for any drag that came from a
-   * selection (see `SELECTION_ONTO_FOLDER_SPACE`). The batch machinery below --
-   * the descendant prune, the carried count, the mixed moved-and-blocked notice
-   * -- is therefore unreachable from the strip today and is kept rather than
-   * torn out, because it is also the behaviour this function must have again
-   * the day `selectionMayBeClipped` is fixed and the limit is lifted. Reading
-   * it as live code is the mistake to avoid; so is deleting it as dead.
-   */
-  private async moveIntoRoot(
-    files: TAbstractFile[],
-    root: string,
-    spaceName: string
-  ): Promise<void> {
-    // Resolved ONCE, before any rename, and compared by IDENTITY below.
-    //
-    // This used to fold both paths to lower case and compare the strings, which
-    // is wrong on a case sensitive filesystem -- Linux, or a case sensitive
-    // APFS/exFAT volume -- where `Inbox` and `inbox` are two different folders.
-    // A note at `inbox/x.md` dropped on a space pinned to `Inbox` was reported
-    // "x.md is already in Inbox" while sitting somewhere else entirely, and
-    // never moved. Folder identity has no such failure mode: two names are the
-    // same folder exactly when the vault says they are, on every filesystem.
-    //
-    // Refused rather than compared against null if the folder has gone in the
-    // moment since `spaceDropFor` checked: `f.parent` is null for a file at the
-    // vault root, so a null root would make every such file look like it was
-    // already home.
-    const rootFolder = this.app.vault.getAbstractFileByPath(root);
-    if (!(rootFolder instanceof TFolder)) {
-      noticeMissingRoot();
-      return;
-    }
-    const moved: TAbstractFile[] = [];
-    const already: TAbstractFile[] = [];
-    const blocked: TAbstractFile[] = [];
-    // A folder carries its contents, so a dragged path inside another dragged
-    // FOLDER is already handled by moving that ancestor. Renaming it as well
-    // would pull it back OUT: once the folder moves, Obsidian updates the
-    // child's live parent, which is no longer the root, so the child would be
-    // renamed again to the root itself. Computed from the paths BEFORE any
-    // rename, because renames change them. A pruned descendant counts as moved:
-    // it did move, with its folder.
-    //
-    // The snapshot is deliberate and is read for everything below, the count
-    // included: live `TFile.path` values mutate as folders move, which is what
-    // the prune exists to survive, so nothing after the loop may read them.
-    const original = new Map<TAbstractFile, string>(files.map((f) => [f, canonicalPath(f.path)]));
-    const folderPaths = files
-      .filter((f) => f instanceof TFolder)
-      .map((f) => original.get(f) as string);
-    const insideDraggedFolder = (f: TAbstractFile): boolean => {
-      const own = original.get(f) as string;
-      return folderPaths.some((d) => d !== own && own.startsWith(`${d}/`));
-    };
-    const carried = files.filter(insideDraggedFolder);
-    const toMove = files.filter((f) => !insideDraggedFolder(f));
-    for (const f of toMove) {
-      // The one live read in this loop. It is safe BECAUSE of the prune above
-      // (`insideDraggedFolder`): no file left in `toMove` sits inside another, so
-      // no earlier rename can have moved this file's parent. Loosen the prune
-      // and this starts answering "already in the root" from a stale parent.
-      if (f.parent === rootFolder) {
-        already.push(f);
-        continue;
-      }
-      try {
-        await this.app.fileManager.renameFile(f, normalizePath(`${root}/${f.name}`));
-        moved.push(f);
-      } catch (e) {
-        console.error(`Spaces: could not move ${f.path} into ${root}`, e);
-        // The commonest cause by far is a file of that name already sitting in
-        // the root, so the name is what the user needs to hear -- when there is
-        // one name to hear. `subject` decides that, and the console line above
-        // is unconditional, so every blocked path is recoverable whatever the
-        // toast says.
-        blocked.push(f);
-      }
-    }
-    // A moved descendant is only counted if its ancestor actually moved.
-    const carriedMoved = carried.filter((c) =>
-      moved.some(
-        (m) =>
-          m instanceof TFolder &&
-          (original.get(c) as string).startsWith(`${original.get(m) as string}/`)
-      )
-    );
-    const movedCount = moved.length + carriedMoved.length;
-    // `subject` and `alreadyInMessage` from `membership.ts`, not a fourth and
-    // fifth copy of their rules written out here. Thirty colliding notes used
-    // to produce thirty filenames in one toast, which is the exact outrunning
-    // `subject` was written to stop, and the `is`/`are` agreement was spelled
-    // out twice in one file.
-    //
-    // `movedCount` is passed explicitly because it can EXCEED `moved`: a dragged
-    // folder carries its contents, and those travelled without a rename of their
-    // own. One file moved on its own is still named.
-    //
-    // The DESTINATION, not only the space. A move cannot be undone, so the one
-    // thing the user has to be able to check afterwards is where the file now
-    // is, and the space's name does not say that: "Moved plan.md into Work"
-    // leaves them hunting when Work is pinned to `Projects/Clients`. The same
-    // naming makes the "already in" case readable too, since a note in
-    // `Work/sub/a.md` that moves UP to `Work/a.md` is otherwise reported in the
-    // identical words as one that did not move at all.
-    const into = `${spaceName} (${root})`;
-    if (blocked.length > 0) {
-      const failed = `${subject(blocked)} could not move`;
-      if (movedCount === 0) {
-        new Notice(`Spaces: ${failed} into ${into}`);
-        return;
-      }
-      // Say what changed as well as what did not.
-      new Notice(`Moved ${subject(moved, movedCount)} into ${into}. ${failed}.`);
-      return;
-    }
-    if (movedCount === 0 && already.length > 0) {
-      new Notice(alreadyInMessage(already, into));
-      return;
-    }
-    new Notice(`Moved ${subject(moved, movedCount)} into ${into}`);
+    await addToSpace({ defs: this.defs, controller: this.controller }, spaceId, files);
   }
 
   /**
@@ -3001,8 +2845,7 @@ export default class SpacesPlugin extends Plugin {
       },
       writeOrder: (folderPath, order) => this.writeOrderFor(folderPath, order),
       indicatorStyle: () => this.defs.get().settings.dropIndicatorStyle,
-      onDragBegin: (paths, truncated, fromSelection) =>
-        this.currentDrag.begin(paths, truncated, fromSelection),
+      onDragBegin: (paths, truncated) => this.currentDrag.begin(paths, truncated),
       // The one place that clears what a drag published. The strip never hears
       // `dragend` for a file drag (its source is a tree row), so an icon lit
       // under an Escaped drag is cleared from here, and the switcher is created

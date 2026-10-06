@@ -28,14 +28,13 @@ interface RowSnapshot extends GapRow {
 /**
  * What one `dragstart` turns out to be carrying.
  *
- * The three fields are produced together by `collectDragged` and published
- * together by `publishDrag`, because they are only safe read together: see
+ * Both fields are produced together by `collectDragged` and published together
+ * by `publishDrag`, because they are only safe read together: see
  * `DraggedFiles` in `currentDrag.ts`, the public shape this fills.
  */
 interface Collected {
   paths: string[];
   truncated: boolean;
-  fromSelection: boolean;
 }
 
 /** The part of a rect the drop rules read. Undisplaced, in viewport space. */
@@ -142,20 +141,8 @@ export interface DragOrderingDeps {
    * on these paths must decline on the same flag, for the reason recorded above
    * `movesIntoOwnSubtree` in `dropIntent.ts`.
    *
-   * `fromSelection` travels with them for the same reason and answers a
-   * different question: not "might this list be short" but "could it be short
-   * at all". It is true only when the paths came from a multi-selection, which
-   * is the only case `truncated` has anything to say about, and unlike
-   * `truncated` it is a fact about where the list came from rather than a
-   * geometric guess about where it ends. A consumer whose action cannot be
-   * undone should refuse on this; see `currentDrag.ts` for the blind spot that
-   * made it necessary.
    */
-  onDragBegin?: (
-    paths: readonly string[],
-    truncated: boolean,
-    fromSelection: boolean
-  ) => void;
+  onDragBegin?: (paths: readonly string[], truncated: boolean) => void;
   /**
    * No drag this class published is running any more. Clear whatever you kept.
    *
@@ -168,7 +155,7 @@ export interface DragOrderingDeps {
    * `dragend` listener -- and for a while the blocked path published its paths
    * without ever arming one. The record then outlived its drag, and the next
    * unrelated drag to cross the space strip (a tab, an editor selection) read
-   * those paths as a live file drag and offered to `renameFile` them.
+   * those paths as a live file drag, lit an icon, and offered to act on them.
    *
    * What is true, and what the two arming sites in `onDragStart` are there to
    * keep true, is: this fires at the end of every drag that reached a
@@ -486,10 +473,8 @@ export class DragOrdering {
    * it.
    */
   private publishDrag(row: { el: HTMLElement; path: string } | null): Collected {
-    const collected = row
-      ? this.collectDragged(row)
-      : { paths: [], truncated: false, fromSelection: false };
-    this.deps.onDragBegin?.(collected.paths, collected.truncated, collected.fromSelection);
+    const collected = row ? this.collectDragged(row) : { paths: [], truncated: false };
+    this.deps.onDragBegin?.(collected.paths, collected.truncated);
     return collected;
   }
 
@@ -514,7 +499,7 @@ export class DragOrdering {
    * Shared by both paths through `onDragStart` rather than written out on the
    * armed one, because it is the BLOCKED path where the consequence of
    * skipping it is worst: that path publishes paths it never arms a teardown
-   * for, and a record that outlives its drag is a `renameFile` on files the
+   * for, and a record that outlives its drag is an act on notes and folders the
    * user never dragged.
    */
   private armDragEnd(el: HTMLElement): void {
@@ -527,11 +512,21 @@ export class DragOrdering {
       // FIRST, before a single path is resolved or published: whatever a
       // previous drag left behind is finished.
       //
-      // The invariant this buys is narrow and worth stating exactly: once a
-      // `dragstart` has begun, no earlier drag's paths are readable by
-      // anything. A browser cannot start a second drag while one is running,
-      // so a `dragstart` arriving IS proof the last one ended, whether or not
-      // its `dragend` was ever delivered to us.
+      // The invariant this buys is narrow, and the narrowness is the part
+      // that was once stated too generously: once a `dragstart` HAS REACHED
+      // THIS HANDLER, no earlier drag's paths are readable by anything. A
+      // browser cannot start a second drag while one is running, so a
+      // `dragstart` arriving IS proof the last one ended, whether or not its
+      // `dragend` was ever delivered to us.
+      //
+      // "Reached this handler" is the whole qualification, and it is not a
+      // detail. This listener is on the bound explorer CONTAINER (see `bind`),
+      // while `dragover`, `drop` and `dragend` are on the document. A drag
+      // that starts on a tab header, in the editor, or outside Obsidian
+      // altogether never fires a `dragstart` here, so it clears nothing. The
+      // only thing standing between a stale record and such a drag is
+      // `armDragEnd` on the row the previous drag started from, which is why
+      // both paths below arm one.
       //
       // Belt to the braces below, not a replacement for them. `publishDrag`
       // reaches every return path of this handler and `onDragBegin` replaces
@@ -539,7 +534,7 @@ export class DragOrdering {
       // nothing. It earns its place in the cases where that is not reached:
       // `rowFromTarget` or `collectDragged` throwing into `guard`, or a future
       // early return added above the publish. The cost of being wrong here is
-      // a `renameFile` on files the user never dragged, so the record is
+      // an act on notes and folders the user never dragged, so the record is
       // emptied before anything can go wrong rather than after.
       //
       // Our OWN drag state is cleared alongside, for the same reason and at no
@@ -583,11 +578,10 @@ export class DragOrdering {
         // no `onDragDone` ever fires, and the paths sit in the consumer's
         // record until something clears them. The next unrelated drag across
         // the space strip -- a tab, a selection dragged out of the editor --
-        // then reads them as a live file drag, lights an icon, and a drop on a
-        // folder-pinned space calls `renameFile` on files the user never
-        // touched. Nothing about `enabled()` has any bearing on that, which is
-        // the whole reason the publish moved above the gate; the teardown had
-        // to move with it.
+        // then reads them as a live file drag, lights an icon, and a drop on
+        // it writes members the user never asked for. Nothing about
+        // `enabled()` has any bearing on that, which is the whole reason the
+        // publish moved above the gate; the teardown had to move with it.
         if (blocked) this.armDragEnd(blocked.el);
         this.publishDrag(blocked);
         return;
@@ -636,22 +630,15 @@ export class DragOrdering {
    * the first or last RENDERED row may continue past it — unless the scroller
    * is already at that end of its range.
    *
-   * **`fromSelection` is the fact that tell cannot get wrong.** Three of the
-   * four returns below are `whole(...)`: no container, the dragged row is not
-   * selected, or the selected set came back empty. Every one of them means
-   * "just this row, there is no selection to miss", and a one-row list is never
-   * short. Only the last return reads a selection, and it is therefore the only
-   * one where `truncated` has anything to be right or wrong about. A consumer
-   * that cannot afford to be wrong refuses on `fromSelection` and never has to
-   * trust the geometry at all — see the flag's own note in `currentDrag.ts` for
-   * why that matters, and `spaceDropFor` for the one place that spends it.
+   * **Three of the four returns below are `whole(...)`:** no container, the
+   * dragged row is not selected, or the selected set came back empty. Every one
+   * of them means "just this row, there is no selection to miss", and a one-row
+   * list is never short, so `truncated` is false on all three by construction.
+   * Only the last return reads a selection, and it is therefore the only one
+   * where `truncated` has anything to be right or wrong about.
    */
   private collectDragged(row: { el: HTMLElement; path: string }): Collected {
-    const whole = (paths: string[]): Collected => ({
-      paths,
-      truncated: false,
-      fromSelection: false,
-    });
+    const whole = (paths: string[]): Collected => ({ paths, truncated: false });
     const c = this.container;
     if (!c) return whole([row.path]);
     const self = row.el.querySelector(SEL.titleWithPath);
@@ -673,7 +660,7 @@ export class DragOrdering {
       if (p) paths.push(p);
     }
     if (paths.length === 0) return whole([row.path]);
-    return { paths, truncated: this.selectionMayBeClipped(rendered), fromSelection: true };
+    return { paths, truncated: this.selectionMayBeClipped(rendered) };
   }
 
   /**

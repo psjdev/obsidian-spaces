@@ -68,8 +68,7 @@ async function stripIcon(useThemeIconColor: boolean): Promise<HTMLElement> {
     () => false,
     () => undefined,
     {
-      dragged: () => ({ paths: [], truncated: false, fromSelection: false }),
-      rootExists: () => true,
+      dragged: () => ({ paths: [], truncated: false }),
       onDropped: () => undefined,
       onRefused: () => undefined,
     }
@@ -150,8 +149,7 @@ describe("forcing theme colors on every surface that draws a space icon", () => 
       () => false,
       () => undefined,
       {
-        dragged: () => ({ paths: [], truncated: false, fromSelection: false }),
-        rootExists: () => true,
+        dragged: () => ({ paths: [], truncated: false }),
         onDropped: () => undefined,
         onRefused: () => undefined,
       }

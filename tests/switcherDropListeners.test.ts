@@ -26,7 +26,7 @@ import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { buildFakeVault } from "./helpers/fakeVault";
-import { CLIPPED_SELECTION, SELECTION_ONTO_FOLDER_SPACE } from "../src/ui/spaceDrop";
+import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE } from "../src/ui/spaceDrop";
 import { DEFAULT_DEFINITIONS, type SpaceDefinition } from "../src/types";
 import type { DraggedFiles } from "../src/order/currentDrag";
 
@@ -52,14 +52,13 @@ interface Harness {
   onDropped: ReturnType<typeof vi.fn>;
   onRefused: ReturnType<typeof vi.fn>;
   drag: DraggedFiles;
-  rootPresent: boolean;
 }
 
 /**
- * `drag` and `rootPresent` are mutable on the harness rather than captured, so
- * one mounted strip can be asked several questions in the order a real drag
- * would ask them. Both are read through the callbacks on every event, which is
- * the point: the view must never cache either.
+ * `drag` is mutable on the harness rather than captured, so one mounted strip
+ * can be asked several questions in the order a real drag would ask them. It is
+ * read through the callback on every event, which is the point: the view must
+ * never cache it.
  */
 async function build(): Promise<Harness> {
   let stored: unknown = { ...DEFAULT_DEFINITIONS, spaces: [CURATED, PINNED] };
@@ -84,8 +83,7 @@ async function build(): Promise<Harness> {
   const h = {
     onDropped,
     onRefused,
-    drag: { paths: [] as readonly string[], truncated: false, fromSelection: false },
-    rootPresent: true,
+    drag: { paths: [] as readonly string[], truncated: false },
   };
   const switcher = new SwitcherView(
     defs,
@@ -96,7 +94,6 @@ async function build(): Promise<Harness> {
     () => undefined,
     {
       dragged: () => h.drag,
-      rootExists: () => h.rootPresent,
       onDropped: (spaceId, drag) => onDropped(spaceId, drag),
       onRefused: (reason, spaceName) => onRefused(reason, spaceName),
     }
@@ -138,26 +135,18 @@ function lit(host: HTMLElement): string[] {
 describe("the rail's dragover marks only a target that would act", () => {
   it("lights a curated icon and cancels the event", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     const e = send(iconFor(h.host, "curated"), "dragover");
     expect(lit(h.host)).toEqual(["curated"]);
     expect(e.defaultPrevented).toBe(true);
     expect(h.onRefused).not.toHaveBeenCalled();
   });
 
-  it("lights a folder-pinned icon and cancels the event", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
-    const e = send(iconFor(h.host, "pinned"), "dragover");
-    expect(lit(h.host)).toEqual(["pinned"]);
-    expect(e.defaultPrevented).toBe(true);
-  });
-
   // The negative that matters most: *All* holds no members, so it is not a
   // target, and the event has to pass through untouched.
   it("neither lights nor cancels over All", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     const e = send(allIcon(h.host), "dragover");
     expect(lit(h.host)).toEqual([]);
     expect(e.defaultPrevented).toBe(false);
@@ -171,30 +160,20 @@ describe("the rail's dragover marks only a target that would act", () => {
     expect(e.defaultPrevented).toBe(false);
   });
 
-  // A folder space keeps its root string after the folder is deleted, so this
-  // icon used to light and then fail every rename behind the drop.
-  it("neither lights nor cancels for a folder space whose root is gone", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
-    h.rootPresent = false;
-    const e = send(iconFor(h.host, "pinned"), "dragover");
-    expect(lit(h.host)).toEqual([]);
-    expect(e.defaultPrevented).toBe(false);
-    // Silent: the space's own empty state already explains a missing root.
-    expect(h.onRefused).not.toHaveBeenCalled();
-  });
-
   it("moves the mark rather than leaving two icons lit", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     send(iconFor(h.host, "curated"), "dragover");
-    send(iconFor(h.host, "pinned"), "dragover");
-    expect(lit(h.host)).toEqual(["pinned"]);
+    // Away and back, because the only other icon in this strip is the pinned
+    // one and it never lights. A second lit icon would survive this.
+    send(allIcon(h.host), "dragover");
+    send(iconFor(h.host, "curated"), "dragover");
+    expect(lit(h.host)).toEqual(["curated"]);
   });
 
   it("takes the mark off when the pointer leaves the rail", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     send(iconFor(h.host, "curated"), "dragover");
     expect(lit(h.host)).toEqual(["curated"]);
     iconFor(h.host, "curated").dispatchEvent(
@@ -205,7 +184,7 @@ describe("the rail's dragover marks only a target that would act", () => {
 
   it("takes the mark off when a drag ends without the pointer moving", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     send(iconFor(h.host, "curated"), "dragover");
     // A file drag's source is a tree row, so the rail hears no `dragend`. This
     // is the callback `main.ts` spends `DragOrdering`'s drag-done hook on, and
@@ -214,6 +193,59 @@ describe("the rail's dragover marks only a target that would act", () => {
     // which was not true: see `clearDropTarget`.)
     h.switcher.clearDropTarget();
     expect(lit(h.host)).toEqual([]);
+  });
+});
+
+/**
+ * The scope reduction, at the layer the user meets it.
+ *
+ * A space pinned to a folder renders from that folder and has no member list,
+ * so there is nothing for a drop to write. It refuses, and it refuses OUT LOUD:
+ * its icon is identical to the curated one beside it, so a silent decline there
+ * reads as a feature that has stopped working rather than as an answer.
+ */
+describe("the rail refuses a space pinned to a folder", () => {
+  it("neither lights nor cancels, and says why, naming the space", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
+    const e = send(iconFor(h.host, "pinned"), "dragover");
+    expect(lit(h.host)).toEqual([]);
+    expect(e.defaultPrevented).toBe(false);
+    expect(h.onRefused).toHaveBeenCalledTimes(1);
+    // The NAME as well as the reason: the words point the user at Obsidian's
+    // own "Move file to...", which needs to say which space it is about.
+    expect(h.onRefused).toHaveBeenCalledWith(FOLDER_PINNED_SPACE, "Clients");
+  });
+
+  // Said once per drag, like every other spoken refusal, because `dragover`
+  // fires every few pixels of pointer travel.
+  it("says it once per drag however many dragovers arrive", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
+    for (let i = 0; i < 5; i++) send(iconFor(h.host, "pinned"), "dragover");
+    expect(h.onRefused).toHaveBeenCalledTimes(1);
+  });
+
+  // The reversible path is untouched by the refusal: a curated space in the
+  // same strip still lights, still cancels, and still says nothing.
+  it("still lights the curated icon in the same drag", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: false };
+    send(iconFor(h.host, "pinned"), "dragover");
+    const e = send(iconFor(h.host, "curated"), "dragover");
+    expect(lit(h.host)).toEqual(["curated"]);
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  // The `drop` listener re-asks and refuses too, so a drop delivered by any
+  // route -- a synthetic event, a browser that cancelled elsewhere -- still
+  // writes nothing.
+  it("acts on no drop that reaches it anyway", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
+    const e = send(iconFor(h.host, "pinned"), "drop");
+    expect(h.onDropped).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
   });
 });
 
@@ -229,39 +261,29 @@ describe("the rail's dragover refuses a clipped selection out loud", () => {
    */
   it("neither lights nor cancels, and says why", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: true, fromSelection: false };
-    const e = send(iconFor(h.host, "pinned"), "dragover");
-    expect(lit(h.host)).toEqual([]);
-    expect(e.defaultPrevented).toBe(false);
-    expect(h.onRefused).toHaveBeenCalledTimes(1);
-    expect(h.onRefused).toHaveBeenCalledWith(CLIPPED_SELECTION, "Clients");
-  });
-
-  it("refuses a clipped drag on a curated space too", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: true, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: true };
     const e = send(iconFor(h.host, "curated"), "dragover");
     expect(lit(h.host)).toEqual([]);
     expect(e.defaultPrevented).toBe(false);
     expect(h.onRefused).toHaveBeenCalledTimes(1);
+    expect(h.onRefused).toHaveBeenCalledWith(CLIPPED_SELECTION, "Work");
   });
 
   // `dragover` fires every few pixels of pointer travel, so the guard is what
   // stands between one explanation and a stack of identical notices.
   it("says it once per drag however many dragovers arrive", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: true, fromSelection: false };
-    for (let i = 0; i < 5; i++) send(iconFor(h.host, "pinned"), "dragover");
-    send(iconFor(h.host, "curated"), "dragover");
+    h.drag = { paths: ["Notes/a.md"], truncated: true };
+    for (let i = 0; i < 5; i++) send(iconFor(h.host, "curated"), "dragover");
     expect(h.onRefused).toHaveBeenCalledTimes(1);
   });
 
   it("explains the next drag as well", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: true, fromSelection: false };
-    send(iconFor(h.host, "pinned"), "dragover");
+    h.drag = { paths: ["Notes/a.md"], truncated: true };
+    send(iconFor(h.host, "curated"), "dragover");
     h.switcher.clearDropTarget();
-    send(iconFor(h.host, "pinned"), "dragover");
+    send(iconFor(h.host, "curated"), "dragover");
     expect(h.onRefused).toHaveBeenCalledTimes(2);
   });
 
@@ -269,18 +291,18 @@ describe("the rail's dragover refuses a clipped selection out loud", () => {
   // the "no drop" cursor says so on its own.
   it("stays quiet over a target that was never a target", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: true, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: true };
     send(allIcon(h.host), "dragover");
     expect(h.onRefused).not.toHaveBeenCalled();
   });
 
   it("never hands a clipped drag to the write, even if a drop reaches it", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: true, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: true };
     // A drop cannot arrive after a refused dragover, since nothing cancelled
-    // it. Dispatched anyway, because the cost of being wrong here is an
-    // irreversible partial move.
-    const e = send(iconFor(h.host, "pinned"), "drop");
+    // it. Dispatched anyway, because the record the write would get is a
+    // fraction of what the user selected and the check costs one comparison.
+    const e = send(iconFor(h.host, "curated"), "drop");
     expect(h.onDropped).not.toHaveBeenCalled();
     expect(e.defaultPrevented).toBe(false);
   });
@@ -297,7 +319,7 @@ describe("a reorder drag still takes the old branch", () => {
     const h = await build();
     // A file drag is live at the same time, so a branch that read the record
     // instead of `dragFromId` would light an icon here.
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     send(iconFor(h.host, "curated"), "dragstart");
     const e = send(iconFor(h.host, "pinned"), "dragover");
     expect(e.defaultPrevented).toBe(true);
@@ -307,7 +329,7 @@ describe("a reorder drag still takes the old branch", () => {
 
   it("does not run the file drop on a reorder drop", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     send(iconFor(h.host, "curated"), "dragstart");
     send(iconFor(h.host, "pinned"), "drop");
     expect(h.onDropped).not.toHaveBeenCalled();
@@ -317,16 +339,15 @@ describe("a reorder drag still takes the old branch", () => {
 describe("the rail's drop spends the same answer the dragover showed", () => {
   it("hands the whole record to the write", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: false };
     send(iconFor(h.host, "curated"), "dragover");
     const e = send(iconFor(h.host, "curated"), "drop");
     expect(e.defaultPrevented).toBe(true);
-    // The WHOLE record, all three fields: a consumer handed the paths without
-    // both flags cannot tell a complete selection from a trimmed one.
+    // The WHOLE record, both fields: a consumer handed the paths without
+    // `truncated` cannot tell a complete selection from a trimmed one.
     expect(h.onDropped).toHaveBeenCalledWith("curated", {
       paths: ["Notes/a.md", "Notes/b.md"],
       truncated: false,
-      fromSelection: false,
     });
     // And the mark goes with the drop, rather than waiting for a teardown.
     expect(lit(h.host)).toEqual([]);
@@ -334,74 +355,9 @@ describe("the rail's drop spends the same answer the dragover showed", () => {
 
   it("does nothing for a drop over All", async () => {
     const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
     const e = send(allIcon(h.host), "drop");
     expect(h.onDropped).not.toHaveBeenCalled();
     expect(e.defaultPrevented).toBe(false);
-  });
-});
-
-/**
- * The deliberate scope limit on the irreversible path, at the layer the user
- * meets it.
- *
- * A drag that came from the explorer's multi-selection is refused by a
- * folder-pinned space, because the only guard that could have caught a short
- * list there -- `truncated` -- cannot see the top edge of the render window.
- * Every case below sets `truncated: false`, so a version that leaned on that
- * flag instead fails all of them.
- */
-describe("the rail refuses a selection aimed at a folder-pinned space", () => {
-  it("neither lights nor cancels, and says why, naming the space", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: false, fromSelection: true };
-    const e = send(iconFor(h.host, "pinned"), "dragover");
-    expect(lit(h.host)).toEqual([]);
-    expect(e.defaultPrevented).toBe(false);
-    expect(h.onRefused).toHaveBeenCalledTimes(1);
-    // The NAME as well as the reason: the advice is "drag them on one at a
-    // time", which needs to say which icon it is about.
-    expect(h.onRefused).toHaveBeenCalledWith(SELECTION_ONTO_FOLDER_SPACE, "Clients");
-  });
-
-  // The count test that must not be substituted, driven through the listener.
-  it("refuses a selection that has been clipped down to one visible row", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: true };
-    const e = send(iconFor(h.host, "pinned"), "dragover");
-    expect(lit(h.host)).toEqual([]);
-    expect(e.defaultPrevented).toBe(false);
-    expect(h.onRefused).toHaveBeenCalledWith(SELECTION_ONTO_FOLDER_SPACE, "Clients");
-  });
-
-  // The reversible path is untouched: a curated space still lights, still
-  // cancels, and still says nothing, for the same selection.
-  it("still lights a curated icon for the same selection", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: false, fromSelection: true };
-    const e = send(iconFor(h.host, "curated"), "dragover");
-    expect(lit(h.host)).toEqual(["curated"]);
-    expect(e.defaultPrevented).toBe(true);
-    expect(h.onRefused).not.toHaveBeenCalled();
-  });
-
-  // And a single-row drag onto the pinned space still works, so the refusal is
-  // the selection and not the space.
-  it("still lights the pinned icon for a single-row drag", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md"], truncated: false, fromSelection: false };
-    const e = send(iconFor(h.host, "pinned"), "dragover");
-    expect(lit(h.host)).toEqual(["pinned"]);
-    expect(e.defaultPrevented).toBe(true);
-  });
-
-  // The `drop` listener re-asks and refuses too, so a drop delivered by any
-  // route -- a synthetic event, a browser that cancelled elsewhere -- cannot
-  // reach the move.
-  it("acts on no drop that reaches it anyway", async () => {
-    const h = await build();
-    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: false, fromSelection: true };
-    send(iconFor(h.host, "pinned"), "drop");
-    expect(h.onDropped).not.toHaveBeenCalled();
   });
 });

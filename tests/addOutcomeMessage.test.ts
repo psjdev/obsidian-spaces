@@ -51,13 +51,14 @@ describe("addOutcomeMessage", () => {
 });
 
 /**
- * The two rules the folder-space move used to write out by hand, four times
- * between them.
+ * The two naming rules, in one place rather than written out at each notice.
  *
  * They live in `membership.ts` because they are rules, not lookups: the ledger
- * settled that at R11 for this branch, and the drift had already begun --
- * `moveIntoRoot` was joining every blocked filename with commas, which is the
- * unbounded list `subject` exists to prevent.
+ * settled that at R11 for this branch, after a fourth hand-written copy had
+ * already drifted and was joining every filename with commas, which is the
+ * unbounded list `subject` exists to prevent. That copy belonged to the
+ * folder-space move, which has since been removed; the rules outlived it
+ * because the add path says the same things.
  */
 describe("subject", () => {
   it("names one", () => {

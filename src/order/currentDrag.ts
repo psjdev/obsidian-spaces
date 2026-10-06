@@ -21,21 +21,24 @@
  */
 
 /**
- * A drag as anything outside the file tree has to see it: the paths, whether
- * that list can be trusted to be the WHOLE selection, and whether it came from
- * a selection at all.
+ * A drag as anything outside the file tree has to see it: the paths, and
+ * whether that list can be trusted to be the WHOLE selection.
  *
- * The three travel together deliberately. `collectDragged` produces all of
- * them, and `DragOrdering` already refuses its own drop on `truncated`, but a
- * consumer handed only `paths` has no way to tell a complete selection from a
- * clipped one, and a clipped one looks exactly like a small complete one.
- * Carrying the paths alone across this seam is what let a 240-note selection be
- * half moved and reported as a 48-note success.
+ * The two travel together deliberately. `collectDragged` produces both, and
+ * `DragOrdering` already refuses its own drop on `truncated`, but a consumer
+ * handed only `paths` has no way to tell a complete selection from a clipped
+ * one, and a clipped one looks exactly like a small complete one. Carrying the
+ * paths alone across this seam is what let a 240-note selection be half moved
+ * and reported as a 48-note success.
  *
- * `fromSelection` is the later and blunter of the two guards, added once
- * `truncated` was found to be structurally blind on one edge. Read it, not the
- * length of `paths`, wherever the cost of acting on half a gesture is
- * irreversible.
+ * A third field, `fromSelection`, lived here while the strip could MOVE files
+ * on disk: it was the blunter guard that refused the irreversible path outright
+ * rather than trusting `truncated`'s geometry. The move was removed by an
+ * owner's decision and nothing else ever read the flag, so it went with its one
+ * consumer rather than being kept against a path that no longer exists. The
+ * blindness it guarded against is unfixed and is recorded where it lives, at
+ * `DragOrdering.selectionMayBeClipped`; anything that puts an irreversible act
+ * back behind this record needs that guard back with it.
  */
 export interface DraggedFiles {
   readonly paths: readonly string[];
@@ -53,49 +56,25 @@ export interface DraggedFiles {
    * `dropIntent.ts` states the governing stance above `movesIntoOwnSubtree`: a
    * multi-selection is one gesture, and performing the possible half leaves
    * the user with a partial result they did not ask for and cannot see the
-   * shape of. On the strip that half is a `renameFile` per path, and Obsidian
-   * has no undo for a file move.
+   * shape of. On the strip that half is a member list holding a fraction of
+   * what was selected, written by a gesture whose notice counts only what it
+   * wrote.
+   *
+   * It is a HALF-GUARD and must not be mistaken for a complete one. It is
+   * geometric, and `DragOrdering.selectionMayBeClipped` records at its own
+   * definition the edge on which it cannot fire at all.
    */
   readonly truncated: boolean;
-  /**
-   * True when `paths` came from the explorer's MULTI-SELECTION rather than from
-   * the one row the pointer was on.
-   *
-   * This is the discriminator `truncated` cannot be trusted to be, and it
-   * exists because `truncated` has a blind spot nothing downstream can see
-   * around. `DragOrdering.selectionMayBeClipped` reads `rendered[0]` to ask
-   * whether the selection runs off the TOP of the render window, but Obsidian's
-   * virtualiser keeps the ancestor chain of everything it renders, so inside an
-   * expanded folder `rendered[0]` is the FOLDER'S OWN ROW and never a selected
-   * note. That half of the test can never fire. Measured rather than reasoned:
-   * `e2e/drop-on-space.mjs` records it and scrolls the other way so its check
-   * can drive the bottom edge instead.
-   *
-   * So `truncated` is a half-guard, and a consumer that cannot afford to
-   * perform half a gesture must refuse on THIS. `collectDragged` cannot get it
-   * wrong the way the geometry can: it is true on exactly one of that function's
-   * return paths, the one where the dragged row was itself part of a selection,
-   * and that is also the only path on which a short list is possible at all. A
-   * single-row drag carries one path and carries all of it.
-   *
-   * Counting `paths` is NOT the same test and must never be substituted for it.
-   * A selection clipped down to its one visible row presents as
-   * `paths.length === 1`, indistinguishable from a single-row drag by count and
-   * entirely distinguishable by this flag.
-   */
-  readonly fromSelection: boolean;
 }
 
 export class CurrentDrag {
   private current: string[] = [];
   private clipped = false;
-  private selected = false;
 
   /** Copied, so the caller cannot edit the record through the array it passed. */
-  begin(paths: readonly string[], truncated: boolean, fromSelection: boolean): void {
+  begin(paths: readonly string[], truncated: boolean): void {
     this.current = [...paths];
     this.clipped = truncated;
-    this.selected = fromSelection;
   }
 
   end(): void {
@@ -118,7 +97,6 @@ export class CurrentDrag {
     // empty it under them. The guarantee is pinned in `currentDrag.test.ts`.
     this.current = [];
     this.clipped = false;
-    this.selected = false;
   }
 
   paths(): readonly string[] {
@@ -131,6 +109,6 @@ export class CurrentDrag {
    * complete.
    */
   dragged(): DraggedFiles {
-    return { paths: this.current, truncated: this.clipped, fromSelection: this.selected };
+    return { paths: this.current, truncated: this.clipped };
   }
 }

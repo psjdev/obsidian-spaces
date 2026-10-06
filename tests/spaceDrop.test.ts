@@ -1,21 +1,21 @@
 /**
  * What a drop on a space icon means.
  *
- * Layer 1: pure, no DOM. Asked twice per drag -- once on `dragover` to decide
- * whether to light the icon, once on `drop` to decide what to do -- so that the
- * icon can never promise something the drop will not deliver. That exact
- * failure already happened on this plugin once: the drag indicator read
- * `destination=Travel` while the file landed at the vault root, because the
- * drop re-decided instead of honouring what was shown.
+ * Layer 1: pure, no DOM. Asked on every `dragover` to decide whether to light
+ * the icon and again on `drop` to decide what to do, so that the icon can never
+ * promise something the drop will not deliver. That exact failure already
+ * happened on this plugin once: the drag indicator read `destination=Travel`
+ * while the file landed at the vault root, because the drop re-decided instead
+ * of honouring what was shown.
+ *
+ * ADD IS THE ONLY ACT this function can answer with. The second one, moving a
+ * file into a folder-pinned space's root, was removed by an owner's decision:
+ * the two kinds of icon are indistinguishable in the strip, and only one of
+ * them rewrote the vault. The tests that drove the move went with it; what is
+ * left below is the add, and the two refusals the strip says out loud.
  */
 import { describe, expect, it } from "vitest";
-import {
-  CLIPPED_SELECTION,
-  MISSING_ROOT,
-  SELECTION_ONTO_FOLDER_SPACE,
-  dropTargetFor,
-  spaceDropFor,
-} from "../src/ui/spaceDrop";
+import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE, spaceDropFor } from "../src/ui/spaceDrop";
 import type { SpaceDefinition } from "../src/types";
 
 /**
@@ -23,17 +23,9 @@ import type { SpaceDefinition } from "../src/types";
  * default is the ordinary case, a selection the DOM holds whole; the tests
  * that are ABOUT the clipping pass `true` and say so.
  */
-function drag(paths: readonly string[], truncated = false, fromSelection = false) {
-  return { paths, truncated, fromSelection };
+function drag(paths: readonly string[], truncated = false) {
+  return { paths, truncated };
 }
-
-/**
- * The vault's answer about a space's root folder. `exists` is the default
- * because a declared root that is really there is the ordinary case; the
- * missing-root tests pass `gone` and say so.
- */
-const exists = (): boolean => true;
-const gone = (): boolean => false;
 
 function space(o: Partial<SpaceDefinition> = {}): SpaceDefinition {
   return {
@@ -48,119 +40,112 @@ function space(o: Partial<SpaceDefinition> = {}): SpaceDefinition {
 
 describe("spaceDropFor", () => {
   it("adds to a curated space", () => {
-    expect(spaceDropFor(space(), drag(["Notes/a.md"]), exists)).toEqual({ kind: "add", spaceId: "s1" });
+    expect(spaceDropFor(space(), drag(["Notes/a.md"]))).toEqual({ kind: "add", spaceId: "s1" });
   });
 
   it("refuses when there is no space under the pointer", () => {
     // The `+` control and *All* both resolve to no space.
-    expect(spaceDropFor(null, drag(["Notes/a.md"]), exists).kind).toBe("refuse");
+    expect(spaceDropFor(null, drag(["Notes/a.md"])).kind).toBe("refuse");
   });
 
   it("refuses an empty drag", () => {
-    expect(spaceDropFor(space(), drag([]), exists).kind).toBe("refuse");
+    expect(spaceDropFor(space(), drag([])).kind).toBe("refuse");
   });
 
-  it("moves into the root of a folder-pinned space", () => {
-    expect(spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md"]), exists)).toEqual({
-      kind: "move",
+  // A selection is the ordinary case for the add path and must keep working.
+  // `addToSpace` takes a list, `Remove from space` undoes it, and nothing about
+  // the count changes the answer.
+  it("adds a whole selection to a curated space", () => {
+    expect(spaceDropFor(space(), drag(["a.md", "b.md", "c.md"]))).toEqual({
+      kind: "add",
       spaceId: "s1",
-      root: "Clients",
+    });
+  });
+});
+
+/**
+ * The scope reduction, pinned as behaviour rather than described in a commit
+ * message.
+ *
+ * A space pinned to a folder renders from that folder and never shows a member
+ * list, so a member written to it would be a write the user can never see. It
+ * is refused, it is refused ALOUD, and it is refused for every spelling of a
+ * declared root, including the ones a previous version of this function read as
+ * curated.
+ */
+describe("spaceDropFor and a space pinned to a folder", () => {
+  it("refuses, names the space, and gives the reason the strip speaks", () => {
+    expect(spaceDropFor(space({ name: "Archive", root: "Clients" }), drag(["Notes/a.md"]))).toEqual({
+      kind: "refuse",
+      reason: FOLDER_PINNED_SPACE,
+      spaceName: "Archive",
     });
   });
 
   /**
-   * The missing-root state, in all three of its spellings.
+   * The mutation this exists to kill: `rootOf(space) !== null` written in place
+   * of `hasRoot(space)`.
    *
-   * A space in it has DECLARED a root and cannot honour it. It still renders
-   * from that root and still shows no member list, so it is not curated: adding
-   * to it would write members nothing ever displays. And there is no folder to
-   * move into, so it is not a move target either. Refusing is the only honest
-   * answer, and it is why `isFolderSpace` is bound to `hasRoot` rather than to
-   * `rootOf` -- collapsing "no root at all" into "a root that cannot be
-   * honoured" is the exact mistake this rule used to make.
+   * `rootOf` nulls the two unusable spellings, `""` and `"/"`, so that
+   * substitution would read a space declaring either of them as CURATED and
+   * start writing members to a space that still renders from a root. `hasRoot`
+   * asks the question actually being asked: does this space have a member list
+   * at all.
    */
-  it("refuses the two unusable root spellings", () => {
-    expect(spaceDropFor(space({ root: "" }), drag(["Notes/a.md"]), exists).kind).toBe("refuse");
-    expect(spaceDropFor(space({ root: "/" }), drag(["Notes/a.md"]), exists).kind).toBe("refuse");
-  });
-
-  /**
-   * And the spelling `rootOf` cannot see.
-   *
-   * `rootOf` hands back `Projects` whether or not that folder is still there,
-   * so this is the state where the icon lit, the drop was claimed, and every
-   * `renameFile` behind it threw. The ONLY difference between this test and the
-   * move test above is the vault's answer.
-   */
-  it("refuses a declared root whose folder has been deleted", () => {
-    expect(spaceDropFor(space({ root: "Projects" }), drag(["Notes/a.md"]), gone).kind).toBe(
-      "refuse"
-    );
-    expect(spaceDropFor(space({ root: "Projects" }), drag(["Notes/a.md"]), exists)).toEqual({
-      kind: "move",
-      spaceId: "s1",
-      root: "Projects",
+  it("refuses the two unusable root spellings as well", () => {
+    expect(spaceDropFor(space({ root: "" }), drag(["Notes/a.md"]))).toMatchObject({
+      kind: "refuse",
+      reason: FOLDER_PINNED_SPACE,
+    });
+    expect(spaceDropFor(space({ root: "/" }), drag(["Notes/a.md"]))).toMatchObject({
+      kind: "refuse",
+      reason: FOLDER_PINNED_SPACE,
     });
   });
 
-  // A curated space has no root at all, so the vault is never asked.
-  it("never asks about a root a curated space does not have", () => {
-    const asked: string[] = [];
-    const watch = (p: string): boolean => {
-      asked.push(p);
-      return true;
-    };
-    expect(spaceDropFor(space(), drag(["Notes/a.md"]), watch).kind).toBe("add");
-    expect(asked).toEqual([]);
-  });
-
-  it("refuses the pinned root dragged onto its own icon", () => {
-    expect(spaceDropFor(space({ root: "Clients" }), drag(["Clients"]), exists).kind).toBe("refuse");
-  });
-
-  it("refuses an ancestor of the pinned root", () => {
-    expect(spaceDropFor(space({ root: "Clients/Northwind" }), drag(["Clients"]), exists).kind).toBe("refuse");
-  });
-
-  // `movesIntoOwnSubtree` compares with `===` and `startsWith`, so it is case
-  // SENSITIVE, while the rest of the path policy is not. On a case
-  // insensitive filesystem these are the same folder, and moving it inside
-  // itself would destroy it.
-  it("refuses the pinned root under a different case", () => {
-    expect(spaceDropFor(space({ root: "Clients" }), drag(["clients"]), exists).kind).toBe("refuse");
-    expect(spaceDropFor(space({ root: "Clients/Sub" }), drag(["CLIENTS"]), exists).kind).toBe("refuse");
-  });
-
-  it("still moves a note that merely shares a prefix with the root", () => {
-    // "ClientsArchive" is not "Clients" nor inside it.
-    expect(spaceDropFor(space({ root: "Clients" }), drag(["ClientsArchive/a.md"]), exists).kind).toBe("move");
-  });
-
-  it("refuses when any one of several dragged paths is illegal", () => {
-    expect(
-      spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md", "Clients"]), exists).kind
-    ).toBe("refuse");
+  /**
+   * And a root whose folder has since been deleted.
+   *
+   * This used to be a state the function had to probe the live vault to see,
+   * because it decided whether there was a folder to move INTO. With no move
+   * there is nothing to probe: the space declares a root either way, so it has
+   * no member list either way, and the answer is the same without asking.
+   */
+  it("refuses a declared root whose folder is gone, without asking the vault", () => {
+    expect(spaceDropFor(space({ root: "Projects" }), drag(["Notes/a.md"]))).toMatchObject({
+      kind: "refuse",
+      reason: FOLDER_PINNED_SPACE,
+    });
   });
 
   /**
-   * The merge blocker this flag exists for.
+   * Order against the clipped-selection rule, which is the one place these two
+   * refusals compete.
    *
-   * `truncated` means the explorer's render window may be hiding more selected
-   * rows than the DOM holds, so the paths are possibly a fraction of the
-   * gesture. Acting on them would move that fraction with `renameFile`, leave
-   * the rest behind, and count only what moved -- which reads as a complete
-   * success and cannot be undone. Refusing is the same call `DragOrdering`
-   * makes for its own drops.
+   * Both are true of a clipped selection aimed at a pinned space. Only one is
+   * useful: "select fewer notes and folders, then drag again" is advice the
+   * user can follow forever without this icon ever accepting anything.
    */
-  it("refuses a drag whose selection may outrun the render window", () => {
-    const d = spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md"], true), exists);
-    expect(d).toMatchObject({ kind: "refuse", reason: CLIPPED_SELECTION });
+  it("reports the pinned space rather than the clipping", () => {
+    expect(spaceDropFor(space({ root: "Clients" }), drag(["a.md"], true))).toMatchObject({
+      kind: "refuse",
+      reason: FOLDER_PINNED_SPACE,
+    });
   });
+});
 
-  // Curated too: `addToSpace` would add only the visible rows and the notice
-  // would count only those, so the add is as partial as the move.
-  it("refuses a clipped drag on a curated space as well", () => {
-    expect(spaceDropFor(space(), drag(["Notes/a.md"], true), exists)).toMatchObject({
+/**
+ * The clipped-selection refusal, kept after the move was removed.
+ *
+ * `truncated` means the explorer's render window may be hiding more selected
+ * rows than the DOM holds, so the paths are possibly a fraction of the gesture.
+ * Acting on them now writes a member list missing most of what was selected and
+ * reports the fraction as the whole, which "Remove from space" can undo and
+ * which is still not what the user asked for.
+ */
+describe("spaceDropFor and a selection the render window may clip", () => {
+  it("refuses a clipped drag on a curated space", () => {
+    expect(spaceDropFor(space(), drag(["Notes/a.md"], true))).toMatchObject({
       kind: "refuse",
       reason: CLIPPED_SELECTION,
     });
@@ -169,127 +154,19 @@ describe("spaceDropFor", () => {
   // The space is named on the refusals that get spoken, because the strip is a
   // row of icons and "the space" picks out none of them.
   it("names the space on a refusal the user will be told about", () => {
-    expect(spaceDropFor(space({ name: "Archive" }), drag(["a.md"], true), exists)).toEqual({
+    expect(spaceDropFor(space({ name: "Archive" }), drag(["a.md"], true))).toEqual({
       kind: "refuse",
       reason: CLIPPED_SELECTION,
       spaceName: "Archive",
     });
   });
 
-  // Asked after the two cheap refusals, so the one refusal worth voicing only
-  // fires for a pointer that is genuinely aimed at a space.
+  // Asked after the two cheap refusals, so the refusals worth voicing only fire
+  // for a pointer that is genuinely aimed at a space.
   it("refuses a clipped drag over no space with the ordinary reason", () => {
-    expect(spaceDropFor(null, drag(["Notes/a.md"], true), exists)).toEqual({
+    expect(spaceDropFor(null, drag(["Notes/a.md"], true))).toEqual({
       kind: "refuse",
       reason: "not a space",
     });
-  });
-});
-
-/**
- * The second guard on the irreversible path, and why it is a different
- * question from the first.
- *
- * `truncated` asks "might this list be short", and the predicate behind it is
- * structurally blind on the top edge of the explorer's render window: an
- * expanded folder's own row is permanently in the DOM, so `rendered[0]` is
- * never a selected note and that half of the test cannot fire. `fromSelection`
- * asks the question the DOM cannot get wrong -- "did this list come from a
- * selection at all" -- and the move path refuses on it.
- *
- * Every test below passes `truncated: false`, which is the whole point: they
- * pin behaviour in exactly the state where the first guard is quiet and wrong.
- */
-describe("spaceDropFor and a selection aimed at a folder-pinned space", () => {
-  it("refuses the move, and says which space", () => {
-    expect(
-      spaceDropFor(
-        space({ name: "Archive", root: "Clients" }),
-        drag(["Notes/a.md", "Notes/b.md"], false, true),
-        exists
-      )
-    ).toEqual({
-      kind: "refuse",
-      reason: SELECTION_ONTO_FOLDER_SPACE,
-      spaceName: "Archive",
-    });
-  });
-
-  /**
-   * The mutation this exists to kill: `drag.paths.length > 1` written in place
-   * of `drag.fromSelection`.
-   *
-   * A selection clipped down to its one rendered row reaches this function
-   * carrying a single path. It is a selection, and the rest of it is invisible,
-   * so a count test waves through precisely the case that moves part of a
-   * gesture and reports it as all of it. That substitution passes every other
-   * test in this file and fails this one.
-   */
-  it("refuses a one-path selection, which a count test would let through", () => {
-    expect(
-      spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md"], false, true), exists).kind
-    ).toBe("refuse");
-  });
-
-  // The negative control for the rule as a whole. Without it, "refuse every
-  // move" would pass the two above.
-  it("still moves a single-row drag onto the same space", () => {
-    expect(
-      spaceDropFor(space({ root: "Clients" }), drag(["Notes/a.md"], false, false), exists)
-    ).toEqual({ kind: "move", spaceId: "s1", root: "Clients" });
-  });
-
-  /**
-   * The add path is deliberately untouched and keeps multi-select.
-   *
-   * `addToSpace` writes `data.json` and Remove undoes it, so collecting too few
-   * paths there is a wrong count the user can see and fix, not lost work. A
-   * version that put the `fromSelection` test above the curated/folder split
-   * would fail here while passing everything else.
-   */
-  it("still adds a selection to a curated space", () => {
-    expect(spaceDropFor(space(), drag(["a.md", "b.md"], false, true), exists)).toEqual({
-      kind: "add",
-      spaceId: "s1",
-    });
-  });
-
-  /**
-   * Order matters against the root checks. A folder space whose folder has been
-   * deleted is refused for THAT reason, which is a standing fact about the
-   * space, rather than being told to drag notes in one at a time to a folder
-   * that is not there.
-   */
-  it("reports a missing root rather than the selection limit", () => {
-    expect(
-      spaceDropFor(space({ root: "Projects" }), drag(["a.md", "b.md"], false, true), gone)
-    ).toMatchObject({ kind: "refuse", reason: MISSING_ROOT });
-  });
-
-  // And the clipped refusal still wins, because it is asked before the
-  // curated/folder split and is true of both kinds of space.
-  it("reports a clipped selection rather than the selection limit", () => {
-    expect(
-      spaceDropFor(space({ root: "Clients" }), drag(["a.md"], true, true), exists)
-    ).toMatchObject({ kind: "refuse", reason: CLIPPED_SELECTION });
-  });
-});
-
-describe("dropTargetFor and the selection limit", () => {
-  // It comes back rather than collapsing to null, which is what lets the
-  // listener speak. It still lights nothing: the caller lights for add and
-  // move only.
-  it("hands the refusal back so the listener can voice it", () => {
-    expect(
-      dropTargetFor(null, space({ root: "Clients" }), drag(["a.md"], false, true), exists)
-    ).toMatchObject({ kind: "refuse", reason: SELECTION_ONTO_FOLDER_SPACE });
-  });
-
-  // While a refusal nobody has worded still collapses to null, so the pointer
-  // passes through and the "no drop" cursor explains it for free.
-  it("still swallows a refusal that is not spoken", () => {
-    expect(
-      dropTargetFor(null, space({ root: "Clients" }), drag(["Clients"], false, false), exists)
-    ).toBeNull();
   });
 });
