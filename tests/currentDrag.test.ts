@@ -26,9 +26,12 @@ describe("CurrentDrag", () => {
     expect(d.paths()).toEqual([]);
   });
 
-  // The interrupted drag: Escape, or a drop outside every window. `dragend`
-  // fires for all of them, so `end()` is the only clear point and the next
-  // drag can never act on the last one's paths.
+  // The interrupted drag: Escape, or a drop outside every window. The browser
+  // fires `dragend` for all of them, but it fires it AT THE SOURCE ROW, which
+  // the explorer may have replaced by then, so reaching `end()` is not
+  // guaranteed by the drag's own ending alone. `DragOrdering` closes that gap
+  // by calling it again at the next `dragstart`. What this class owes either
+  // way is the same, and it is what is pinned here.
   it("does not leak one drag's paths into the next", () => {
     const d = new CurrentDrag();
     d.begin(["Notes/a.md"], false);

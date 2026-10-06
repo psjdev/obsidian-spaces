@@ -208,7 +208,10 @@ describe("the rail's dragover marks only a target that would act", () => {
     h.drag = { paths: ["Notes/a.md"], truncated: false };
     send(iconFor(h.host, "curated"), "dragover");
     // A file drag's source is a tree row, so the rail hears no `dragend`. This
-    // is the one callback that learns every drag has ended, however it ended.
+    // is the callback `main.ts` spends `DragOrdering`'s drag-done hook on, and
+    // that hook fires at each drag's end AND at the next drag's `dragstart`.
+    // (It used to be described as learning of every drag "however it ended",
+    // which was not true: see `clearDropTarget`.)
     h.switcher.clearDropTarget();
     expect(lit(h.host)).toEqual([]);
   });

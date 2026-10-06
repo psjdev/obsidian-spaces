@@ -167,9 +167,82 @@ describe("DragOrdering", () => {
       // would still satisfy "it was called".
       expect(onDragBegin).toHaveBeenCalledTimes(1);
       expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false);
-      expect(onDragDone).not.toHaveBeenCalled();
-      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      // ONE, not zero: `dragstart` clears whatever a previous drag left behind
+      // before it publishes anything. See the ordering test below.
       expect(onDragDone).toHaveBeenCalledTimes(1);
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * The invariant: once a `dragstart` has begun, no earlier drag's paths are
+     * readable by anything.
+     *
+     * The ORDER is the whole assertion. A clear that ran after the publish
+     * would empty the record this drag has just filled, so a version that moved
+     * the `onDragDone` call below `publishDrag` fails here while passing the
+     * count above. A version that drops the clear altogether fails here too.
+     *
+     * Worth paying for even though `onDragBegin` already replaces the
+     * consumer's record, because the clear runs before anything that can throw:
+     * `rowFromTarget` and `collectDragged` both read the DOM inside `guard`, and
+     * a throw there would leave the publish unreached and the previous drag's
+     * paths live.
+     */
+    it("clears the previous drag before publishing the new one", () => {
+      const calls: string[] = [];
+      deps.onDragBegin = () => calls.push("begin");
+      deps.onDragDone = () => calls.push("done");
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      expect(calls).toEqual(["done", "begin"]);
+    });
+
+    /**
+     * The data-loss defect, at the layer that introduced it.
+     *
+     * A blocked drag published its paths and armed no teardown of its own, so
+     * it depended entirely on the DOCUMENT listener. Obsidian replaces the
+     * source row whenever a drop re-renders the tree, which dropping a note
+     * into a folder does every time, and a `dragend` dispatched at a DETACHED
+     * node reaches no listener on the document. The record then outlived its
+     * drag: the next unrelated drag across the space strip read those paths as
+     * a live file drag, lit an icon, and a drop on a folder-pinned space would
+     * have called `renameFile` on files the user never touched.
+     *
+     * The row is detached here before `dragend` is dispatched AT it, which is
+     * what the browser does. Removing `armDragEnd` from the blocked path leaves
+     * the count at 1 (the clear at `dragstart`) and fails this.
+     */
+    it("ends a BLOCKED drag whose source row was replaced mid-gesture", () => {
+      const onDragDone = vi.fn();
+      deps.onDragBegin = vi.fn();
+      deps.onDragDone = onDragDone;
+      enabled = false;
+      boundDrag();
+      const row = tree.rows["F/a.md"];
+      fireOnSelf(row, "dragstart", 4);
+      // One so far: the clear that opens `onDragStart`.
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+      row.remove();
+      expect(document.contains(row)).toBe(false);
+      row.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
+    });
+
+    // The same guarantee on the armed path, which has had it since the row
+    // listener was added. Kept beside its blocked twin so the two cannot drift.
+    it("ends an ARMED drag whose source row was replaced mid-gesture", () => {
+      const onDragDone = vi.fn();
+      deps.onDragBegin = vi.fn();
+      deps.onDragDone = onDragDone;
+      boundDrag();
+      const row = tree.rows["F/a.md"];
+      fire(row, "dragstart", 4);
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+      row.remove();
+      row.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
     });
 
     it("publishes an empty list for a dragstart that lands on no row", () => {
@@ -293,11 +366,16 @@ describe("DragOrdering", () => {
       });
       boundDrag();
       fire(tree.rows["F/a.md"], "dragstart", 4);
+      // Counted FROM the dragstart, not from zero: `onDragStart` opens by
+      // clearing the previous drag, so one call is already on the books and is
+      // not the one this test is about. What must not have happened is a
+      // SECOND call between the publish and the bubble listener.
+      const doneAtStart = onDragDone.mock.calls.length;
       fire(tree.rows["G"], "drop", 48 + ROW_H / 2);
-      expect(doneAtBubble).toBe(0);
+      expect(doneAtBubble).toBe(doneAtStart);
       expect(begunAtBubble).toEqual([[["F/a.md"], false]]);
       document.dispatchEvent(new Event("dragend", { bubbles: true }));
-      expect(onDragDone).toHaveBeenCalledTimes(1);
+      expect(onDragDone).toHaveBeenCalledTimes(doneAtStart + 1);
     });
   });
 

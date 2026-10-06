@@ -160,8 +160,13 @@ export class SwitcherView {
    * `dragover` is the only moment a refused drag can be spoken from (see
    * `fileDrop.onRefused`), and it fires once per few pixels of pointer travel,
    * so without this one notice becomes dozens. Reset in `clearDropTarget`,
-   * which `main.ts` calls from the one callback that learns every drag has
-   * ended however it ended.
+   * which `main.ts` calls from `DragOrdering`'s drag-done callback. That
+   * callback fires at the end of each drag the explorer published AND at the
+   * start of the next one, which is what keeps this flag from surviving into a
+   * drag it was not raised for -- the first reading of it, "the one callback
+   * that learns every drag has ended however it ended", was not true, and a
+   * `dragend` lost to a replaced source row left this stuck on while a stale
+   * record was still offering its paths.
    */
   private refusalSpoken = false;
   /**
@@ -1083,9 +1088,17 @@ export class SwitcherView {
   /**
    * Takes the drop mark off, for a drag that ended without the pointer ever
    * leaving the icon -- Escape, or a drop refused elsewhere. `dragend` fires on
-   * the drag SOURCE, a row in the file tree, so the rail never hears it and
-   * `dragleave` never fires either. `main.ts` calls this from the one callback
-   * that learns every drag has ended, however it ended.
+   * the drag SOURCE, a row in the file tree, so the rail never hears it.
+   *
+   * `dragleave` is not a substitute. The HTML spec does fire one before
+   * `dragend` when a drag is cancelled, so it covers the Escape case, but it
+   * says nothing about a drop the browser delivered elsewhere and it is
+   * `relatedTarget`-dependent (see the listener). `main.ts` calls this from
+   * `DragOrdering`'s drag-done callback, which fires at the end of each drag
+   * the explorer published and again at the start of the next one. The older
+   * wording here, "the one callback that learns every drag has ended, however
+   * it ended", claimed more than that callback could deliver: a `dragend` sent
+   * to a source row the tree had already replaced reached nothing at all.
    */
   clearDropTarget(): void {
     this.markDropTarget(null);

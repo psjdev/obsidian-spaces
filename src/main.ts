@@ -2896,10 +2896,18 @@ export default class SpacesPlugin extends Plugin {
       writeOrder: (folderPath, order) => this.writeOrderFor(folderPath, order),
       indicatorStyle: () => this.defs.get().settings.dropIndicatorStyle,
       onDragBegin: (paths, truncated) => this.currentDrag.begin(paths, truncated),
-      // The one place that learns every drag has ended, however it ended. The
-      // strip never hears `dragend` for a file drag (its source is a tree row),
-      // so an icon lit under an Escaped drag is cleared from here, and the
-      // switcher is created lazily so it may not exist yet.
+      // The one place that clears what a drag published. The strip never hears
+      // `dragend` for a file drag (its source is a tree row), so an icon lit
+      // under an Escaped drag is cleared from here, and the switcher is created
+      // lazily so it may not exist yet.
+      //
+      // NOT "learns every drag has ended, however it ended", which is what this
+      // said while the defect was live. `DragOrdering` calls it at each drag's
+      // end and again at the next drag's `dragstart`, and the second half is
+      // what the record's safety actually rests on: a `dragend` dispatched at a
+      // source row the explorer has since replaced reaches no document
+      // listener, so "every" was never on offer. See `onDragDone` in
+      // `DragOrdering.ts` for the full chain.
       onDragDone: () => {
         this.currentDrag.end();
         this.switcher?.clearDropTarget();

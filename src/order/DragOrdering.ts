@@ -131,12 +131,30 @@ export interface DragOrderingDeps {
    */
   onDragBegin?: (paths: readonly string[], truncated: boolean) => void;
   /**
-   * The drag is over, however it ended: dropped, cancelled, or abandoned.
+   * No drag this class published is running any more. Clear whatever you kept.
+   *
+   * Deliberately NOT worded as "the drag is over, however it ended". That
+   * claim was false and it cost a data-loss defect: `dragend` is dispatched at
+   * the node the drag started on, and an event dispatched at a DETACHED node
+   * reaches no listener on the document (the same fact `endNativeDrag` below is
+   * built around). Obsidian replaces the source row whenever a drop re-renders
+   * the tree, so the ONLY thing that made this reliable was the row's own
+   * `dragend` listener -- and for a while the blocked path published its paths
+   * without ever arming one. The record then outlived its drag, and the next
+   * unrelated drag to cross the space strip (a tab, an editor selection) read
+   * those paths as a live file drag and offered to `renameFile` them.
+   *
+   * What is true, and what the two arming sites in `onDragStart` are there to
+   * keep true, is: this fires at the end of every drag that reached a
+   * `dragstart` inside the bound container, AND at the start of the next such
+   * drag, whichever comes first. The second half is the belt to the first's
+   * braces: a consumer's record can never be read across two drags even if a
+   * `dragend` is lost in a way nobody has thought of yet.
    *
    * It can fire more than once for a single drag: on a claimed drop the
-   * synthetic `dragend` reaches the row's own listener and the document's, and
-   * the browser's real `dragend` can follow. A consumer must make its handler
-   * idempotent.
+   * synthetic `dragend` reaches the row's own listener and the document's, the
+   * browser's real `dragend` can follow, and the next `dragstart` calls it
+   * again. A consumer must make its handler idempotent.
    */
   onDragDone?: () => void;
 }
@@ -426,8 +444,60 @@ export class DragOrdering {
     return collected;
   }
 
+  /**
+   * Make sure this drag's end reaches `onDragEnd`, whatever happens to the row.
+   *
+   * ALSO on the row itself, not only on the document where `bind` put it. The
+   * explorer renders in blocks and drops them as the pane scrolls, so
+   * autoscrolling far enough during a drag destroys the row the drag started
+   * on. Measured in a running vault with a 240-child folder open: a 3000px
+   * scroll mid-drag replaced 48 of the 49 rendered rows and left
+   * `document.contains(sourceRow)` false. The browser still sends `dragend` to
+   * that node, but an event dispatched at a detached node reaches no listener
+   * on the document, so the teardown never ran and the tree kept every row
+   * translated down until the next drag.
+   *
+   * A node runs its OWN listeners whether or not it is still in the document,
+   * which is the whole point of putting one here. `once` so a row cannot
+   * accumulate one per drag, and `onDragEnd` takes it off explicitly as well
+   * for the ordinary case where the document listener got there first.
+   *
+   * Shared by both paths through `onDragStart` rather than written out on the
+   * armed one, because it is the BLOCKED path where the consequence of
+   * skipping it is worst: that path publishes paths it never arms a teardown
+   * for, and a record that outlives its drag is a `renameFile` on files the
+   * user never dragged.
+   */
+  private armDragEnd(el: HTMLElement): void {
+    this.sourceEl = el;
+    el.addEventListener("dragend", this.onDragEnd, { once: true });
+  }
+
   private readonly onDragStart = (e: Event): void =>
     this.guard(() => {
+      // FIRST, before a single path is resolved or published: whatever a
+      // previous drag left behind is finished.
+      //
+      // The invariant this buys is narrow and worth stating exactly: once a
+      // `dragstart` has begun, no earlier drag's paths are readable by
+      // anything. A browser cannot start a second drag while one is running,
+      // so a `dragstart` arriving IS proof the last one ended, whether or not
+      // its `dragend` was ever delivered to us.
+      //
+      // Belt to the braces below, not a replacement for them. `publishDrag`
+      // reaches every return path of this handler and `onDragBegin` replaces
+      // the consumer's record, so in the ordinary case this clear changes
+      // nothing. It earns its place in the cases where that is not reached:
+      // `rowFromTarget` or `collectDragged` throwing into `guard`, or a future
+      // early return added above the publish. The cost of being wrong here is
+      // a `renameFile` on files the user never dragged, so the record is
+      // emptied before anything can go wrong rather than after.
+      //
+      // Our OWN drag state is cleared alongside, for the same reason and at no
+      // cost: the enabled path below reassigns both a few lines later.
+      this.dragged = [];
+      this.draggedTruncated = false;
+      this.deps.onDragDone?.();
       // Checked per gesture rather than once at bind time — see `bind()`. A
       // blocked attempt is reported once and left inert: `dragover`/`drop` stay
       // silent because `this.dragged` is never populated below.
@@ -450,7 +520,27 @@ export class DragOrdering {
         // `rowAt`'s geometry hit test answers "which row is this POINTER over",
         // a mid-drag question, and asking it here would mean taking the
         // snapshot this early return exists to avoid paying for.
-        this.publishDrag(this.rowFromTarget(e.target));
+        const blocked = this.rowFromTarget(e.target);
+        // ARMED BEFORE THE PUBLISH, and this path needs it exactly as much as
+        // the enabled one does. See the long note at the arming site below for
+        // why a document listener is not enough: `dragend` is dispatched at the
+        // source row, and dropping a note into a folder re-renders the tree and
+        // replaces that row, so the event fires at a detached node that no
+        // document listener can hear.
+        //
+        // Publishing without arming is what made a blocked drag's record
+        // permanent. The user drags a note into a folder with reordering off
+        // (a sort override is enough), Obsidian moves it and replaces the row,
+        // no `onDragDone` ever fires, and the paths sit in the consumer's
+        // record until something clears them. The next unrelated drag across
+        // the space strip -- a tab, a selection dragged out of the editor --
+        // then reads them as a live file drag, lights an icon, and a drop on a
+        // folder-pinned space calls `renameFile` on files the user never
+        // touched. Nothing about `enabled()` has any bearing on that, which is
+        // the whole reason the publish moved above the gate; the teardown had
+        // to move with it.
+        if (blocked) this.armDragEnd(blocked.el);
+        this.publishDrag(blocked);
         return;
       }
       // Deliberately no preventDefault and no stopPropagation: Obsidian owns
@@ -466,22 +556,7 @@ export class DragOrdering {
         this.publishDrag(null);
         return;
       }
-      this.sourceEl = row.el;
-      // ALSO on the row itself, not only on the document where `bind` put it.
-      // The explorer renders in blocks and drops them as the pane scrolls, so
-      // autoscrolling far enough during a drag destroys the row the drag
-      // started on. Measured in a running vault with a 240-child folder open:
-      // a 3000px scroll mid-drag replaced 48 of the 49 rendered rows and left
-      // `document.contains(sourceRow)` false. The browser still sends
-      // `dragend` to that node, but an event dispatched at a detached node
-      // reaches no listener on the document, so the teardown never ran and the
-      // tree kept every row translated down until the next drag.
-      //
-      // A node runs its OWN listeners whether or not it is still in the
-      // document, which is the whole point of putting one here. `once` so a
-      // row cannot accumulate one per drag, and removed again below for the
-      // ordinary case where the document listener got there first.
-      row.el.addEventListener("dragend", this.onDragEnd, { once: true });
+      this.armDragEnd(row.el);
       const collected = this.publishDrag(row);
       this.dragged = collected.paths;
       this.draggedTruncated = collected.truncated;
