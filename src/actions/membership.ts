@@ -124,9 +124,12 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
 
 /**
  * Adds to a space named by id rather than to the active one, which is
- * what *All* needs — there is no active space there. Shares nothing with
- * `addAll` beyond `entryFor`, deliberately: `addAll` reads the active space
- * and must keep doing so.
+ * what *All* needs — there is no active space there. Each of the two
+ * resolves its own space, `addAll` from the active one and this by id, and
+ * that separation is deliberate: `addAll` reads the active space and must
+ * keep doing so. What they share is `entryFor`, `splitBatch` and
+ * `addOutcomeMessage`, because those are rules rather than lookups, and a
+ * rule written twice lands on one path and not the other.
  */
 export async function addToSpace(
   ctx: MembershipContext,
