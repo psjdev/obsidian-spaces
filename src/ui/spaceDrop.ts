@@ -51,6 +51,17 @@ export type SpaceDrop =
  * Compared by identity against this constant rather than by prose, so the
  * message and the test can change without the branch changing meaning.
  */
+/**
+ * No space under the pointer at all.
+ *
+ * Silent at hover -- the pointer is over the gap between icons and the "no
+ * drop" cursor says so for free -- but NOT silent at the drop, where it means
+ * something else entirely: the icon lit, the user released on it, and the
+ * space stopped existing while the button was down. The wording for that lives
+ * with the other refusals in `main.ts`.
+ */
+export const SPACE_GONE = "not a space";
+
 export const CLIPPED_SELECTION = "part of the selection is outside the render window";
 
 /**
@@ -90,7 +101,7 @@ export const FOLDER_PINNED_SPACE = "a space pinned to a folder has no member lis
 export function spaceDropFor(space: SpaceDefinition | null, drag: DraggedFiles): SpaceDrop {
   // *All* and the `+` control both arrive here as no space. Neither holds
   // members, so neither is a target.
-  if (!space) return { kind: "refuse", reason: "not a space" };
+  if (!space) return { kind: "refuse", reason: SPACE_GONE };
   if (drag.paths.length === 0) {
     return { kind: "refuse", reason: "nothing is being dragged" };
   }

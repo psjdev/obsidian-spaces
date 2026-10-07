@@ -26,7 +26,7 @@ import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { buildFakeVault } from "./helpers/fakeVault";
-import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE } from "../src/ui/spaceDrop";
+import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE, SPACE_GONE } from "../src/ui/spaceDrop";
 import { DEFAULT_DEFINITIONS, type SpaceDefinition } from "../src/types";
 import type { DraggedFiles } from "../src/order/currentDrag";
 
@@ -48,6 +48,8 @@ const PINNED: SpaceDefinition = {
 
 interface Harness {
   host: HTMLElement;
+  /** Mutable mid-drag, because the whole point below is that it can move. */
+  defs: DefinitionStore;
   switcher: SwitcherView;
   onDropped: ReturnType<typeof vi.fn>;
   onRefused: ReturnType<typeof vi.fn>;
@@ -81,6 +83,7 @@ async function build(): Promise<Harness> {
   const onDropped = vi.fn();
   const onRefused = vi.fn();
   const h = {
+    defs,
     onDropped,
     onRefused,
     drag: { paths: [] as readonly string[], truncated: false },
@@ -246,6 +249,7 @@ describe("the rail refuses a space pinned to a folder", () => {
     const e = send(iconFor(h.host, "pinned"), "drop");
     expect(h.onDropped).not.toHaveBeenCalled();
     expect(e.defaultPrevented).toBe(false);
+    expect(h.onRefused).toHaveBeenCalledWith(FOLDER_PINNED_SPACE, "Clients");
   });
 });
 
@@ -305,6 +309,108 @@ describe("the rail's dragover refuses a clipped selection out loud", () => {
     const e = send(iconFor(h.host, "curated"), "drop");
     expect(h.onDropped).not.toHaveBeenCalled();
     expect(e.defaultPrevented).toBe(false);
+    expect(h.onRefused).toHaveBeenCalledWith(CLIPPED_SELECTION, "Work");
+  });
+});
+
+/**
+ * The gap the `drop` listener is actually for.
+ *
+ * A refused HOVER produces no `drop`, so for a long time the re-ask here was
+ * described as unreachable and a refusal reaching it just returned. But the
+ * hover and the release are two reads of the definitions separated by however
+ * long the user holds the button, and sync, a second window or another plugin
+ * can rewrite them in between. Then the icon lit, the browser delivered the
+ * drop, and the gesture ended with nothing written and nothing said.
+ *
+ * The strip does not re-render itself when the definitions change -- `main.ts`
+ * drives that in a repaint step -- so the icon under the pointer keeps its
+ * `data-space-id` and these are the events a real drag would deliver.
+ */
+describe("the rail's drop re-asks, and says so when the answer moved", () => {
+  it("speaks when the space was deleted while the button was held", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
+    const icon = iconFor(h.host, "curated");
+    // It lit: without this the drop below would never have been delivered.
+    expect(send(icon, "dragover").defaultPrevented).toBe(true);
+    await h.defs.mutate((d) => {
+      d.spaces = d.spaces.filter((sp) => sp.id !== "curated");
+    });
+    const e = send(icon, "drop");
+    expect(h.onDropped).not.toHaveBeenCalled();
+    expect(h.onRefused).toHaveBeenCalledWith(SPACE_GONE, null);
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it("speaks when the space became folder pinned while the button was held", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
+    const icon = iconFor(h.host, "curated");
+    expect(send(icon, "dragover").defaultPrevented).toBe(true);
+    await h.defs.mutate((d) => {
+      const sp = d.spaces.find((x) => x.id === "curated");
+      if (sp) sp.root = "Clients";
+    });
+    const e = send(icon, "drop");
+    expect(h.onDropped).not.toHaveBeenCalled();
+    expect(h.onRefused).toHaveBeenCalledWith(FOLDER_PINNED_SPACE, "Work");
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  // The other half of the same decision, and the one easy to break while
+  // fixing the first: *All* carries no `data-space-id`, so it was never a
+  // target. A drop on it must stay as silent as the hover does, NOT report a
+  // space that has gone missing.
+  it("stays silent on a drop over All", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
+    const e = send(allIcon(h.host), "drop");
+    expect(h.onDropped).not.toHaveBeenCalled();
+    expect(h.onRefused).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it("still hands an unchanged answer to the write", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md"], truncated: false };
+    const icon = iconFor(h.host, "curated");
+    send(icon, "dragover");
+    const e = send(icon, "drop");
+    expect(h.onRefused).not.toHaveBeenCalled();
+    expect(h.onDropped).toHaveBeenCalledWith("curated", h.drag);
+    expect(e.defaultPrevented).toBe(true);
+  });
+});
+
+/**
+ * One drag crosses several icons, and they do not all refuse for the same
+ * reason. The guard against a notice per pixel of travel used to be a single
+ * boolean for the whole drag, which meant the second space to refuse said
+ * nothing at all and lit nothing either -- leaving the only words on screen
+ * naming a different space and giving advice that did not apply to this one.
+ */
+describe("each refusal in a drag gets its own words", () => {
+  it("explains a second space refusing for a different reason", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: true };
+    send(iconFor(h.host, "pinned"), "dragover");
+    send(iconFor(h.host, "curated"), "dragover");
+    expect(h.onRefused).toHaveBeenCalledTimes(2);
+    // Pinned answers first for the pinned space: `spaceDropFor` asks the
+    // standing fact about the space before the fact about this gesture.
+    expect(h.onRefused).toHaveBeenNthCalledWith(1, FOLDER_PINNED_SPACE, "Clients");
+    expect(h.onRefused).toHaveBeenNthCalledWith(2, CLIPPED_SELECTION, "Work");
+  });
+
+  it("does not repeat itself when the pointer returns to the same icon", async () => {
+    const h = await build();
+    h.drag = { paths: ["Notes/a.md", "Notes/b.md"], truncated: true };
+    send(iconFor(h.host, "pinned"), "dragover");
+    send(iconFor(h.host, "curated"), "dragover");
+    send(iconFor(h.host, "pinned"), "dragover");
+    send(iconFor(h.host, "curated"), "dragover");
+    expect(h.onRefused).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -32,7 +32,7 @@ import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { SpaceController } from "../controller/SpaceController";
 import type { ActiveSelection, SpaceDefinition, StripPlacement } from "../types";
-import { dropTargetFor } from "./spaceDrop";
+import { dropTargetFor, spaceDropFor } from "./spaceDrop";
 import type { DraggedFiles } from "../order/currentDrag";
 
 /** The four candidate placements a drag can land on, in a fixed order. */
@@ -155,11 +155,15 @@ export class SwitcherView {
    */
   private dropTargetEl: HTMLElement | null = null;
   /**
-   * Whether this drag has already been told why it was refused.
+   * Which refusals this drag has already been told about, as `spaceId::reason`.
    *
-   * `dragover` is the only moment a refused drag can be spoken from (see
-   * `fileDrop.onRefused`), and it fires once per few pixels of pointer travel,
-   * so without this one notice becomes dozens. Reset in `clearDropTarget`,
+   * `dragover` fires once per few pixels of pointer travel, so without this one
+   * notice becomes dozens. Keyed rather than a single flag per drag, because a
+   * drag crosses several icons: one boolean meant that after a folder-pinned
+   * space spoke, a clipped-selection refusal over a DIFFERENT space said
+   * nothing and lit nothing, leaving the only notice on screen naming another
+   * space and giving advice that did not apply. That is the silence
+   * `spaceDrop.ts` says reads as a broken feature. Cleared in `clearDropTarget`,
    * which `main.ts` calls from `DragOrdering`'s drag-done callback. That
    * callback fires at the end of each drag the explorer published AND at the
    * start of the next one, which is what keeps this flag from surviving into a
@@ -168,7 +172,7 @@ export class SwitcherView {
    * `dragend` lost to a replaced source row left this stuck on while a stale
    * record was still offering its paths.
    */
-  private refusalSpoken = false;
+  private spokenRefusals = new Set<string>();
   /**
    * The one popover this view has open, or null.
    *
@@ -923,11 +927,17 @@ export class SwitcherView {
           // Aimed at a space, and refused for a reason the user cannot see.
           // The icon stays dark -- lighting one that then refuses is the
           // failure this seam exists to prevent -- so the words are the only
-          // feedback there is. No scroll either: there is nothing further
-          // along the rail that this drag could reach and act on.
+          // feedback there is. The rail does not scroll while the pointer rests
+          // here, which is a real gap when the icon the user wants is past the
+          // edge; it is recorded rather than fixed, because arming the scroll
+          // from a branch that deliberately acts on nothing needs its own
+          // check that the drag end still tears it down.
           this.markDropTarget(null);
-          if (!this.refusalSpoken) {
-            this.refusalSpoken = true;
+          // Keyed by the space as well as the reason: the next icon along may
+          // refuse for a different reason, and that one has its own words.
+          const key = `${this.spaceFor(over)?.id ?? ""}::${target.reason}`;
+          if (!this.spokenRefusals.has(key)) {
+            this.spokenRefusals.add(key);
             this.fileDrop.onRefused(target.reason, target.spaceName ?? null);
           }
           return;
@@ -980,17 +990,42 @@ export class SwitcherView {
         // declines a drop on the strip and so it is still live; a claimed drop
         // would already have cleared it.
         const drag = this.fileDrop.dragged();
-        const target = dropTargetFor(null, this.spaceFor(over), drag);
+        // Nothing published means this drop is not ours at all, the same
+        // question `dragover` asks first. Everything below assumes the hover
+        // already approved, which is only true for a drag we published.
+        if (drag.paths.length === 0) return;
         this.markDropTarget(null);
-        // A refusal cannot reach here -- `dragover` never called
-        // `preventDefault()` for one, so the browser fired no `drop` -- but it
-        // is checked rather than assumed. The strip's one outcome is reversible
-        // now, so this is no longer the last guard before a `renameFile`; it is
-        // one comparison standing between a stale hover and a membership write
-        // the user did not ask for, which is still worth having.
-        if (target === null || target.kind === "refuse") return;
+        // *All* and the `+` carry no `spaceId`, so `spaceElAt` already answered
+        // null for them, as it did for the gap between icons. None of those was
+        // ever a target and none gets words: the distinction below is between a
+        // space icon whose space is GONE and a thing that was never a space.
+        if (over === null) return;
+        // `spaceDropFor`, not `dropTargetFor`. The hover form collapses every
+        // refusal it would not SPEAK down to null, which is right while the
+        // user is still deciding and wrong once they have let go: here a null
+        // is indistinguishable from "not ours" and the gesture ends in silence.
+        //
+        // Reaching a refusal at all means the answer CHANGED under the drag --
+        // the browser fires no `drop` for a hover that refused, so this icon
+        // was lit when the button went down. A space deleted, or newly pinned
+        // to a folder, by sync or a second window or another plugin in the
+        // seconds the button was held. The earlier note here said a refusal
+        // could not reach this line; that claim and the re-ask on the line
+        // above cannot both be true, and it was the claim that was wrong.
+        const drop = spaceDropFor(this.spaceFor(over), drag);
+        if (drop.kind === "refuse") {
+          // NOT cancelled, matching the contract `dropTargetFor` states for a
+          // refusal everywhere else: light nothing, cancel nothing, say why.
+          // The missing half here was only ever the words.
+          //
+          // Said unconditionally, not through `spokenRefusals`. That set stops
+          // a hover repeating itself while the pointer travels; this is the
+          // outcome of the gesture, and the user let go over a lit icon.
+          this.fileDrop.onRefused(drop.reason, drop.spaceName ?? null);
+          return;
+        }
         e.preventDefault();
-        this.fileDrop.onDropped(target.spaceId, drag);
+        this.fileDrop.onDropped(drop.spaceId, drag);
         return;
       }
       e.preventDefault();
@@ -1105,10 +1140,10 @@ export class SwitcherView {
    */
   clearDropTarget(): void {
     this.markDropTarget(null);
-    // The next drag gets its own explanation. Reset here rather than at a
+    // The next drag gets its own explanations. Cleared here rather than at a
     // drag's start, because the strip has no start to hook: a file drag begins
     // on a tree row this view never hears from.
-    this.refusalSpoken = false;
+    this.spokenRefusals.clear();
     // Stopped here so the guarantee is local: the loop would also end once the
     // published paths go empty, but that rests on the caller's call order.
     this.stopDragScrolling?.();

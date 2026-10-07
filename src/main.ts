@@ -36,7 +36,7 @@ import {
 import { createVaultChangeCoalescer } from "./lifecycle/eventCoalescer";
 import { addToSpace, registerMembershipMenus } from "./actions/membership";
 import { CurrentDrag, type DraggedFiles } from "./order/currentDrag";
-import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE, spaceDropFor } from "./ui/spaceDrop";
+import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE, SPACE_GONE, spaceDropFor } from "./ui/spaceDrop";
 import {
   createSpace,
   renameSpace,
@@ -2739,6 +2739,14 @@ export default class SpacesPlugin extends Plugin {
       );
       return;
     }
+    if (reason === SPACE_GONE) {
+      // Only ever seen at the RELEASE. At hover this reason means the pointer
+      // is between icons, which the "no drop" cursor already explains; reaching
+      // it from a drop means the icon was lit when the button went down and the
+      // space stopped existing while it was held.
+      new Notice("Spaces: nothing was added. That space no longer exists.");
+      return;
+    }
     console.warn("Spaces: a drop on a space icon was refused:", reason);
   }
 
@@ -2749,14 +2757,22 @@ export default class SpacesPlugin extends Plugin {
    * stating plainly, because the version of this comment that described it as a
    * live safety net was false and stayed false through several reviews.
    *
-   * Refusing means never calling `preventDefault()` at `dragover`, so the
-   * browser fires no `drop`, and the rail's own drop listener re-asks and
-   * returns before `onDropped` runs. Below that, the only input that can change
-   * between the hover and the release is the path list, which can only shrink
-   * as stale paths are filtered out, and an empty list has its own notice
-   * above. Nothing else `spaceDropFor` reads can move: the space is resolved
-   * from the same `defs` snapshot in the same tick, and the function no longer
-   * consults the live vault at all.
+   * There are TWO gaps here and only one of them is closed, which is what the
+   * earlier wording ran together:
+   *
+   *  - HOVER to RELEASE is a real gap, as long as the user holds the button.
+   *    A space can be deleted or newly pinned in it, by sync or a second
+   *    window or another plugin. That gap is NOT closed by anything below; it
+   *    is caught in the rail's own drop listener, which re-asks `spaceDropFor`
+   *    and speaks the refusal through `reportRefusedDrop`. The earlier wording
+   *    claimed this gap did not exist, and a drop that fell into it was
+   *    swallowed in silence.
+   *  - RELEASE to THIS RE-ASK is not a gap. `onDropped` is called
+   *    synchronously from that listener and `filesDroppedOnSpace` reads `defs`
+   *    before its first `await`, so the space really is resolved from one
+   *    snapshot in one tick. The only input that moves is the path list, which
+   *    can only shrink as stale paths are filtered out, and an empty list has
+   *    its own notice above.
    *
    * What it buys is that the drop path narrows `SpaceDrop` by ASKING the seam
    * rather than by assuming the answer, so a rule added to `spaceDropFor` that
@@ -2792,9 +2808,11 @@ export default class SpacesPlugin extends Plugin {
    */
   private async filesDroppedOnSpace(spaceId: string, drag: DraggedFiles): Promise<void> {
     const space = this.defs.get().spaces.find((s) => s.id === spaceId);
-    // Deleted between the hover that lit the icon and the release. Said rather
-    // than returned in silence: the user let go over a lit icon, so something
-    // has to account for the gesture.
+    // A backstop, not the guard that matters. The rail's drop listener already
+    // re-asked and spoke for a space deleted while the button was held, and it
+    // calls this synchronously, so there is no tick in which the answer can
+    // change again. Kept, and kept speaking, because a silent return here
+    // would be the one shape this whole seam exists to avoid.
     if (!space) {
       new Notice("Spaces: that space no longer exists");
       return;
