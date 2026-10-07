@@ -145,14 +145,15 @@ export function decorate<T extends FileLike>(
   //  - an EXACT member. (Reaching here at all means not every row is one,
   //    since `allExact` returned above when they were.)
   //  - an INHERITED one, which is in the space through the folder the disabled
-  //    entry above names. `addAll` dedupes against the space's path members
-  //    alone and never consults `inheritedFromFolder`, so adding one writes a
-  //    redundant exact member: nothing the user can see changes, and the
-  //    folder they would later remove no longer takes the row with it.
+  //    entry above names. `addAll` would now report it as already there and
+  //    write nothing, so an Add entry here offers a change that cannot
+  //    happen, and a control whose only outcome is "that did nothing" is
+  //    worse than an absent one.
   //
-  // Every other add path already refuses an inherited path — `main.ts`'s
-  // `activeFileToAdd` and `joinOnCreate`, and `spaceAddTargets`' `heldBy` —
-  // so this is the one that had drifted.
+  // Every add path asks the same question: `main.ts`'s `activeFileToAdd` and
+  // `joinOnCreate`, `spaceAddTargets`, and `addAll`/`addToSpace` through
+  // `heldBy` in `definitions/membership.ts`. This filter is what keeps the
+  // MENU from offering what those would decline.
   //
   // Indexed against `decisions`, which was built from `visible` in order.
   const addable = visible.filter(

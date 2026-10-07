@@ -134,8 +134,11 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
       const target = d.spaces.find((s) => s.id === space.id);
       if (!target) return;
       // `added`, not the raw batch: what the space already SHOWS must not be
-      // written as an explicit member. The `pathMembers` check below is the
-      // narrower second guard, against a path this same loop just wrote.
+      // written as an explicit member. The `pathMembers` check below can no
+      // longer fire for a repeat within this loop -- `splitBatch` already made
+      // `added` distinct by `canonicalPath`, the same fold `samePath` uses. It
+      // guards the gap between the split and this draft, which another
+      // enqueued `mutate` can land in.
       for (const f of added) {
         if (!pathMembers(target).some((m) => samePath(m.path, f.path))) {
           target.members.push(entryFor(f));
@@ -174,7 +177,7 @@ export async function addToSpace(
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === spaceId);
       if (!target) return;
-      // `added`, not the raw batch -- see `addAll`.
+      // `added`, not the raw batch, and the same second guard -- see `addAll`.
       for (const f of added) {
         if (!pathMembers(target).some((m) => samePath(m.path, f.path))) {
           target.members.push(entryFor(f));

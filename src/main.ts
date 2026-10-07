@@ -2689,20 +2689,22 @@ export default class SpacesPlugin extends Plugin {
   }
 
   /**
-   * Why a drop on a space icon was refused, said out loud WHILE THE POINTER IS
-   * STILL HOVERING.
+   * Why a drop on a space icon was refused.
    *
-   * Two refusals reach here; every other one is a pointer somewhere that was
-   * never a target, and the "no drop" cursor says so for free. Logged rather
-   * than shown if it is anything else, because a refusal nobody has worded
-   * would otherwise surface a raw internal string.
+   * Said at HOVER for the two refusals the strip can see coming, and at the
+   * DROP for a space that stopped existing while the button was held. Every
+   * other refusal is a pointer somewhere that was never a target, and the "no
+   * drop" cursor says so for free. Logged rather than shown if it is anything
+   * else, because a refusal nobody has worded would otherwise surface a raw
+   * internal string.
    *
-   * Both messages are in the PRESENT and the CONDITIONAL, because no drop has
-   * happened yet: the user is mid-gesture with the button still down, and
-   * telling them "nothing was dropped" at that moment describes an event that
-   * has not occurred. Both also name the space, because the strip is a row of
-   * icons and "the space" identifies none of them. And both end with something
-   * the user can actually do.
+   * TENSE FOLLOWS THE MOMENT, which is why the three do not match. The two
+   * hover messages are PRESENT and CONDITIONAL: the user is mid-gesture with
+   * the button still down, and "nothing was dropped" would describe an event
+   * that has not occurred. `SPACE_GONE` is the opposite, reachable only after
+   * the release, so it is past tense. The two hover messages name the space,
+   * because the strip is a row of icons and "the space" identifies none of
+   * them; `SPACE_GONE` cannot, because the space it would name is gone.
    *
    * The clipped-selection wording used to tell the user to "scroll the whole
    * selection into view and drag again", which they often cannot. The tell is

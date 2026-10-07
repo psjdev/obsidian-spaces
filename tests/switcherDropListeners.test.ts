@@ -324,8 +324,17 @@ describe("the rail's dragover refuses a clipped selection out loud", () => {
  * drop, and the gesture ended with nothing written and nothing said.
  *
  * The strip does not re-render itself when the definitions change -- `main.ts`
- * drives that in a repaint step -- so the icon under the pointer keeps its
- * `data-space-id` and these are the events a real drag would deliver.
+ * drives that in a repaint step -- so here the icon under the pointer keeps its
+ * `data-space-id`.
+ *
+ * HOW REACHABLE EACH CASE IS, since the two differ and the difference is easy
+ * to overstate. A space newly PINNED keeps its id, so it survives a repaint and
+ * the real app delivers exactly these events. A space DELETED loses its icon
+ * once `main.ts:569` repaints, and the release then lands on the rail gap or on
+ * a neighbour that has shifted into those pixels; that branch is therefore more
+ * defensive than this scenario makes it sound. It is still asserted, because
+ * the repaint is not synchronous with the drag and a silent return is the one
+ * outcome this seam must never have.
  */
 describe("the rail's drop re-asks, and says so when the answer moved", () => {
   it("speaks when the space was deleted while the button was held", async () => {

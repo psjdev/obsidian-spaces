@@ -4,11 +4,10 @@
  *
  * In *All* there is no active space and therefore no visibility snapshot to
  * consult, so membership is decided from the space definitions plus the tag
- * index: a path is already held if `resolveMembers` resolves to it, or if a
- * member FOLDER covers it. `resolveMembers` is the same expansion the engine
- * is handed, so "already held" here cannot drift from what the space shows;
- * `inheritedFromFolder` answers the folder question and is pure for exactly
- * this reason.
+ * index. That question is `heldBy`, which lives in `definitions/membership.ts`
+ * because every add path asks it and this module was only the first to need
+ * it. It resolves the same expansion the visibility engine is handed, so
+ * "already held" here cannot drift from what the space shows.
  *
  * The tag index is passed in rather than built here. It is a snapshot the
  * controller already owns, and taking a second one would let this menu

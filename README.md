@@ -89,11 +89,11 @@ Click **All** to leave the space and see the whole vault again.
 
 Drag a note or folder from the file tree onto a space's icon in the strip to add it to that space. Select several and they all go in together. The icon marks itself while you hover, so the one that lights is the one that will take the drop, and a notice afterwards says what was added. Nothing moves on disk: the note stays exactly where it is and the space gains a member.
 
-If part of your selection has scrolled out of view, the drop is declined and says so, rather than adding only the part Spaces can see. Scroll so the whole selection is visible, then drag again.
+When Spaces can see that your selection runs past the edge of the file tree's view, it declines the drop and says so. Select fewer notes and folders, then drag again.
 
 A space pinned to a folder declines the drop and says why. It shows that folder's contents rather than a member list, so there is nothing for a drop to add to. To put a note inside that folder, use Obsidian's own "Move file to...".
 
-The drag needs a pointer. In **All**, the context menu below does the same job from the keyboard. Inside a space the menu acts on that space alone, so dragging is the only way to put a note into a different space without switching to **All** first.
+The drag needs a pointer. In **All**, the context menu below does the same job from the keyboard. Inside a space the menu acts on that space alone, so dragging is the only way to put a note into a different space without switching spaces first.
 
 Right-click a row in the file tree:
 
@@ -226,7 +226,7 @@ The plugin makes no network requests. A test (`tests/noNetwork.test.ts`) scans t
 - One active space per window, applied to every file-explorer leaf.
 - A space's kind is fixed at creation: a curated space cannot become folder pinned, or the reverse.
 - Dragging to reorder rows or spaces needs a pointer; both gestures stand down on touch.
-- Dropping notes and folders on a space icon needs a pointer too. The file explorer's context menu offers "Add to space" in **All**; inside a space it offers only that space, so there is no keyboard equivalent for adding to a different one.
+- Dropping notes and folders on a space icon needs a pointer too. The file explorer's context menu offers "Add to space" in **All**; inside a space it offers only that space, so adding to a different one from the keyboard means switching spaces first.
 - A space pinned to a folder does not take the drop at all, because it has no member list. Use Obsidian's own "Move file to..." to put a note inside its folder.
 - The item picker in the creation form draws at most 200 rows at a time and tells you how many more matched. Keep typing to narrow it.
 
