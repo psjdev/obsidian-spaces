@@ -715,13 +715,25 @@ export class DragOrdering {
    * at the predicate because this is where the person fixing it will look.
    *
    * WHAT IT COSTS TODAY. A selection clipped only at the top reports
-   * `truncated: false`, so both consumers act on the visible fraction:
-   * `onDrop` claims the reorder, and the space strip adds the rows it can see
-   * as members and reports that count as the whole gesture. Both are
-   * recoverable -- an order can be rewritten, a member removed -- which is why
-   * this is a recorded defect rather than a blocker. It was NOT recoverable for
-   * as long as a drop on a folder-pinned space moved files on disk, and that
-   * gesture is deferred partly on this.
+   * `truncated: false`, so every consumer acts on the visible fraction. An
+   * earlier version of this paragraph called both outcomes recoverable. One of
+   * them is not, and saying so was the thing stopping anyone sizing this
+   * properly:
+   *
+   *  - The space strip adds the rows it can see as members and reports that
+   *    count as the whole gesture. Recoverable: the members can be removed.
+   *  - `onDrop` is NOT only a reorder. When the drop lands under a different
+   *    parent it calls `moveInto`, which is a filesystem move. `truncated` is
+   *    exactly the flag that makes `onDrop` stand down and hand the gesture
+   *    back to Obsidian, which would then move the WHOLE selection; blind on
+   *    the top edge, it does not stand down, and renames only the fraction it
+   *    can see. Spaces turns a complete native move into a partial one, on
+   *    disk, with nothing of its own to undo it.
+   *
+   * So this is a live partial-move defect, not a recorded annoyance, and the
+   * second bullet is the one that sets the priority. It is PRE-EXISTING: it
+   * belongs to the file-tree drag and predates the space strip, which only ever
+   * writes members. Whoever fixes it should read it as data loss.
    *
    * A FIX HAS TO SEE PAST THE ANCESTOR ROWS. Asking whether the first rendered
    * row that is a LEAF of the selection's own folder is selected, or comparing
