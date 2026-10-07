@@ -116,6 +116,9 @@ async function makeCtx(): Promise<{
       buildVisibilitySnapshot(vault, space, new Set<string>(), compileIgnore([]),
       new Set()),
     dismissRevealed: () => undefined,
+      // The add now asks what the space SHOWS, which means expanding its tag
+      // members. No space here holds one, so an empty index is the whole truth.
+      tagIndex: () => ({ pathsMatching: () => [] }),
   } as unknown as SpaceController;
   return { defs, ctx: { defs, controller } };
 }
@@ -202,6 +205,9 @@ describe("removal matches the way visibility matches", () => {
           buildVisibilitySnapshot(bothVault, space2, new Set<string>(), compileIgnore([]),
       new Set()),
         dismissRevealed: () => undefined,
+      // The add now asks what the space SHOWS, which means expanding its tag
+      // members. No space here holds one, so an empty index is the whole truth.
+      tagIndex: () => ({ pathsMatching: () => [] }),
       } as unknown as SpaceController,
     };
     const { menu, rows } = fakeMenu();
@@ -273,6 +279,9 @@ describe("adding does not duplicate a member the space already holds", () => {
             new Set()
           ),
         dismissRevealed: () => undefined,
+      // The add now asks what the space SHOWS, which means expanding its tag
+      // members. No space here holds one, so an empty index is the whole truth.
+      tagIndex: () => ({ pathsMatching: () => [] }),
       } as unknown as SpaceController,
     };
     const { menu, rows } = fakeMenu();

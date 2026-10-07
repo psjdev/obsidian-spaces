@@ -15,10 +15,8 @@
  * disagree with the tree it was opened from.
  */
 
-import { canonicalPath } from "../visibility/glob";
 import type { SpaceDefinition } from "../types";
-import { inheritedFromFolder } from "../definitions/membership";
-import { resolveMembers } from "../controller/resolveMembers";
+import { heldBy, resolvedPaths } from "../definitions/membership";
 import type { TagIndex } from "../visibility/TagIndex";
 import { isFolderSpace } from "../visibility/folderSpace";
 
@@ -33,47 +31,6 @@ interface SpaceAddTarget {
   disabled: boolean;
   /** Exactly the paths this space does not already hold. */
   addablePaths: string[];
-}
-
-/**
- * Every path this space RESOLVES to, canonical.
- *
- * `resolveMembers`, not `pathMembers`: a note the space holds through a tag
- * member is already in it, and offering "Add to space" for it wrote a second,
- * redundant claim on a path the space had anyway. This is the same expansion
- * the visibility engine is handed, so the menu and the tree agree by
- * construction rather than by two implementations staying in step.
- *
- * Canonical, matching what the add dedupes with. An exact compare offers a
- * differently-cased path as addable, then the add drops it as a duplicate and
- * still reports it added.
- *
- * Built ONCE per space and closed over, never once per selected path: a tag
- * member costs a pass over the vault's notes to expand, and a selection of
- * fifty files would otherwise pay for fifty of them.
- */
-function resolvedPaths(space: SpaceDefinition, tags: TagIndex): Set<string> {
-  return new Set(resolveMembers(space, tags).map((m) => canonicalPath(m.path)));
-}
-
-/** Already held by this space, whether resolved directly or covered by a folder. */
-function heldBy(
-  space: SpaceDefinition,
-  resolved: Set<string>,
-  path: string
-): { held: boolean; viaFolder: string | null } {
-  if (resolved.has(canonicalPath(path))) return { held: true, viaFolder: null };
-  const folder = inheritedFromFolder(space, path);
-  if (folder === null) return { held: false, viaFolder: null };
-  // Folder coverage is the engine's inherited-descendants step, not a seed,
-  // so an exclusion still beats it here — the same precedence
-  // `SpacesApi.isMember` applies. An explicit path member never reaches this
-  // branch: `resolved` (built from `resolveMembers`, which never drops a
-  // hand-picked member) already answered `held: true` for it above, exclusion
-  // included.
-  const excluded = (space.exclude ?? []).some((e) => canonicalPath(e) === canonicalPath(path));
-  if (excluded) return { held: false, viaFolder: null };
-  return { held: true, viaFolder: folder };
 }
 
 /**

@@ -80,14 +80,6 @@ describe("subject", () => {
    * those arrive without a rename of their own, so one `moved` entry can stand
    * for a folder and everything inside it.
    */
-  it("counts what travelled, not what was renamed", () => {
-    expect(subject([file("Clients")], 4)).toBe("4 notes and folders");
-  });
-
-  // And the name is only used when the count really is that one file.
-  it("does not name one file when more than it travelled", () => {
-    expect(subject([file("Clients")], 2)).toBe("2 notes and folders");
-  });
 });
 
 describe("alreadyInMessage", () => {

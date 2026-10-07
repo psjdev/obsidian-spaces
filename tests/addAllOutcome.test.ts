@@ -35,6 +35,9 @@ describe("addAll reports what it changed", () => {
       currentSnapshot: () =>
         buildVisibilitySnapshot(vault, defs.get().spaces[0], new Set(["notes/b.md"]), compileIgnore([]), new Set()),
       dismissRevealed: () => undefined,
+      // The add now asks what the space SHOWS, which means expanding its tag
+      // members. No space here holds one, so an empty index is the whole truth.
+      tagIndex: () => ({ pathsMatching: () => [] }),
     } as unknown as SpaceController;
 
     let click: (() => void) | null = null;
