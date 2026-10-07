@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.9.0 — 2026-10-07
+
+Drag a note or folder from the file tree onto a space's icon to add it to that
+space. Select several and they all go in together. The icon marks itself while
+you hover, so the one that lights is the one that will take the drop, and a
+notice says what was added. Nothing moves on disk: the note stays where it is
+and the space gains a member.
+
+A space pinned to a folder declines the drop and says why. It shows that
+folder's contents rather than a member list, so there is nothing for a drop to
+add to.
+
+When Spaces can see that your selection runs past the edge of the file tree's
+view, it declines the drop and says so. Select fewer notes and folders, then
+drag again.
+
+Fixes:
+
+- Dropping a note a space already shows through a folder or a tag reports that
+  it is already there instead of adding it again. Adding it made the note a
+  member in its own right, so taking the tag off the note, or removing the
+  folder from the space, no longer took the note out of the space with it. It
+  stayed, with nothing on screen to say why, until you removed it by hand.
+- A drop on a space that was deleted or pinned to a folder while you were
+  dragging says so instead of doing nothing.
+- Two spaces declining the same drag for different reasons each explain
+  themselves.
+
 ## 0.8.1 — 2026-10-05
 
 No change to how the plugin behaves. Clears a warning from Obsidian's plugin
