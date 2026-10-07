@@ -7,6 +7,7 @@ import {
   TFile,
   TFolder,
   type Command,
+  type TAbstractFile,
   type WorkspaceLeaf,
 } from "obsidian";
 import { DefinitionStore } from "./definitions/DefinitionStore";
@@ -33,7 +34,9 @@ import {
   type VaultEventRecord,
 } from "./lifecycle/moveCorrelator";
 import { createVaultChangeCoalescer } from "./lifecycle/eventCoalescer";
-import { registerMembershipMenus } from "./actions/membership";
+import { addToSpace, registerMembershipMenus } from "./actions/membership";
+import { CurrentDrag, type DraggedFiles } from "./order/currentDrag";
+import { CLIPPED_SELECTION, FOLDER_PINNED_SPACE, SPACE_GONE, spaceDropFor } from "./ui/spaceDrop";
 import {
   createSpace,
   renameSpace,
@@ -273,6 +276,14 @@ export default class SpacesPlugin extends Plugin {
   private runtimeWriteWarned = false;
   private adapter = new ExplorerAdapter();
   private switcher: SwitcherView | null = null;
+  /**
+   * What the live drag carries, shared between the tree and the strip.
+   *
+   * Owned here rather than by either of them: `DragOrdering` publishes to it
+   * and `SwitcherView` reads it, and neither should have to know the other
+   * exists. Both reach it through callbacks for the same reason.
+   */
+  private readonly currentDrag = new CurrentDrag();
   private header: SpaceHeaderView | null = null;
   /** The one-shot gesture a native create may be attributed to. */
   private creationIntent: CreationIntent | null = null;
@@ -1644,6 +1655,11 @@ export default class SpacesPlugin extends Plugin {
               return;
             }
             this.restoreSavedOrdering();
+          },
+          {
+            dragged: () => this.currentDrag.dragged(),
+            onDropped: (spaceId, drag) => void this.filesDroppedOnSpace(spaceId, drag),
+            onRefused: (reason, spaceName) => this.reportRefusedDrop(reason, spaceName),
           }
         );
         this.switcher.mount(leafRoot);
@@ -2319,16 +2335,29 @@ export default class SpacesPlugin extends Plugin {
     }
 
     if (views.length === 0) return;
-    // The setting governs the ordering GESTURE (the drag) and the
-    // ordering HALF of the transform — `orderMapFor` already returns
-    // `undefined` when this is off, which is what makes `filterAndOrderFolder`
-    // fall back to filtered-but-unordered. It must never govern visibility:
-    // filtering rides this same patch, so tearing the patch down
-    // here — as this used to do — would silently show the whole vault in
-    // every space to a user who only meant to turn off row dragging. Only the
-    // gesture is gated; the patch installs unconditionally below.
-    const allowReordering = this.defs.get().settings.allowReordering;
-    if (!allowReordering) this.dragOrdering?.unbind();
+    // "Allow reordering a space's notes and folders" governs the ordering
+    // GESTURE (the drag) and the ordering HALF of the transform -- `orderMapFor`
+    // already returns `undefined` when this is off, which is what makes
+    // `filterAndOrderFolder` fall back to filtered-but-unordered. It must never
+    // govern visibility: filtering rides this same patch, so tearing the patch
+    // down here -- as this used to do -- would silently show the whole vault in
+    // every space to a user who only meant to turn off row dragging.
+    //
+    // AND IT MUST NOT GOVERN THE LISTENERS EITHER, which is the half this code
+    // got wrong for longer. It used to `unbind()` here and wrap the `bind()`
+    // below in the same condition, so with the setting off `DragOrdering` had
+    // no listeners at all. That is a coarser gate than the setting describes:
+    // the class also PUBLISHES what a drag is carrying, which is what the space
+    // strip reads to decide whether a note may be dropped on an icon. With no
+    // listeners nothing is published, so the drop gesture was dead outright --
+    // no icon, no drop, no notice -- after one click in a settings pane that
+    // says nothing about spaces taking notes.
+    //
+    // The gesture is gated where it belongs, per `dragstart`, by `enabled()` in
+    // `dragDeps()`: `orderingEnabledFor` reads this exact setting, so a blocked
+    // drag still never writes an order. Both the patch and the listeners now
+    // install unconditionally below. The one thing that still unbinds is the
+    // lost sort seam, which is a different fact about a different thing.
 
     // The seam is a property of the Obsidian BUILD, not of one pane, so one
     // "ok" is enough to say the build still exposes it. Taking the
@@ -2354,26 +2383,25 @@ export default class SpacesPlugin extends Plugin {
       return;
     }
 
-    if (allowReordering) {
-      // The drag binds to the same container the adapter does, and for
-      // the same reason — `changeLayout()` replaces it on every switch, so
-      // anything bound once at load would be listening to a detached node.
-      // Gated the same as the unbind above: only the gesture is governed by
-      // the setting.
-      // The PRIMARY pane only, and deliberately. A drag is one
-      // gesture in one pane; what it writes is an order in `defs`, which the
-      // re-sort below then applies to every patched pane, so the RESULT is
-      // multi-leaf even though the gesture is not. Binding a second
-      // `DragOrdering` would need a second instance to own its listeners and
-      // a second teardown in `onunload` to take them off, which is a listener
-      // -ownership change rather than part of this seam.
-      const container = (views[0] as { containerEl?: HTMLElement }).containerEl?.querySelector<HTMLElement>(
-        SEL.container
-      );
-      if (container) {
-        this.dragOrdering ??= new DragOrdering(this.dragDeps());
-        this.dragOrdering.bind(container);
-      }
+    // The drag binds to the same container the adapter does, and for
+    // the same reason — `changeLayout()` replaces it on every switch, so
+    // anything bound once at load would be listening to a detached node.
+    // UNCONDITIONAL, for the reason written out above: these listeners feed the
+    // space strip as well as the reorder, and only the reorder is the setting's
+    // business.
+    // The PRIMARY pane only, and deliberately. A drag is one
+    // gesture in one pane; what it writes is an order in `defs`, which the
+    // re-sort below then applies to every patched pane, so the RESULT is
+    // multi-leaf even though the gesture is not. Binding a second
+    // `DragOrdering` would need a second instance to own its listeners and
+    // a second teardown in `onunload` to take them off, which is a listener
+    // -ownership change rather than part of this seam.
+    const container = (views[0] as { containerEl?: HTMLElement }).containerEl?.querySelector<HTMLElement>(
+      SEL.container
+    );
+    if (container) {
+      this.dragOrdering ??= new DragOrdering(this.dragDeps());
+      this.dragOrdering.bind(container);
     }
 
     for (const view of views) {
@@ -2661,6 +2689,167 @@ export default class SpacesPlugin extends Plugin {
   }
 
   /**
+   * Why a drop on a space icon was refused.
+   *
+   * Said at HOVER for the two refusals the strip can see coming, and at the
+   * DROP for a space that stopped existing while the button was held. Every
+   * other refusal is a pointer somewhere that was never a target, and the "no
+   * drop" cursor says so for free. Logged rather than shown if it is anything
+   * else, because a refusal nobody has worded would otherwise surface a raw
+   * internal string.
+   *
+   * TENSE FOLLOWS THE MOMENT, which is why the three do not match. The two
+   * hover messages are PRESENT and CONDITIONAL: the user is mid-gesture with
+   * the button still down, and "nothing was dropped" would describe an event
+   * that has not occurred. `SPACE_GONE` is the opposite, reachable only after
+   * the release, so it is past tense. The two hover messages name the space,
+   * because the strip is a row of icons and "the space" identifies none of
+   * them; `SPACE_GONE` cannot, because the space it would name is gone.
+   *
+   * The clipped-selection wording used to tell the user to "scroll the whole
+   * selection into view and drag again", which they often cannot. The tell is
+   * geometric, so it fires for any selection whose end sits at the edge of the
+   * explorer's render window with more tree beyond it, from two rows upward,
+   * and a selection big enough to be genuinely clipped will not fit on screen
+   * at all. Selecting fewer works in both cases.
+   */
+  private reportRefusedDrop(reason: string, spaceName: string | null): void {
+    // A name is always carried for these two (see `SpaceDrop`), but the copy
+    // must not read as a bug if one is ever missing.
+    const where = spaceName ?? "that space";
+    if (reason === CLIPPED_SELECTION) {
+      new Notice(
+        `Spaces: this selection may be too large to drop on ${where}. If you ` +
+          "release now, nothing will be added. Select fewer notes and " +
+          "folders, then drag again."
+      );
+      return;
+    }
+    if (reason === FOLDER_PINNED_SPACE) {
+      // Says what the space IS, which is the fact that explains the refusal,
+      // and then where the user can go instead. Deliberately not worded as a
+      // limit waiting to be lifted ("takes one at a time", "not supported
+      // yet"): a pinned space has no member list at all, it is a window onto a
+      // folder, and the same fact is why it never appears in "Add to space".
+      //
+      // Obsidian's own command is named exactly as Obsidian names it, quotes
+      // and ellipsis included, so the user can find it by reading.
+      new Notice(
+        `Spaces: ${where} is pinned to a folder, so it shows that folder's ` +
+          "contents and has no member list to add to. To put a note or folder " +
+          `inside ${where}, use Obsidian's "Move file to..." instead.`
+      );
+      return;
+    }
+    if (reason === SPACE_GONE) {
+      // Only ever seen at the RELEASE. At hover this reason means the pointer
+      // is between icons, which the "no drop" cursor already explains; reaching
+      // it from a drop means the icon was lit when the button went down and the
+      // space stopped existing while it was held.
+      new Notice("Spaces: nothing was added. That space no longer exists.");
+      return;
+    }
+    console.warn("Spaces: a drop on a space icon was refused:", reason);
+  }
+
+  /**
+   * The same question at RELEASE.
+   *
+   * UNREACHABLE TODAY, and kept deliberately rather than deleted. That is worth
+   * stating plainly, because the version of this comment that described it as a
+   * live safety net was false and stayed false through several reviews.
+   *
+   * There are TWO gaps here and only one of them is closed, which is what the
+   * earlier wording ran together:
+   *
+   *  - HOVER to RELEASE is a real gap, as long as the user holds the button.
+   *    A space can be deleted or newly pinned in it, by sync or a second
+   *    window or another plugin. That gap is NOT closed by anything below; it
+   *    is caught in the rail's own drop listener, which re-asks `spaceDropFor`
+   *    and speaks the refusal through `reportRefusedDrop`. The earlier wording
+   *    claimed this gap did not exist, and a drop that fell into it was
+   *    swallowed in silence.
+   *  - RELEASE to THIS RE-ASK is not a gap. `onDropped` is called
+   *    synchronously from that listener and `filesDroppedOnSpace` reads `defs`
+   *    before its first `await`, so the space really is resolved from one
+   *    snapshot in one tick. The only input that moves is the path list, which
+   *    can only shrink as stale paths are filtered out, and an empty list has
+   *    its own notice above.
+   *
+   * What it buys is that the drop path narrows `SpaceDrop` by ASKING the seam
+   * rather than by assuming the answer, so a rule added to `spaceDropFor` that
+   * genuinely can flip between hover and release arrives here with words
+   * already written for it instead of landing in a silent `return`.
+   */
+  private reportDropDidNothing(reason: string, spaceName: string | null): void {
+    console.warn("Spaces: a drop on a space icon was refused at release:", reason);
+    const where = spaceName ?? "that space";
+    new Notice(`Spaces: nothing was added. ${where} cannot take this drop now.`);
+  }
+
+  /**
+   * A note or folder was dropped on a space icon.
+   *
+   * The drop callback hands over a `spaceId` and the drag record, not a
+   * decision: the strip deliberately does not carry one across the seam. So
+   * this resolves the space and asks `spaceDropFor` again.
+   *
+   * It is re-asked with the SURVIVING subset, not with the paths the icon was
+   * lit for: a path can go stale between the dragstart and the drop, and those
+   * are filtered out just below. Removing paths CAN flip a rule from refuse to
+   * act -- a rule that refuses when ANY path is illegal does exactly that, and
+   * one lived here until the move was removed. What matters is the other
+   * direction: removing paths can never flip a rule from act to a DIFFERENT
+   * act. `truncated`, the one flag that chooses anything, is carried across
+   * untouched, so the subset can only agree with what the icon showed or
+   * refuse, and refusing is the safe direction.
+   *
+   * What must not happen is deciding by some OTHER rule than the one the icon
+   * used, which is what made the drag indicator a lie once before, where it
+   * read `destination=Travel` while the file landed at the vault root.
+   */
+  private async filesDroppedOnSpace(spaceId: string, drag: DraggedFiles): Promise<void> {
+    const space = this.defs.get().spaces.find((s) => s.id === spaceId);
+    // A backstop, not the guard that matters. The rail's drop listener already
+    // re-asked and spoke for a space deleted while the button was held, and it
+    // calls this synchronously, so there is no tick in which the answer can
+    // change again. Kept, and kept speaking, because a silent return here
+    // would be the one shape this whole seam exists to avoid.
+    if (!space) {
+      new Notice("Spaces: that space no longer exists");
+      return;
+    }
+    // A path can go stale between the dragstart and the drop: the file was
+    // renamed, or deleted, or an outside change removed it. Those are skipped
+    // and the rest still land, rather than failing the whole drop.
+    const files = drag.paths
+      .map((p) => this.app.vault.getAbstractFileByPath(p))
+      .filter((f): f is TAbstractFile => f !== null);
+    if (files.length === 0) {
+      // Singular when one note was dragged, because "those notes and folders"
+      // for a single deleted file reads as though the plugin lost track of a
+      // batch that never existed.
+      new Notice(
+        drag.paths.length === 1
+          ? "Spaces: that note or folder no longer exists"
+          : "Spaces: those notes and folders no longer exist"
+      );
+      return;
+    }
+    // The SAME record, with the surviving subset in place of the paths.
+    // `truncated` is carried through untouched: a selection the explorer may
+    // have clipped is still clipped after the stale paths are filtered out, and
+    // recomputing it from the surviving list is how a clipped selection would
+    // sneak back in looking like a complete one.
+    const drop = spaceDropFor(space, { paths: files.map((f) => f.path), truncated: drag.truncated });
+    if (drop.kind === "refuse") {
+      this.reportDropDidNothing(drop.reason, drop.spaceName ?? space.name);
+      return;
+    }
+    await addToSpace({ defs: this.defs, controller: this.controller }, spaceId, files);
+  }
+
+  /**
    * The dependencies. Every one of them is a lookup or a write — the drag's
    * decisions live in `dropIntent.ts`, and none of them belong here.
    */
@@ -2688,6 +2877,23 @@ export default class SpacesPlugin extends Plugin {
       },
       writeOrder: (folderPath, order) => this.writeOrderFor(folderPath, order),
       indicatorStyle: () => this.defs.get().settings.dropIndicatorStyle,
+      onDragBegin: (paths, truncated) => this.currentDrag.begin(paths, truncated),
+      // The one place that clears what a drag published. The strip never hears
+      // `dragend` for a file drag (its source is a tree row), so an icon lit
+      // under an Escaped drag is cleared from here, and the switcher is created
+      // lazily so it may not exist yet.
+      //
+      // NOT "learns every drag has ended, however it ended", which is what this
+      // said while the defect was live. `DragOrdering` calls it at each drag's
+      // end and again at the next drag's `dragstart`, and the second half is
+      // what the record's safety actually rests on: a `dragend` dispatched at a
+      // source row the explorer has since replaced reaches no document
+      // listener, so "every" was never on offer. See `onDragDone` in
+      // `DragOrdering.ts` for the full chain.
+      onDragDone: () => {
+        this.currentDrag.end();
+        this.switcher?.clearDropTarget();
+      },
       // `DragOrdering` declines the drop on its own — this hook only
       // voices it. Without it the user sees Obsidian complete the move (which
       // is the right outcome: the whole selection travels) while the ordering

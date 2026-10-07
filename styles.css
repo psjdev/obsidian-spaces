@@ -198,6 +198,65 @@
 .spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-active {
   --icon-stroke: calc(var(--spaces-base-stroke) + 1px);
 }
+
+/* The icon a drop would land on. Drawn from `--interactive-accent`, the same
+   source as the drag box and the picker's covered rows, so the three read as
+   one family. Applied only when `spaceDropFor` says the drop would act, so an
+   icon that lights is an icon that will do something. `opacity: 1` because the
+   base rule dims every non-active icon to 0.55 (0.85 on hover), and a target
+   drawn dimmed would not read as one.
+
+   LAST, and with one selector per active-space style. The opacity ladder is
+   not the only thing it has to beat: all three active-space rules above are
+   about the icon you are STANDING on, which is also an icon you can drop on,
+   and each of them is more specific than a plain
+   `.spaces-switcher .spaces-switcher-item.is-drop-target` would be. What each
+   one WOULD do to this rule if this rule did not match its scope, written as
+   the three failures that were actually observed before it did:
+
+     - Shaded sets `background-color` at an equal weight, so order alone
+       decides between them, and this rule used to come first and lose the
+       tint.
+     - Boxed adds `.spaces-active-boxed` and so outranks an unscoped rule
+       outright, taking both the tint and the ring with it: no feedback at all
+       on the active icon.
+     - Bolded sets `background: transparent; box-shadow: none` on EVERY item,
+       active or not, so under that style no icon in the strip lit up. Bolded is
+       one of three shipped options, so that was a third of users with a dead
+       highlight.
+
+   All three are history, not present behaviour: this rule now sits last and
+   names each scope, so every style lights. They are kept because they are the
+   argument for the selector list, and a reader who deletes a line from it gets
+   the matching failure back.
+
+   Matching each style's scope rather than reaching for `!important` keeps the
+   weight argument visible: a fourth active style added later needs a fourth
+   line here, which is exactly the review this rule should get.
+
+   DASHED, and that is accessibility rather than taste. Under Boxed the active
+   space already wears a 2px inset ring, and if the drop ring were also a solid
+   2px inset ring the only thing separating "the space I am in" from "this will
+   receive the drop" would be HUE -- `currentColor` against
+   `--interactive-accent`. With a low-chroma theme accent, or for a colour-blind
+   reader, that is no difference at all. A dash pattern is a difference in SHAPE
+   and survives both. It is drawn as an `outline` rather than a `box-shadow`
+   because a box shadow cannot be dashed; `outline-offset: -2px` puts it exactly
+   where the solid ring was, and outlines follow `border-radius`. `box-shadow:
+   none` is what takes the Boxed active ring off underneath it, so the two never
+   stack into a double ring. */
+.spaces-switcher .spaces-switcher-item.is-drop-target,
+.spaces-switcher .spaces-switcher-item.is-drop-target:hover,
+.spaces-switcher.spaces-active-boxed .spaces-switcher-item.is-drop-target,
+.spaces-switcher.spaces-active-boxed .spaces-switcher-item.is-drop-target:hover,
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-drop-target,
+.spaces-switcher.spaces-active-bolded .spaces-switcher-item.is-drop-target:hover {
+  opacity: 1;
+  background: color-mix(in oklch, var(--interactive-accent) 22%, transparent);
+  box-shadow: none;
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: -2px;
+}
 .spaces-switcher-item.is-pending { opacity: 1; animation: spaces-pulse 0.6s ease-in-out infinite; }
 @keyframes spaces-pulse { 50% { opacity: 0.4; } }
 .spaces-switcher-add {

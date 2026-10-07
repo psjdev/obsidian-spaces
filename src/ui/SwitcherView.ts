@@ -31,7 +31,9 @@ import { iconColorFor } from "./spaceIconColor";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { SpaceController } from "../controller/SpaceController";
-import type { ActiveSelection, StripPlacement } from "../types";
+import type { ActiveSelection, SpaceDefinition, StripPlacement } from "../types";
+import { dropTargetFor, spaceDropFor } from "./spaceDrop";
+import type { DraggedFiles } from "../order/currentDrag";
 
 /** The four candidate placements a drag can land on, in a fixed order. */
 const PLACEMENTS: readonly StripPlacement[] = ["top", "bottom", "left", "right"];
@@ -147,6 +149,31 @@ export class SwitcherView {
   private dragPointerAlong = 0;
   private dragRaf = 0;
   /**
+   * The one icon wearing `is-drop-target`, or null. Held as a field so
+   * `markDropTarget` can take the mark off the previous icon without
+   * querying the rail, and so a fast drag can never leave two icons lit.
+   */
+  private dropTargetEl: HTMLElement | null = null;
+  /**
+   * Which refusals this drag has already been told about, as `spaceId::reason`.
+   *
+   * `dragover` fires once per few pixels of pointer travel, so without this one
+   * notice becomes dozens. Keyed rather than a single flag per drag, because a
+   * drag crosses several icons: one boolean meant that after a folder-pinned
+   * space spoke, a clipped-selection refusal over a DIFFERENT space said
+   * nothing and lit nothing, leaving the only notice on screen naming another
+   * space and giving advice that did not apply. That is the silence
+   * `spaceDrop.ts` says reads as a broken feature. Cleared in `clearDropTarget`,
+   * which `main.ts` calls from `DragOrdering`'s drag-done callback. That
+   * callback fires at the end of each drag the explorer published AND at the
+   * start of the next one, which is what keeps this flag from surviving into a
+   * drag it was not raised for -- the first reading of it, "the one callback
+   * that learns every drag has ended however it ended", was not true, and a
+   * `dragend` lost to a replaced source row left this stuck on while a stale
+   * record was still offering its paths.
+   */
+  private spokenRefusals = new Set<string>();
+  /**
    * The one popover this view has open, or null.
    *
    * Held because `AnchoredPopover` adds four listeners to `document` that only
@@ -164,7 +191,38 @@ export class SwitcherView {
     private onCreateClicked: () => void,
     /** Shown only while that space renders with Obsidian's sort. */
     private isSortOverridden: (key: ActiveSelection) => boolean,
-    private onRestoreOrdering: (key: ActiveSelection) => void
+    private onRestoreOrdering: (key: ActiveSelection) => void,
+    /**
+     * Everything the strip needs to answer a drag that did not start on it.
+     *
+     * One object rather than three loose parameters because they are a single
+     * seam: the same record has to reach the `dragover` that lights the icon,
+     * the `drop` that acts, and the explanation for the two refusals that are
+     * voiced. Handing the paths alone to one of them and not the others is how
+     * a clipped selection came to be half moved and reported as complete.
+     */
+    private fileDrop: {
+      /** The live drag's paths AND whether that list may be short. */
+      dragged: () => DraggedFiles;
+      /** Act on a drop this seam has already approved. */
+      onDropped: (spaceId: string, drag: DraggedFiles) => void;
+      /**
+       * Say why a drop was refused, at most once per drag.
+       *
+       * Called from `dragover`, not `drop`, because a refused drag never
+       * produces a `drop` to speak from: refusing means not calling
+       * `preventDefault()`, and without that the browser fires no `drop` at
+       * all. `dragover` is therefore the only moment the strip has, and it is
+       * also the moment the user is still deciding.
+       *
+       * `spaceName` comes from the refusal rather than being looked up here,
+       * so the words name the same space the decision was made about. Both
+       * spoken refusals tell the user to do something else instead, and advice
+       * that does not say WHICH space it is about is not advice when four icons
+       * sit side by side.
+       */
+      onRefused: (reason: string, spaceName: string | null) => void;
+    }
   ) {}
 
   /** The axis the strip's icons run along, for the current placement. */
@@ -207,6 +265,7 @@ export class SwitcherView {
     // itself while `dragFromId` is set. Dropping the element without clearing
     // both would leave that loop running forever against a detached rail.
     this.dragFromId = null;
+    this.dropTargetEl = null;
     this.stopDragScrolling?.();
     this.stopDragScrolling = null;
     // A picker anchored to one of these icons outlives the element it points
@@ -822,7 +881,10 @@ export class SwitcherView {
 
     const tick = (): void => {
       this.dragRaf = 0;
-      if (this.dragFromId === null) return;
+      const reordering = this.dragFromId !== null;
+      // A file drag scrolls the rail too, so an icon off the end is reachable
+      // without letting go. It draws no line: there is no gap to point at.
+      if (!reordering && this.fileDrop.dragged().paths.length === 0) return;
       const vertical = this.axis === "y";
       const railSpan = spanOf(rail.getBoundingClientRect(), this.axis);
       const step = edgeScrollStep(this.dragPointerAlong, railSpan);
@@ -833,7 +895,7 @@ export class SwitcherView {
       // Recomputed every frame, not only on pointer movement: the pointer can
       // be perfectly still while the rail moves under it, and the gap it points
       // at changes anyway.
-      update();
+      if (reordering) update();
       if (step !== 0) startScrolling();
     };
 
@@ -844,7 +906,63 @@ export class SwitcherView {
     };
 
     rail.addEventListener("dragover", (e) => {
-      if (this.dragFromId === null) return;
+      if (this.dragFromId === null) {
+        // A drag that did not start on the strip. The only one we act on is a
+        // file drag over an icon that would do something; everything else
+        // falls through untouched, so the event reaches whatever is beneath.
+        const drag = this.fileDrop.dragged();
+        // Nothing published means the drag did not start in the file tree: a
+        // tab being torn off, a selection dragged out of the editor, a file
+        // from the desktop. Every one of those crosses this rail and reaches
+        // this listener, several times a second.
+        //
+        // Checked FIRST, before the auto-scroll is armed. `startScrolling`
+        // used to run for all of them, scheduling a frame whose `tick` opened
+        // by asking this same question and returning -- one wasted rAF per
+        // dragover event, for drags that have nothing to do with spaces.
+        if (drag.paths.length === 0) return;
+        const over = this.spaceElAt(e.target);
+        const target = dropTargetFor(null, this.spaceFor(over), drag);
+        if (target !== null && target.kind === "refuse") {
+          // Aimed at a space, and refused for a reason the user cannot see.
+          // The icon stays dark -- lighting one that then refuses is the
+          // failure this seam exists to prevent -- so the words are the only
+          // feedback there is. The rail does not scroll while the pointer rests
+          // here, which is a real gap when the icon the user wants is past the
+          // edge; it is recorded rather than fixed, because arming the scroll
+          // from a branch that deliberately acts on nothing needs its own
+          // check that the drag end still tears it down.
+          this.markDropTarget(null);
+          // Keyed by the space as well as the reason: the next icon along may
+          // refuse for a different reason, and that one has its own words.
+          const key = `${this.spaceFor(over)?.id ?? ""}::${target.reason}`;
+          if (!this.spokenRefusals.has(key)) {
+            this.spokenRefusals.add(key);
+            this.fileDrop.onRefused(target.reason, target.spaceName ?? null);
+          }
+          return;
+        }
+        this.markDropTarget(target === null ? null : over);
+        // Refreshed on EVERY file-drag dragover, lit icon or not. The scroll
+        // tick reads this value every frame, and a pointer over the gap
+        // between two icons is still a real position. Left stale, the tick
+        // would keep scrolling against wherever the pointer last lit an icon.
+        this.dragPointerAlong = pointerAlong(e, this.axis);
+        startScrolling();
+        if (target === null) return;
+        // Same reason the reorder branch cancels: nothing permits a drop in
+        // our own strip, and without this the `drop` event never fires.
+        e.preventDefault();
+        // Always "copy". The strip's one outcome is a membership write, which
+        // adds nothing to the vault and takes nothing out of where the note
+        // already lives, so "copy" is the cursor badge that describes it. It
+        // used to be chosen per target, "move" for a space pinned to a folder,
+        // and that badge was the ONLY thing distinguishing two visually
+        // identical icons with two very different outcomes. The move is gone;
+        // so is the choice.
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        return;
+      }
       // Calling `preventDefault()` here must not happen for the FILE TREE,
       // where Obsidian's own handler already permits the drop. Nothing
       // permits a drop in our own strip, though, and without cancelling here
@@ -859,7 +977,57 @@ export class SwitcherView {
     });
 
     rail.addEventListener("drop", (e) => {
-      if (this.dragFromId === null) return;
+      if (this.dragFromId === null) {
+        // Stopped here rather than left to end when `onDragDone` clears the
+        // paths a frame later, so this does not depend on another
+        // component's timing.
+        stopScrolling();
+        const over = this.spaceElAt(e.target);
+        // Re-asked HERE against the definitions as they are at the drop, the
+        // same discipline the reorder uses for its index: a space deleted
+        // while the drag was in flight resolves to null and refuses.
+        // The record is read here, during the drop, because DragOrdering
+        // declines a drop on the strip and so it is still live; a claimed drop
+        // would already have cleared it.
+        const drag = this.fileDrop.dragged();
+        // Nothing published means this drop is not ours at all, the same
+        // question `dragover` asks first. Everything below assumes the hover
+        // already approved, which is only true for a drag we published.
+        if (drag.paths.length === 0) return;
+        this.markDropTarget(null);
+        // *All* and the `+` carry no `spaceId`, so `spaceElAt` already answered
+        // null for them, as it did for the gap between icons. None of those was
+        // ever a target and none gets words: the distinction below is between a
+        // space icon whose space is GONE and a thing that was never a space.
+        if (over === null) return;
+        // `spaceDropFor`, not `dropTargetFor`. The hover form collapses every
+        // refusal it would not SPEAK down to null, which is right while the
+        // user is still deciding and wrong once they have let go: here a null
+        // is indistinguishable from "not ours" and the gesture ends in silence.
+        //
+        // Reaching a refusal at all means the answer CHANGED under the drag --
+        // the browser fires no `drop` for a hover that refused, so this icon
+        // was lit when the button went down. A space deleted, or newly pinned
+        // to a folder, by sync or a second window or another plugin in the
+        // seconds the button was held. The earlier note here said a refusal
+        // could not reach this line; that claim and the re-ask on the line
+        // above cannot both be true, and it was the claim that was wrong.
+        const drop = spaceDropFor(this.spaceFor(over), drag);
+        if (drop.kind === "refuse") {
+          // NOT cancelled, matching the contract `dropTargetFor` states for a
+          // refusal everywhere else: light nothing, cancel nothing, say why.
+          // The missing half here was only ever the words.
+          //
+          // Said unconditionally, not through `spokenRefusals`. That set stops
+          // a hover repeating itself while the pointer travels; this is the
+          // outcome of the gesture, and the user let go over a lit icon.
+          this.fileDrop.onRefused(drop.reason, drop.spaceName ?? null);
+          return;
+        }
+        e.preventDefault();
+        this.fileDrop.onDropped(drop.spaceId, drag);
+        return;
+      }
       e.preventDefault();
       const railSpan = spanOf(rail.getBoundingClientRect(), this.axis);
       const boxes = boxesOf(spaceEls(), railSpan);
@@ -883,8 +1051,25 @@ export class SwitcherView {
     });
 
     // Fires whether the drag ended in a drop, outside the strip, or on Escape,
-    // so it is the only teardown that is guaranteed to run.
+    // so it is the only teardown guaranteed to run for a REORDER, whose source
+    // is an icon in this rail. A file drag's source is a tree row the rail never
+    // hears `dragend` from; that one is torn down through `clearDropTarget`,
+    // called from the plugin's drag-done callback.
     rail.addEventListener("dragend", () => this.endDrag(rail, line));
+
+    rail.addEventListener("dragleave", (e) => {
+      // Only when the pointer actually left the rail, not when it crossed
+      // between two icons inside it.
+      // Through `asNode`, not `instanceof Node`: a node from a popout window
+      // fails the global check, which would clear the mark on every crossing.
+      const into = this.asNode(e.relatedTarget);
+      if (into && rail.contains(into)) return;
+      this.markDropTarget(null);
+      // The pointer has left, so `dragPointerAlong` is now stale. Without
+      // this the tick keeps scrolling against it, re-arming every frame even
+      // at the scroll limit, for as long as the drag lives over the tree.
+      stopScrolling();
+    });
     this.stopDragScrolling = stopScrolling;
   }
 
@@ -903,11 +1088,73 @@ export class SwitcherView {
     return at < 0 ? null : at;
   }
 
+  /**
+   * An event target as a `Node`, or null. Uses Obsidian's cross-window
+   * `instanceOf`: the global `Node` is a different constructor in a popout
+   * window, so `instanceof` would refuse every node there. The typeof test
+   * is for targets that are not nodes at all (a `Window`), which lack it.
+   */
+  private asNode(target: EventTarget | null): Node | null {
+    const node = target as Node | null;
+    return node && typeof node.instanceOf === "function" && node.instanceOf(Node) ? node : null;
+  }
+
+  /** The icon under the pointer, or null when the pointer is between them. */
+  private spaceElAt(target: EventTarget | null): HTMLElement | null {
+    const node = this.asNode(target);
+    if (!node) return null;
+    const el = node.instanceOf(HTMLElement) ? node : node.parentElement;
+    const item = el?.closest<HTMLElement>(".spaces-switcher-item") ?? null;
+    // *All* and the `+` carry no `spaceId`, which is what makes them decline.
+    return item?.dataset.spaceId === undefined ? null : item;
+  }
+
+  private spaceFor(el: HTMLElement | null): SpaceDefinition | null {
+    const id = el?.dataset.spaceId;
+    if (id === undefined) return null;
+    return this.defs.get().spaces.find((s) => s.id === id) ?? null;
+  }
+
+  /** At most one icon wears the mark, so a fast drag cannot leave two lit. */
+  private markDropTarget(el: HTMLElement | null): void {
+    if (this.dropTargetEl === el) return;
+    this.dropTargetEl?.classList.remove("is-drop-target");
+    el?.classList.add("is-drop-target");
+    this.dropTargetEl = el;
+  }
+
+  /**
+   * Takes the drop mark off, for a drag that ended without the pointer ever
+   * leaving the icon -- Escape, or a drop refused elsewhere. `dragend` fires on
+   * the drag SOURCE, a row in the file tree, so the rail never hears it.
+   *
+   * `dragleave` is not a substitute. The HTML spec does fire one before
+   * `dragend` when a drag is cancelled, so it covers the Escape case, but it
+   * says nothing about a drop the browser delivered elsewhere and it is
+   * `relatedTarget`-dependent (see the listener). `main.ts` calls this from
+   * `DragOrdering`'s drag-done callback, which fires at the end of each drag
+   * the explorer published and again at the start of the next one. The older
+   * wording here, "the one callback that learns every drag has ended, however
+   * it ended", claimed more than that callback could deliver: a `dragend` sent
+   * to a source row the tree had already replaced reached nothing at all.
+   */
+  clearDropTarget(): void {
+    this.markDropTarget(null);
+    // The next drag gets its own explanations. Cleared here rather than at a
+    // drag's start, because the strip has no start to hook: a file drag begins
+    // on a tree row this view never hears from.
+    this.spokenRefusals.clear();
+    // Stopped here so the guarantee is local: the loop would also end once the
+    // published paths go empty, but that rests on the caller's call order.
+    this.stopDragScrolling?.();
+  }
+
   /** Set by `wireReorder`; torn down with the view. */
   private stopDragScrolling: (() => void) | null = null;
 
   private endDrag(rail: HTMLElement, line: HTMLElement): void {
     this.dragFromId = null;
+    this.markDropTarget(null);
     line.hidden = true;
     this.stopDragScrolling?.();
     rail

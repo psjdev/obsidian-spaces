@@ -25,6 +25,18 @@ interface RowSnapshot extends GapRow {
   top: number;
 }
 
+/**
+ * What one `dragstart` turns out to be carrying.
+ *
+ * Both fields are produced together by `collectDragged` and published together
+ * by `publishDrag`, because they are only safe read together: see
+ * `DraggedFiles` in `currentDrag.ts`, the public shape this fills.
+ */
+interface Collected {
+  paths: string[];
+  truncated: boolean;
+}
+
 /** The part of a rect the drop rules read. Undisplaced, in viewport space. */
 interface StripRect {
   top: number;
@@ -110,6 +122,54 @@ export interface DragOrderingDeps {
    * stands whether or not it is supplied.
    */
   onSelectionOutsideWindow?(): void;
+  /**
+   * Told what this drag carries, once, at `dragstart`.
+   *
+   * This class already knows -- `collectDragged` works it out, selection and
+   * all -- but it keeps that in a private field it clears at the TOP of its own
+   * drop handler, before the guards that decline a drop outside the tree. That
+   * handler runs in capture on the document, so anything listening on the
+   * strip in the bubble phase would find the field empty. Publishing here and
+   * clearing in `onDragDone` is what makes the paths outlive the decline.
+   *
+   * `truncated` is published WITH the paths, never separately. It is
+   * `collectDragged`'s own answer to "might this list be short" (see
+   * `selectionMayBeClipped`), and it is why `onDrop` below declines a drop this
+   * class would otherwise have claimed. A consumer handed only the paths cannot
+   * tell a clipped selection from a small complete one, so it would act on a
+   * fraction of one gesture and report that as the whole of it. Anything acting
+   * on these paths must decline on the same flag, for the reason recorded above
+   * `movesIntoOwnSubtree` in `dropIntent.ts`.
+   *
+   */
+  onDragBegin?: (paths: readonly string[], truncated: boolean) => void;
+  /**
+   * No drag this class published is running any more. Clear whatever you kept.
+   *
+   * Deliberately NOT worded as "the drag is over, however it ended". That
+   * claim was false and it cost a data-loss defect: `dragend` is dispatched at
+   * the node the drag started on, and an event dispatched at a DETACHED node
+   * reaches no listener on the document (the same fact `endNativeDrag` below is
+   * built around). Obsidian replaces the source row whenever a drop re-renders
+   * the tree, so the ONLY thing that made this reliable was the row's own
+   * `dragend` listener -- and for a while the blocked path published its paths
+   * without ever arming one. The record then outlived its drag, and the next
+   * unrelated drag to cross the space strip (a tab, an editor selection) read
+   * those paths as a live file drag, lit an icon, and offered to act on them.
+   *
+   * What is true, and what the two arming sites in `onDragStart` are there to
+   * keep true, is: this fires at the end of every drag that reached a
+   * `dragstart` inside the bound container, AND at the start of the next such
+   * drag, whichever comes first. The second half is the belt to the first's
+   * braces: a consumer's record can never be read across two drags even if a
+   * `dragend` is lost in a way nobody has thought of yet.
+   *
+   * It can fire more than once for a single drag: on a claimed drop the
+   * synthetic `dragend` reaches the row's own listener and the document's, the
+   * browser's real `dragend` can follow, and the next `dragstart` calls it
+   * again. A consumer must make its handler idempotent.
+   */
+  onDragDone?: () => void;
 }
 
 export class DragOrdering {
@@ -320,17 +380,59 @@ export class DragOrdering {
     return pane === null || !pane.contains(node);
   }
 
+  /**
+   * The row an event FIRED ON, from the target alone. No measuring, no
+   * snapshot, no container needed.
+   *
+   * Split out of `rowAt` because the two answer different questions. This one
+   * asks "which row is this event about", which is the only question a
+   * `dragstart` has: the browser fires it on the element carrying `draggable`,
+   * so `closest()` is exact. `rowAt` asks "which row is this POINTER over",
+   * which needs geometry and a nearest-row fallback, and is the mid-drag
+   * question.
+   *
+   * Having it on its own is what lets `onDragStart` publish what a drag
+   * carries without taking a geometry snapshot first.
+   *
+   * Every type test here is Obsidian's cross-window `instanceOf`, never the
+   * global `instanceof`. A popped-out explorer lives in another window whose
+   * `HTMLElement` is a different constructor, so the global test refuses every
+   * node in it: this function would resolve no row, `publishDrag` would publish
+   * an empty list, and the whole drop-on-a-space-icon gesture would be dead in
+   * that window with nothing to show for it. That is the defect release 0.7.3
+   * shipped and the one `asNode` in `SwitcherView` exists to prevent, and this
+   * function is the one that feeds the feature, so it gets the same treatment.
+   */
+  private rowFromTarget(target: EventTarget | null): { el: HTMLElement; path: string } | null {
+    const node = this.asNode(target);
+    if (!node || !node.instanceOf(HTMLElement)) return null;
+    const direct = node.closest(SEL.titleWithPath);
+    if (!direct || !direct.instanceOf(HTMLElement)) return null;
+    const path = direct.getAttribute("data-path");
+    const el = direct.closest(SEL.rowWrapper);
+    return path && el && el.instanceOf(HTMLElement) ? { el, path } : null;
+  }
+
+  /**
+   * An event target as a `Node`, or null.
+   *
+   * The same helper, for the same reason, as `SwitcherView.asNode`: the global
+   * `Node` is a different constructor in a popout window, so `instanceof` would
+   * refuse every node there. The `typeof` test is for targets that are not
+   * nodes at all -- a `Window`, which a drag event can carry -- and which
+   * therefore have no `instanceOf` method to call.
+   */
+  private asNode(target: EventTarget | null): Node | null {
+    const node = target as Node | null;
+    return node && typeof node.instanceOf === "function" && node.instanceOf(Node) ? node : null;
+  }
+
   private rowAt(target: EventTarget | null, clientY: number): { el: HTMLElement; path: string } | null {
     const c = this.container;
     if (!c) return null;
 
-    const node = target instanceof HTMLElement ? target : null;
-    const direct = node?.closest(SEL.titleWithPath);
-    if (direct instanceof HTMLElement) {
-      const path = direct.getAttribute("data-path");
-      const el = direct.closest(SEL.rowWrapper);
-      if (path && el instanceof HTMLElement) return { el, path };
-    }
+    const direct = this.rowFromTarget(target);
+    if (direct) return direct;
 
     // Hit test, then nearest-row fallback, bounded by the render window (~49
     // rows). The fallback is not defensive padding: rows are separated by a real
@@ -363,45 +465,162 @@ export class DragOrdering {
     return best;
   }
 
+  /**
+   * Hand `onDragBegin` what this drag carries, once.
+   *
+   * Reading the selection is DOM work only — `querySelectorAll` and a class
+   * test — so it costs no geometry snapshot and both callers below can afford
+   * it.
+   */
+  private publishDrag(row: { el: HTMLElement; path: string } | null): Collected {
+    const collected = row ? this.collectDragged(row) : { paths: [], truncated: false };
+    this.deps.onDragBegin?.(collected.paths, collected.truncated);
+    return collected;
+  }
+
+  /**
+   * Make sure this drag's end reaches `onDragEnd`, whatever happens to the row.
+   *
+   * ALSO on the row itself, not only on the document where `bind` put it. The
+   * explorer renders in blocks and drops them as the pane scrolls, so
+   * autoscrolling far enough during a drag destroys the row the drag started
+   * on. Measured in a running vault with a 240-child folder open: a 3000px
+   * scroll mid-drag replaced 48 of the 49 rendered rows and left
+   * `document.contains(sourceRow)` false. The browser still sends `dragend` to
+   * that node, but an event dispatched at a detached node reaches no listener
+   * on the document, so the teardown never ran and the tree kept every row
+   * translated down until the next drag.
+   *
+   * A node runs its OWN listeners whether or not it is still in the document,
+   * which is the whole point of putting one here. `once` so a row cannot
+   * accumulate one per drag, and `onDragEnd` takes it off explicitly as well
+   * for the ordinary case where the document listener got there first.
+   *
+   * Shared by both paths through `onDragStart` rather than written out on the
+   * armed one, because it is the BLOCKED path where the consequence of
+   * skipping it is worst: that path publishes paths it never arms a teardown
+   * for, and a record that outlives its drag is an act on notes and folders the
+   * user never dragged.
+   */
+  private armDragEnd(el: HTMLElement): void {
+    this.sourceEl = el;
+    el.addEventListener("dragend", this.onDragEnd, { once: true });
+  }
+
   private readonly onDragStart = (e: Event): void =>
     this.guard(() => {
+      // FIRST, before a single path is resolved or published: whatever a
+      // previous drag left behind is finished.
+      //
+      // The invariant this buys is narrow, and the narrowness is the part
+      // that was once stated too generously: once a `dragstart` HAS REACHED
+      // THIS HANDLER, no earlier drag's paths are readable by anything. A
+      // browser cannot start a second drag while one is running, so a
+      // `dragstart` arriving IS proof the last one ended, whether or not its
+      // `dragend` was ever delivered to us.
+      //
+      // "Reached this handler" is the whole qualification, and it is not a
+      // detail. This listener is on the bound explorer CONTAINER (see `bind`),
+      // while `dragover`, `drop` and `dragend` are on the document. A drag
+      // that starts on a tab header, in the editor, or outside Obsidian
+      // altogether never fires a `dragstart` here, so it clears nothing. The
+      // only thing standing between a stale record and such a drag is
+      // `armDragEnd` on the row the previous drag started from, which is why
+      // both paths below arm one.
+      //
+      // Belt to the braces below, not a replacement for them. `publishDrag`
+      // reaches every return path of this handler and `onDragBegin` replaces
+      // the consumer's record, so in the ordinary case this clear changes
+      // nothing. It earns its place in the cases where that is not reached:
+      // `rowFromTarget` or `collectDragged` throwing into `guard`, or a future
+      // early return added above the publish. The cost of being wrong here is
+      // an act on notes and folders the user never dragged, so the record is
+      // emptied before anything can go wrong rather than after.
+      //
+      // Our OWN drag state is cleared alongside, for the same reason and at no
+      // cost: the enabled path below reassigns both a few lines later.
+      this.dragged = [];
+      this.draggedTruncated = false;
+      this.deps.onDragDone?.();
       // Checked per gesture rather than once at bind time — see `bind()`. A
       // blocked attempt is reported once and left inert: `dragover`/`drop` stay
       // silent because `this.dragged` is never populated below.
       if (!this.deps.enabled()) {
         this.deps.onBlockedDrag?.();
+        // ...but what the drag CARRIES is published anyway, because this gate
+        // is not about that. `enabled()` is false when the user turned
+        // reordering off, when `allowReorderingAll` is off and they are in
+        // *All*, when the space renders under an Obsidian sort override, and
+        // while filtering is paused. Every one of those is a statement about
+        // whether a new ORDER may be written. None of them says anything about
+        // whether a note may be put into a space, and gating the publish on
+        // them left the whole drop-on-a-space-icon gesture silently dead — no
+        // icon, no drop, no notice — after one click in the explorer's sort
+        // menu.
+        //
+        // Resolved from the event target alone, which is the honest resolution
+        // for this moment rather than a cheap substitute for one: `dragstart`
+        // fires ON the element carrying `draggable`, so `closest()` is exact.
+        // `rowAt`'s geometry hit test answers "which row is this POINTER over",
+        // a mid-drag question, and asking it here would mean taking the
+        // snapshot this early return exists to avoid paying for.
+        const blocked = this.rowFromTarget(e.target);
+        // ARMED BEFORE THE PUBLISH, and this path needs it exactly as much as
+        // the enabled one does. See the long note at the arming site below for
+        // why a document listener is not enough: `dragend` is dispatched at the
+        // source row, and dropping a note into a folder re-renders the tree and
+        // replaces that row, so the event fires at a detached node that no
+        // document listener can hear.
+        //
+        // Publishing without arming is what made a blocked drag's record
+        // permanent. The user drags a note into a folder with reordering off
+        // (a sort override is enough), Obsidian moves it and replaces the row,
+        // no `onDragDone` ever fires, and the paths sit in the consumer's
+        // record until something clears them. The next unrelated drag across
+        // the space strip -- a tab, a selection dragged out of the editor --
+        // then reads them as a live file drag, lights an icon, and a drop on
+        // it writes members the user never asked for. Nothing about
+        // `enabled()` has any bearing on that, which is the whole reason the
+        // publish moved above the gate; the teardown had to move with it.
+        if (blocked) this.armDragEnd(blocked.el);
+        this.publishDrag(blocked);
         return;
       }
       // Deliberately no preventDefault and no stopPropagation: Obsidian owns
       // the drag, we only observe what is being dragged.
-      // The first snapshot of the drag. `rowAt` answers from it, so without
-      // this the gesture never resolves a row and never registers at all.
-      // A fresh drag measures the tree as it is now, never as a previous drag
-      // left it.
+      // The first snapshot of the drag. `rowAt` falls back to it when the
+      // target resolves no row, and every later handler reads it. A fresh drag
+      // measures the tree as it is now, never as a previous drag left it.
       this.geo.clear();
       this.syncGeometry();
       const row = this.rowAt(e.target, (e as MouseEvent).clientY ?? 0);
       if (!row) {
         this.dragged = [];
+        this.publishDrag(null);
         return;
       }
-      this.sourceEl = row.el;
-      // ALSO on the row itself, not only on the document where `bind` put it.
-      // The explorer renders in blocks and drops them as the pane scrolls, so
-      // autoscrolling far enough during a drag destroys the row the drag
-      // started on. Measured in a running vault with a 240-child folder open:
-      // a 3000px scroll mid-drag replaced 48 of the 49 rendered rows and left
-      // `document.contains(sourceRow)` false. The browser still sends
-      // `dragend` to that node, but an event dispatched at a detached node
-      // reaches no listener on the document, so the teardown never ran and the
-      // tree kept every row translated down until the next drag.
+      // ARMED FROM THE EVENT TARGET, not from `rowAt`'s answer, and the
+      // difference is the original defect's exact shape surviving on the path
+      // everyone assumed was safe.
       //
-      // A node runs its OWN listeners whether or not it is still in the
-      // document, which is the whole point of putting one here. `once` so a
-      // row cannot accumulate one per drag, and removed again below for the
-      // ordinary case where the document listener got there first.
-      row.el.addEventListener("dragend", this.onDragEnd, { once: true });
-      const collected = this.collectDragged(row);
+      // `rowAt` answers "which row is this POINTER over", which is a mid-drag
+      // question: it tries the target first and then falls back to a geometric
+      // nearest-row search, because a pointer in the 2px gap between two rows
+      // still has to resolve to one. At `dragstart` that fallback can hand back
+      // a row the drag did NOT start on, and arming THAT row leaves the real
+      // source with no `dragend` listener of its own. The source is exactly
+      // what gets replaced when a drop re-renders the tree, the document
+      // listener never hears a `dragend` dispatched at a detached node, and the
+      // record then outlives its drag -- which is the chain the blocked path
+      // was fixed for.
+      //
+      // `rowFromTarget` is exact here: `dragstart` fires ON the element
+      // carrying `draggable`, so `closest()` cannot resolve a different row.
+      // The fallback to `row` is kept for the case it cannot resolve one at
+      // all, where arming something beats arming nothing, and it is the
+      // behaviour this line already had.
+      this.armDragEnd((this.rowFromTarget(e.target) ?? row).el);
+      const collected = this.publishDrag(row);
       this.dragged = collected.paths;
       this.draggedTruncated = collected.truncated;
     });
@@ -430,18 +649,24 @@ export class DragOrdering {
    * The tell is geometric and needs nothing private: a selection that reaches
    * the first or last RENDERED row may continue past it — unless the scroller
    * is already at that end of its range.
+   *
+   * **Three of the four returns below are `whole(...)`:** no container, the
+   * dragged row is not selected, or the selected set came back empty. Every one
+   * of them means "just this row, there is no selection to miss", and a one-row
+   * list is never short, so `truncated` is false on all three by construction.
+   * Only the last return reads a selection, and it is therefore the only one
+   * where `truncated` has anything to be right or wrong about.
    */
-  private collectDragged(
-    row: { el: HTMLElement; path: string }
-  ): { paths: string[]; truncated: boolean } {
-    const whole = (paths: string[]): { paths: string[]; truncated: boolean } => ({
-      paths,
-      truncated: false,
-    });
+  private collectDragged(row: { el: HTMLElement; path: string }): Collected {
+    const whole = (paths: string[]): Collected => ({ paths, truncated: false });
     const c = this.container;
     if (!c) return whole([row.path]);
     const self = row.el.querySelector(SEL.titleWithPath);
-    if (!(self instanceof HTMLElement) || !self.matches(SEL.selectedRow)) {
+    // `instanceOf`, not the global `instanceof`: in a popped-out explorer the
+    // window's `HTMLElement` is a different constructor and the global test
+    // refuses every node there. Same defect class as release 0.7.3 and as
+    // `asNode` in `SwitcherView`.
+    if (!(self && self.instanceOf(HTMLElement)) || !self.matches(SEL.selectedRow)) {
       return whole([row.path]);
     }
     // DOM order, which after Slice A's sort is also the visual order. Rendered
@@ -469,6 +694,53 @@ export class DragOrdering {
    * a folder the user has since COLLAPSED is not rendered and is not adjacent
    * to the window's edges either, so this cannot see it. Nothing in the public
    * DOM can.
+   *
+   * SECOND BLIND SPOT, AND A STRUCTURAL ONE: THE TOP-EDGE HALF OF THIS TEST
+   * CANNOT FIRE FOR A SELECTION INSIDE AN EXPANDED FOLDER.
+   *
+   * `rendered[0]` is read to ask whether the selection runs off the TOP of the
+   * render window. Obsidian's virtualiser keeps the ANCESTOR CHAIN of
+   * everything it renders, and a folder's own row is a sibling of the container
+   * holding its children, so an expanded folder's row stays in the DOM however
+   * far its children have scrolled away above the window. `rendered[0]` is
+   * therefore that folder's row and never one of the selected notes, so
+   * `first.matches(SEL.selectedRow)` is false no matter how much of the
+   * selection has detached above. Only the `last` half ever reports anything.
+   *
+   * Measured, not reasoned. It was driven against a running vault with a
+   * 401-note folder expanded: every step of a downward scroll reported the
+   * first rendered row as the folder's own and unselected, while the selected
+   * block drained away above the window. That harness lives outside this
+   * repository, so there is no path here to cite; the measurement is recorded
+   * at the predicate because this is where the person fixing it will look.
+   *
+   * WHAT IT COSTS TODAY. A selection clipped only at the top reports
+   * `truncated: false`, so every consumer acts on the visible fraction. An
+   * earlier version of this paragraph called both outcomes recoverable. One of
+   * them is not, and saying so was the thing stopping anyone sizing this
+   * properly:
+   *
+   *  - The space strip adds the rows it can see as members and reports that
+   *    count as the whole gesture. Recoverable: the members can be removed.
+   *  - `onDrop` is NOT only a reorder. When the drop lands under a different
+   *    parent it calls `moveInto`, which is a filesystem move. `truncated` is
+   *    exactly the flag that makes `onDrop` stand down and hand the gesture
+   *    back to Obsidian, which would then move the WHOLE selection; blind on
+   *    the top edge, it does not stand down, and renames only the fraction it
+   *    can see. Spaces turns a complete native move into a partial one, on
+   *    disk, with nothing of its own to undo it.
+   *
+   * So this is a live partial-move defect, not a recorded annoyance, and the
+   * second bullet is the one that sets the priority. It is PRE-EXISTING: it
+   * belongs to the file-tree drag and predates the space strip, which only ever
+   * writes members. Whoever fixes it should read it as data loss.
+   *
+   * A FIX HAS TO SEE PAST THE ANCESTOR ROWS. Asking whether the first rendered
+   * row that is a LEAF of the selection's own folder is selected, or comparing
+   * the scroller's offset against the selection's own extent, are the two
+   * shapes worth trying. Neither has been attempted, and `.is-selected` is not
+   * authoritative in the first place (see `collectDragged`), so anything built
+   * here needs its own measurement against a real virtualised tree.
    */
   private selectionMayBeClipped(rendered: readonly Element[]): boolean {
     const c = this.container;
@@ -658,6 +930,7 @@ export class DragOrdering {
       this.clearIndicator(true);
       this.dragged = [];
       this.draggedTruncated = false;
+      this.deps.onDragDone?.();
       // Taken off explicitly as well as by `once`: this handler is reached
       // from the document listener too, and that path leaves the row's own
       // listener armed for a drag that is already over.

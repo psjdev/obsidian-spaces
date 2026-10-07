@@ -239,10 +239,8 @@ describe("decorate (Stop showing here on visitor rows)", () => {
 
   it("offers no Add entry for a row the space already inherits", () => {
     // The row is in the space through a folder, which the disabled entry
-    // above it names. `addAll` dedupes against the space's path members alone
-    // and never consults `inheritedFromFolder`, so accepting the offer wrote a
-    // redundant exact member: nothing visible changed, and removing the folder
-    // afterwards no longer took the row with it.
+    // above it names. `addAll` asks `heldBy` and would report it as already
+    // there, so an Add entry would offer a change that cannot happen.
     const { menu, items } = fakeMenu();
     decorate(
       menu,

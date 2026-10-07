@@ -22,6 +22,8 @@ import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
 import { resolveLivePath } from "../visibility/resolveLivePath";
 import { hasRoot } from "../visibility/folderSpace";
 import { normalizeTag } from "../visibility/tagMatch";
+import { resolveMembers } from "../controller/resolveMembers";
+import type { TagIndex } from "../visibility/TagIndex";
 
 /**
  * The innermost ancestor folder that is itself an exact member -- the folder
@@ -194,4 +196,58 @@ export function watchesMetadata(space: SpaceDefinition | null): boolean {
   if (space === null) return false;
   if (hasRoot(space)) return false;
   return space.members.some((m) => m.kind === "tag");
+}
+
+
+/**
+ * Every path this space RESOLVES to, canonical.
+ *
+ * `resolveMembers`, not `pathMembers`: a note the space holds through a tag
+ * member is already in it, and offering to add it wrote a second, redundant
+ * claim on a path the space had anyway. This is the same expansion the
+ * visibility engine is handed, so a caller and the tree agree by construction
+ * rather than by two implementations staying in step.
+ *
+ * Canonical, matching what the add dedupes with. An exact compare offers a
+ * differently-cased path as addable, then the add drops it as a duplicate and
+ * still reports it added.
+ *
+ * Built ONCE per space and closed over, never once per selected path: a tag
+ * member costs a pass over the vault's notes to expand, and a selection of
+ * fifty files would otherwise pay for fifty of them.
+ */
+export function resolvedPaths(space: SpaceDefinition, tags: TagIndex): Set<string> {
+  return new Set(resolveMembers(space, tags).map((m) => canonicalPath(m.path)));
+}
+
+/**
+ * Already held by this space, whether resolved directly or covered by a folder.
+ *
+ * THE question every add path has to ask, which is why it lives here beside
+ * `inheritedFromFolder` rather than in whichever module needed it first.
+ * `spaceAddTargets` owned it while the *All* menu was the only caller; a drop
+ * on a space icon is a second one, and `pathMembers` is not a weaker version
+ * of this question but a different one -- it answers what the space STORES,
+ * not what it SHOWS. An add that dedupes on the former writes an explicit
+ * member for a path the space already displayed through a tag or a folder,
+ * and `resolveMembers` never drops a hand-picked member, so that member then
+ * outlives the tag or folder that justified it.
+ */
+export function heldBy(
+  space: SpaceDefinition,
+  resolved: Set<string>,
+  path: string
+): { held: boolean; viaFolder: string | null } {
+  if (resolved.has(canonicalPath(path))) return { held: true, viaFolder: null };
+  const folder = inheritedFromFolder(space, path);
+  if (folder === null) return { held: false, viaFolder: null };
+  // Folder coverage is the engine's inherited-descendants step, not a seed,
+  // so an exclusion still beats it here -- the same precedence
+  // `SpacesApi.isMember` applies. An explicit path member never reaches this
+  // branch: `resolved` (built from `resolveMembers`, which never drops a
+  // hand-picked member) already answered `held: true` for it above, exclusion
+  // included.
+  const excluded = (space.exclude ?? []).some((e) => canonicalPath(e) === canonicalPath(path));
+  if (excluded) return { held: false, viaFolder: null };
+  return { held: true, viaFolder: folder };
 }

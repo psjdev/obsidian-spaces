@@ -111,7 +111,12 @@ async function build(withHeader = true) {
     controller,
     () => undefined,
     () => false,
-    () => undefined
+    () => undefined,
+    {
+      dragged: () => ({ paths: [], truncated: false }),
+      onDropped: () => undefined,
+      onRefused: () => undefined,
+    }
   );
 
   // The pane rows the strip aligns to, in the order the explorer builds them.

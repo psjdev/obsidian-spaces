@@ -49,7 +49,12 @@ async function mount(style: ActiveSpaceStyle) {
     controller,
     () => undefined,
     () => false,
-    () => undefined
+    () => undefined,
+    {
+      dragged: () => ({ paths: [], truncated: false }),
+      onDropped: () => undefined,
+      onRefused: () => undefined,
+    }
   );
   const host = document.createElement("div");
   document.body.appendChild(host);

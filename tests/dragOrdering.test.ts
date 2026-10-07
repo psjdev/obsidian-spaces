@@ -82,6 +82,18 @@ function visibleLines(): number {
   return document.querySelectorAll(".spaces-drop-line:not([hidden])").length;
 }
 
+/**
+ * Fire on the row's `.tree-item-self`, which is where Obsidian puts `data-path`
+ * and `draggable` and therefore where the browser fires a real `dragstart`.
+ * `fire` below targets the WRAPPER, which carries neither, so a handler that
+ * resolves its row from the event target cannot answer from it. Both are kept:
+ * the wrapper form exercises the geometry hit test, this one the target form.
+ */
+function fireOnSelf(el: HTMLElement, type: string, clientY: number): Event {
+  const self = el.querySelector(".tree-item-self") as HTMLElement;
+  return fire(self, type, clientY);
+}
+
 function fire(el: HTMLElement, type: string, clientY: number): Event {
   const e = new MouseEvent(type, { bubbles: true, cancelable: true, clientY });
   el.dispatchEvent(e);
@@ -142,6 +154,290 @@ describe("DragOrdering", () => {
     d.bind(tree.container);
     return d;
   }
+
+  describe("publishing the drag", () => {
+    it("hands onDragBegin the collected paths at dragstart, and onDragDone at dragend", () => {
+      const onDragBegin = vi.fn();
+      const onDragDone = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      deps.onDragDone = onDragDone;
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      // The ARGUMENT is the point: a version that published [] every time
+      // would still satisfy "it was called".
+      expect(onDragBegin).toHaveBeenCalledTimes(1);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false);
+      // ONE, not zero: `dragstart` clears whatever a previous drag left behind
+      // before it publishes anything. See the ordering test below.
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * The invariant: once a `dragstart` has begun, no earlier drag's paths are
+     * readable by anything.
+     *
+     * The ORDER is the whole assertion. A clear that ran after the publish
+     * would empty the record this drag has just filled, so a version that moved
+     * the `onDragDone` call below `publishDrag` fails here while passing the
+     * count above. A version that drops the clear altogether fails here too.
+     *
+     * Worth paying for even though `onDragBegin` already replaces the
+     * consumer's record, because the clear runs before anything that can throw:
+     * `rowFromTarget` and `collectDragged` both read the DOM inside `guard`, and
+     * a throw there would leave the publish unreached and the previous drag's
+     * paths live.
+     */
+    it("clears the previous drag before publishing the new one", () => {
+      const calls: string[] = [];
+      deps.onDragBegin = () => calls.push("begin");
+      deps.onDragDone = () => calls.push("done");
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      expect(calls).toEqual(["done", "begin"]);
+    });
+
+    /**
+     * The data-loss defect, at the layer that introduced it.
+     *
+     * A blocked drag published its paths and armed no teardown of its own, so
+     * it depended entirely on the DOCUMENT listener. Obsidian replaces the
+     * source row whenever a drop re-renders the tree, which dropping a note
+     * into a folder does every time, and a `dragend` dispatched at a DETACHED
+     * node reaches no listener on the document. The record then outlived its
+     * drag: the next unrelated drag across the space strip read those paths as
+     * a live file drag, lit an icon, and a drop on a folder-pinned space would
+     * have called `renameFile` on files the user never touched.
+     *
+     * The row is detached here before `dragend` is dispatched AT it, which is
+     * what the browser does. Removing `armDragEnd` from the blocked path leaves
+     * the count at 1 (the clear at `dragstart`) and fails this.
+     */
+    it("ends a BLOCKED drag whose source row was replaced mid-gesture", () => {
+      const onDragDone = vi.fn();
+      deps.onDragBegin = vi.fn();
+      deps.onDragDone = onDragDone;
+      enabled = false;
+      boundDrag();
+      const row = tree.rows["F/a.md"];
+      fireOnSelf(row, "dragstart", 4);
+      // One so far: the clear that opens `onDragStart`.
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+      row.remove();
+      expect(document.contains(row)).toBe(false);
+      row.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
+    });
+
+    // The same guarantee on the armed path, which has had it since the row
+    // listener was added. Kept beside its blocked twin so the two cannot drift.
+    it("ends an ARMED drag whose source row was replaced mid-gesture", () => {
+      const onDragDone = vi.fn();
+      deps.onDragBegin = vi.fn();
+      deps.onDragDone = onDragDone;
+      boundDrag();
+      const row = tree.rows["F/a.md"];
+      fire(row, "dragstart", 4);
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+      row.remove();
+      row.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * The armed path arms the row the EVENT fired on, not the row the pointer
+     * happens to be over.
+     *
+     * `rowAt` answers a mid-drag question -- which row is this pointer over --
+     * and falls back to a geometric nearest-row search to do it, because the
+     * 2px gap between rows would otherwise be a dead zone. At `dragstart` that
+     * fallback can answer with a row the drag did not start on, and arming THAT
+     * row leaves the real source with no `dragend` listener: the original
+     * stale-record defect's exact shape, on the path everyone assumed was safe.
+     *
+     * The pointer is put over the SECOND row while the event fires on the
+     * first. `rowAt` resolves the target first today, so this passes either
+     * way; what it pins is that arming stops depending on that internal
+     * precedence. Reorder `rowAt` to try geometry first and this is the test
+     * that fails.
+     */
+    it("arms the row the dragstart fired on, not the row under the pointer", () => {
+      const onDragDone = vi.fn();
+      deps.onDragBegin = vi.fn();
+      deps.onDragDone = onDragDone;
+      boundDrag();
+      const row = tree.rows["F/a.md"];
+      // Well inside `F/b.md`'s stubbed rect, so a geometric answer differs.
+      fireOnSelf(row, "dragstart", ROW_H + ROW_H / 2);
+      expect(onDragDone).toHaveBeenCalledTimes(1);
+      row.remove();
+      row.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(2);
+    });
+
+    it("publishes an empty list for a dragstart that lands on no row", () => {
+      const onDragBegin = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      fire(tree.container, "dragstart", 9999);
+      expect(onDragBegin).toHaveBeenCalledTimes(2);
+      expect(onDragBegin).toHaveBeenLastCalledWith([], false);
+    });
+
+    /**
+     * The flag travels WITH the paths, and that is the merge blocker.
+     *
+     * `collectDragged` already answers "this list may be short" and `onDrop`
+     * already declines its own drop on it. A consumer given only the paths
+     * cannot tell a clipped selection from a small complete one, so it acts on
+     * the visible fraction of one gesture and reports that as the whole of it.
+     * On the space strip that fraction is a `renameFile` per path.
+     */
+    it("publishes the clipping answer alongside the paths", () => {
+      const onDragBegin = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      // The tell `selectionMayBeClipped` reads: the FIRST rendered row is
+      // selected while the scroller is away from the top, so the selection may
+      // continue above the render window into rows the DOM does not hold.
+      const aSelf = tree.rows["F/a.md"].querySelector(".tree-item-self") as HTMLElement;
+      const bSelf = tree.rows["F/b.md"].querySelector(".tree-item-self") as HTMLElement;
+      aSelf.classList.add(SEL.selectedRow.slice(1));
+      bSelf.classList.add(SEL.selectedRow.slice(1));
+      tree.container.scrollTop = 50;
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], true);
+    });
+
+    // The negative control. Without it a version that published `true` for
+    // every multi-selection would pass the test above.
+    it("publishes false when the scroller is at the top and nothing can be hidden", () => {
+      const onDragBegin = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      const aSelf = tree.rows["F/a.md"].querySelector(".tree-item-self") as HTMLElement;
+      const bSelf = tree.rows["F/b.md"].querySelector(".tree-item-self") as HTMLElement;
+      aSelf.classList.add(SEL.selectedRow.slice(1));
+      bSelf.classList.add(SEL.selectedRow.slice(1));
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md", "F/b.md"], false);
+    });
+
+    /**
+     * Reordering being switched off does not make the drag invisible.
+     *
+     * `enabled()` answers one question: may a new ORDER be written. It is false
+     * for the reordering setting, for *All* when `allowReorderingAll` is off,
+     * for a space under an Obsidian sort override, and while filtering is
+     * paused. None of those is a statement about whether a note may be put
+     * into a space, so publishing what the drag carries used to sit below this
+     * gate and the whole drop-on-a-space-icon gesture died silently after one
+     * click in the explorer's sort menu.
+     */
+    it("publishes what a drag carries even when reordering is disabled", () => {
+      const onDragBegin = vi.fn();
+      const onBlockedDrag = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      deps.onBlockedDrag = onBlockedDrag;
+      enabled = false;
+      boundDrag();
+      fireOnSelf(tree.rows["F/a.md"], "dragstart", 4);
+      expect(onDragBegin).toHaveBeenCalledWith(["F/a.md"], false);
+      // The gate itself still holds: the drag is published, not armed.
+      expect(onBlockedDrag).toHaveBeenCalledTimes(1);
+      fire(tree.rows["F/b.md"], "drop", ROW_H * 2 - 2);
+      expect(writeOrder).not.toHaveBeenCalled();
+    });
+
+    /**
+     * And it costs nothing to do so.
+     *
+     * The early return exists so a blocked drag does not measure the tree.
+     * `syncGeometry` begins by measuring the CONTAINER, so counting that one
+     * call is an exact test of whether the snapshot was taken.
+     *
+     * The mutation it catches, stated honestly: hoisting `syncGeometry()` above
+     * the gate. Hoisting `rowAt` alone would NOT fail this -- `rowAt` reads the
+     * geometry cache rather than filling it, and with an empty cache in jsdom
+     * it measures no container of its own -- so naming `rowAt` here, as this
+     * note used to, named a mutation the test does not catch.
+     */
+    it("takes no geometry snapshot on the blocked path", () => {
+      deps.onDragBegin = vi.fn();
+      enabled = false;
+      boundDrag();
+      let measured = 0;
+      const real = tree.container.getBoundingClientRect.bind(tree.container);
+      tree.container.getBoundingClientRect = () => {
+        measured++;
+        return real();
+      };
+      fireOnSelf(tree.rows["F/a.md"], "dragstart", 4);
+      expect(measured).toBe(0);
+    });
+
+    /**
+     * The branch of `collectDragged` that reads other rows, and the three that
+     * do not.
+     *
+     * A selection is collected only when the DRAGGED row is itself part of it.
+     * A selection sitting elsewhere in the tree is not this drag's business,
+     * and a drag that resolves no row carries nothing at all.
+     */
+    it("collects a selection only when the dragged row is part of it", () => {
+      const onDragBegin = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      const aSelf = tree.rows["F/a.md"].querySelector(".tree-item-self") as HTMLElement;
+      const bSelf = tree.rows["F/b.md"].querySelector(".tree-item-self") as HTMLElement;
+      aSelf.classList.add(SEL.selectedRow.slice(1));
+      bSelf.classList.add(SEL.selectedRow.slice(1));
+      boundDrag();
+      // Dragged row IS selected: the only branch that reads other rows.
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      expect(onDragBegin).toHaveBeenLastCalledWith(["F/a.md", "F/b.md"], false);
+      // Dragged row is NOT selected, though a selection exists elsewhere. One
+      // row, whole, and not a selection as far as this drag is concerned.
+      fire(tree.rows["G"], "dragstart", ROW_H * 2 + 4);
+      expect(onDragBegin).toHaveBeenLastCalledWith(["G"], false);
+    });
+
+    it("has not called onDragDone when a DECLINED drop reaches a bubble listener", () => {
+      // The guarantee this hook exists for. A drop on a folder's middle is
+      // declined by the capture handler (Obsidian owns that move), so it
+      // propagates on to whatever listens in the bubble phase, which is where
+      // the space strip will be. The paths must still be live there.
+      //
+      // A CLAIMED drop is different on purpose: `endNativeDrag` dispatches a
+      // synthetic dragend, so onDragDone fires during it. Nothing else should
+      // be acting on a drop this class has already consumed.
+      const onDragBegin = vi.fn();
+      const onDragDone = vi.fn();
+      deps.onDragBegin = onDragBegin;
+      deps.onDragDone = onDragDone;
+      let doneAtBubble = -1;
+      // Read INSIDE the bubble listener, the window the strip reads in. Checking
+      // after the fact would not prove the paths were live at that moment.
+      let begunAtBubble: unknown[][] = [];
+      tree.rows["G"].addEventListener("drop", () => {
+        doneAtBubble = onDragDone.mock.calls.length;
+        begunAtBubble = onDragBegin.mock.calls.map((c) => [...c]);
+      });
+      boundDrag();
+      fire(tree.rows["F/a.md"], "dragstart", 4);
+      // Counted FROM the dragstart, not from zero: `onDragStart` opens by
+      // clearing the previous drag, so one call is already on the books and is
+      // not the one this test is about. What must not have happened is a
+      // SECOND call between the publish and the bubble listener.
+      const doneAtStart = onDragDone.mock.calls.length;
+      fire(tree.rows["G"], "drop", 48 + ROW_H / 2);
+      expect(doneAtBubble).toBe(doneAtStart);
+      expect(begunAtBubble).toEqual([[["F/a.md"], false]]);
+      document.dispatchEvent(new Event("dragend", { bubbles: true }));
+      expect(onDragDone).toHaveBeenCalledTimes(doneAtStart + 1);
+    });
+  });
 
   it("NEVER preventDefaults a dragstart", () => {
     // The constraint with the widest blast radius: suppressing dragstart breaks
