@@ -70,6 +70,22 @@ export interface SeamHarness {
   filterAndOrderFolder(folderPath: string, items: FolderItemLike[]): FolderItemLike[];
   /** The plugin's own `livePermits`, so the subset guard can be asserted directly. */
   livePermits(folderPath: string, itemPath: string | undefined): boolean;
+  /**
+   * The vault root's rows out of the REAL patched seam: `ensureOrderingPatched()`
+   * installs the override, and this then calls the view's own (now overridden)
+   * `getSortedFolderItems`.
+   *
+   * The distinction `tests/folderSpaceHoistSeam.test.ts` exists for. Reaching
+   * `plugin["filterAndOrderFolder"]` by hand bypasses `patch()` entirely — the
+   * `isAllowed` guard and the raw-items fallback at
+   * `nativeExplorerSort.ts:214` are never on the stack — so a transform
+   * returning an out-of-input row that nothing admits still looks correct.
+   * Compaction is the SECOND producer of out-of-input rows, and this is how it
+   * is held to the same standard.
+   */
+  sortRootThroughSeam(): FolderItemLike[];
+  /** What the seam falls back to on a rejection: the raw, unfiltered rows. */
+  rawRootItems(): FolderItemLike[];
 }
 
 function nameOf(path: string): string {
@@ -195,10 +211,37 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
 
   // The pane `itemsForPaths` reads the substituted tip off. Obsidian keeps an
   // item for every path in the vault, rendered or not, so every node is here.
+  //
+  // `fileItems` is also where the NATIVE sort below reads from, so a row that
+  // arrives as input and the same row looked up as a substitution tip are the
+  // same object — which is what makes the seam's identity-based subset rule
+  // mean anything here: the head is in-input, the tip is not.
+  const fileItems: Record<string, FolderItemLike> = Object.fromEntries(
+    [...nodes.keys()].map((p) => [p, folderItem(p)])
+  );
+  const rootNode = nodes.get("");
+  // Enough of an explorer view for `probe()` to answer "ok", so
+  // `ensureOrderingPatched` will install the real override on it.
   const view = {
-    fileItems: Object.fromEntries([...nodes.keys()].map((p) => [p, folderItem(p)])),
+    fileItems,
+    sortOrder: "alphabetical",
+    // Per folder, the way Obsidian's does: the RAW, unfiltered children. This
+    // is what `patch`'s override hands the transform, and what it falls back
+    // to when `isAllowed` rejects the result.
+    getSortedFolderItems(folder: unknown): FolderItemLike[] {
+      const kids = (folder as { children?: { path: string }[] } | null)?.children;
+      if (!Array.isArray(kids)) return [];
+      return kids.flatMap((c) => (fileItems[c.path] ? [fileItems[c.path]] : []));
+    },
+    sort(): void {
+      // Nothing to re-render here.
+    },
   };
   (plugin as unknown as { explorerViews: () => object[] }).explorerViews = () => [view];
+  // Captured BEFORE the patch, or this would call the override and report the
+  // seam's own output as though it were the raw tree.
+  const nativeSortRoot = view.getSortedFolderItems.bind(view);
+  const rawRootItems = (): FolderItemLike[] => nativeSortRoot(rootNode ?? null);
 
   // THE point of this harness: the real apply path, which is what calls
   // `rebuildChainIndex`.
@@ -210,5 +253,13 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
     filterAndOrderFolder: (folderPath, items) =>
       plugin["filterAndOrderFolder"](folderPath, items, view),
     livePermits: (folderPath, itemPath) => plugin["livePermits"](folderPath, itemPath),
+    sortRootThroughSeam: () => {
+      // The production install, not a hand-rolled `patch()` call: it is what
+      // supplies `livePermits` as the seam's `permits` argument, and that
+      // argument is the thing under test.
+      plugin["ensureOrderingPatched"]();
+      return view.getSortedFolderItems(rootNode ?? null);
+    },
+    rawRootItems,
   };
 }

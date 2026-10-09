@@ -1220,6 +1220,16 @@ export default class SpacesPlugin extends Plugin {
       // paused state, so the next recompute cannot paint them back. See its
       // comment for why the guard lives there and not at this call site.
       this.applyAdapterSnapshot(null);
+      // The chain index is the adapter's OTHER input, and the guard inside
+      // `applyAdapterSnapshot` does not cover it. Left live it describes runs
+      // in a tree that is now the whole vault — the same mismatch the dimming
+      // would be, so it is cleared in the same place and for the same reason.
+      //
+      // Clearing here is again only half of it: `onSnapshotApplied` keeps
+      // arriving while paused (every `file-open`, every coalesced vault
+      // flush) and would rebuild it, so `rebuildChainIndex` holds the paused
+      // state itself, exactly as `applyAdapterSnapshot` does.
+      this.chainIndexNow = null;
     } else {
       this.ensureOrderingPatched();
       // And put it back, explicitly. Nothing else re-seeds the adapter:
@@ -1235,6 +1245,13 @@ export default class SpacesPlugin extends Plugin {
       //
       // Optional on the controller for the same reason `start()`'s repaint
       // steps are: the resume can be reached before `start()` has built one.
+      // Rebuilt before the adapter is applied, the same order
+      // `onSnapshotApplied` uses, and for the same reason: the adapter's pass
+      // reads this index. Needed explicitly here because resume does NOT go
+      // through `onSnapshotApplied` — without it the index would stay null
+      // until some unrelated recompute happened along, and compaction would
+      // silently not come back with the filtering it was paused beside.
+      this.rebuildChainIndex(this.controller?.currentSnapshot() ?? null);
       this.applyAdapterSnapshot(this.controller?.currentSnapshot() ?? null);
       this.applyFilterAndOrdering();
     }
@@ -1977,7 +1994,14 @@ export default class SpacesPlugin extends Plugin {
       // Substituted, then filtered and ordered like any other folder's items.
       // Returning here would skip both — `globalIgnore` would stop applying and
       // the saved order for this level would be ignored.
-      if (hoisted !== null) return this.filterAndOrderFolder(root, hoisted);
+      // `view` is passed ON, not dropped. `substituteCompacted` resolves a
+      // run's tip through `itemsForPaths(view, …)`, so a recursion that
+      // forgot the pane would hand it null, resolve nothing, and leave a
+      // folder space's hoisted root the one level in the space that never
+      // compacts. The extra argument reaches nothing else: this branch
+      // re-enters only if `root` were also the vault root, which
+      // `activeSpaceRoot()` never returns (see the comment above).
+      if (hoisted !== null) return this.filterAndOrderFolder(root, hoisted, view);
     }
 
     // Picking a sort sets `view.sortOrder` then calls `sort()`, which
@@ -2262,7 +2286,13 @@ export default class SpacesPlugin extends Plugin {
   private chainIndexNow: ChainIndex | null = null;
 
   private rebuildChainIndex(snap: VisibilitySnapshot | null): void {
-    if (snap === null || !this.defs.get().settings.compactFolderChains) {
+    // Paused means the tree is the whole vault, so there are no scaffold runs
+    // to describe. Guarded HERE rather than at `setFilteringPaused`'s call
+    // site alone, for the reason `applyAdapterSnapshot` gives for its own
+    // copy of this check: `onSnapshotApplied` reaches this on every
+    // `file-open` and every coalesced vault flush, and `SpaceController`
+    // knows nothing about the pause, so it keeps handing over a live snapshot.
+    if (snap === null || this.filteringPaused || !this.defs.get().settings.compactFolderChains) {
       this.chainIndexNow = null;
       return;
     }
@@ -2368,10 +2398,12 @@ export default class SpacesPlugin extends Plugin {
    * ACROSS calls is the bug above.
    */
   private readonly livePermits: Permits = (folderPath, itemPath) => {
-    // Two independent reasons an out-of-input item may be returned, checked
-    // separately so a bug in one cannot admit what the other would refuse:
-    // a folder space hoisting its root's children, and a compacted run
-    // substituting its tip.
+    // Two independent reasons an out-of-input item may be returned: a folder
+    // space hoisting its root's children, and a compacted run substituting
+    // its tip. Each is decided from its own state, so neither can CORRUPT the
+    // other's computation — which is all separation buys here. It is a
+    // disjunction, so either half alone admits; separation is not a second
+    // gate, and neither half can veto the other.
     if (this.permitsForThisCall?.(folderPath, itemPath) ?? false) return true;
     return typeof itemPath === "string" && this.admittedThisCall.has(itemPath);
   };
@@ -2386,11 +2418,25 @@ export default class SpacesPlugin extends Plugin {
    * Deliberately NOT cleared after the call. Clearing on entry to
    * `filterAndOrderFolder` would wipe it during the hoist branch's own
    * recursive call, and `isAllowed` reads it AFTER `transform` returns, so the
-   * value must outlive the function that set it. A leftover is harmless only
-   * because of an invariant across the seam: outside the hoist branch every
-   * folder's `out` is an identity subset of `items`, so `isAllowed`
-   * short-circuits and never consults the predicate. If that changes, this
-   * field needs an explicit lifetime.
+   * value must outlive the function that set it.
+   *
+   * WHY A LEFTOVER IS STILL HARMLESS, restated for compaction. This used to
+   * rest on "outside the hoist branch every folder's `out` is an identity
+   * subset of `items`, so `isAllowed` short-circuits and never consults the
+   * predicate". That is no longer true: `substituteCompacted` can return a
+   * run's tip for ANY folder, so `isAllowed` now does consult `livePermits`
+   * for ordinary folders, and `livePermits` reads this field first — possibly
+   * a value left behind by an earlier call for a space that is no longer
+   * active.
+   *
+   * It is harmless because of a different fact, which now carries the weight:
+   * `makePermits` answers false for every folder but the vault root
+   * (`folderSpace.ts:113`, `if (!isVaultRoot(folderPath)) return false`). A
+   * stale predicate therefore cannot admit anything at the folders compaction
+   * newly brings here, and at the vault root of an ACTIVE folder space the
+   * hoist branch has already overwritten this field in the same call. That
+   * line is load-bearing: weaken it and this field needs an explicit lifetime
+   * after all.
    */
   private permitsForThisCall: Permits | null = null;
 

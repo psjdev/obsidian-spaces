@@ -135,3 +135,60 @@ describe("compaction does not break the two things around it", () => {
     expect(h.livePermits("", "Secret")).toBe(false);
   });
 });
+
+/**
+ * The same guard, through the REAL seam.
+ *
+ * Everything above reaches `plugin["filterAndOrderFolder"]` by hand, which
+ * never puts `patch()`'s override, `isAllowed`, or the raw-items fallback at
+ * `nativeExplorerSort.ts:214` on the stack — exactly the gap
+ * `tests/folderSpaceHoistSeam.test.ts` was written for, now that compaction is
+ * the SECOND producer of out-of-input rows.
+ *
+ * The "renders no row with compaction on" test above cannot close it:
+ * `Secret` is dropped by `filterVisibleItems` whatever `livePermits` answers,
+ * which is why that test was one of the four that PASSED during the red run,
+ * before `livePermits` was touched.
+ */
+describe("compaction through the real sort seam", () => {
+  function patchedHarness(): ReturnType<typeof makePluginForSeam> {
+    return makePluginForSeam({
+      compactFolderChains: true,
+      tree: {
+        "": ["Secret", "Work"],
+        Work: ["Work/Clients"],
+        "Work/Clients": ["Work/Clients/a.md"],
+        Secret: ["Secret/private.md"],
+      },
+      visible: ["Work", "Work/Clients", "Work/Clients/a.md"],
+      members: ["Work/Clients/a.md"],
+    });
+  }
+
+  it("accepts the substituted tip instead of falling back to the raw vault root", () => {
+    const h = patchedHarness();
+    // The fallback this must not take: every row the space excludes, rendered.
+    expect(h.rawRootItems().map((i) => i.file?.path)).toEqual(["Secret", "Work"]);
+
+    const out = h.sortRootThroughSeam();
+
+    // The tip is out-of-input by construction, so `isAllowed`'s identity half
+    // cannot have passed it: this array existing at all IS the admission
+    // working. Drop the `admittedThisCall` line from `livePermits` and
+    // `isAllowed` refuses the whole array, `patch` returns `items`, and this
+    // reads ["Secret", "Work"] — the vault inside the space, with the
+    // compaction undone as well.
+    expect(out.map((i) => i.file?.path)).toEqual(["Work/Clients"]);
+    expect(out.map((i) => i.file?.path)).not.toContain("Secret");
+  });
+
+  it("hands back its own rows, not the raw items the fallback would return", () => {
+    const h = patchedHarness();
+    const raw = h.rawRootItems();
+    const out = h.sortRootThroughSeam();
+    // `patch` returns the INPUT array when it rejects, so "is this the
+    // fallback?" is a question about the array, not only about its contents.
+    expect(out).not.toEqual(raw);
+    expect(out).toHaveLength(1);
+  });
+});
