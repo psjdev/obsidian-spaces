@@ -135,10 +135,19 @@ interface ResortSignature {
   order: OrderMap | undefined;
   /** The snapshot's own visible set, or null for *All*, where nothing filters. */
   visible: Set<string> | null;
+  /**
+   * `chainIndexNow`, by identity. Compaction changes what the seam RETURNS
+   * without moving visibility, so toggling the setting moves none of the
+   * other three fields. `rebuildChainIndex` allocates a fresh index per
+   * snapshot, so identity over-invalidates and never under-invalidates.
+   */
+  chainIndex: ChainIndex | null;
 }
 
-function sameResortSignature(a: ResortSignature, b: ResortSignature): boolean {
+/** Exported only so `tests/resortMemoChainIndex.test.ts` can state the key in its own terms. */
+export function sameResortSignature(a: ResortSignature, b: ResortSignature): boolean {
   if (a.selection !== b.selection || a.order !== b.order) return false;
+  if (a.chainIndex !== b.chainIndex) return false;
   if (a.visible === b.visible) return true;
   if (!a.visible || !b.visible) return false;
   // Membership, not a serialisation: this runs on every commit, and sorting
@@ -2635,7 +2644,11 @@ export default class SpacesPlugin extends Plugin {
    * `buildVisibilitySnapshot` answers that with `visible.has(p)` and nothing
    * else); the resolved order map by identity (`DefinitionStore.mutate` clones
    * on every write, so it over-invalidates, never under); and the selection,
-   * so two spaces showing the same rows are told apart. Outside the key are
+   * so two spaces showing the same rows are told apart; and the chain index
+   * (`chainIndexNow`) by identity, because compaction changes what the seam
+   * RETURNS without changing visibility, so flipping `compactFolderChains`
+   * moves none of the other three and the tree would keep its old shape.
+   * Outside the key are
    * only Obsidian's own triggers — a vault mutation re-sorts that folder
    * anyway, a native sort-mode pick calls `sort()` itself — plus a freshly
    * patched view, which `ensureOrderingPatched` invalidates explicitly. If
@@ -2653,7 +2666,7 @@ export default class SpacesPlugin extends Plugin {
     this.lastResort = every ? signature : null;
   }
 
-  /** See `applyFilterAndOrdering` for why these three fields and no others. */
+  /** See `applyFilterAndOrdering` for why these four fields and no others. */
   private currentResortSignature(): ResortSignature {
     const selection = this.runtime.getSelection();
     const snapshot = this.controller.currentSnapshot();
@@ -2661,6 +2674,7 @@ export default class SpacesPlugin extends Plugin {
       selection: selection.kind === "all" ? "all" : `space:${selection.id}`,
       order: this.orderMapFor(),
       visible: snapshot ? snapshot.visiblePaths() : null,
+      chainIndex: this.chainIndexNow,
     };
   }
 

@@ -86,6 +86,9 @@ export interface SeamHarness {
   sortRootThroughSeam(): FolderItemLike[];
   /** What the seam falls back to on a rejection: the raw, unfiltered rows. */
   rawRootItems(): FolderItemLike[];
+  /** The plugin and its one explorer view, for tests that drive the re-sort memo. */
+  plugin: SpacesPlugin;
+  view: { sort(): void };
 }
 
 function nameOf(path: string): string {
@@ -261,5 +264,7 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
       return view.getSortedFolderItems(rootNode ?? null);
     },
     rawRootItems,
+    plugin,
+    view,
   };
 }
