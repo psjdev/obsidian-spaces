@@ -76,6 +76,11 @@ import {
   type SortSeamStatus,
 } from "./layout/nativeExplorerSort";
 import { filterVisibleItems } from "./visibility/visibleItems";
+import {
+  buildChainIndex,
+  type ChainIndex,
+  type ChainTree,
+} from "./visibility/compactChains";
 import type { VisibilitySnapshot } from "./visibility/VisibilityEngine";
 import {
   elsewhereOf,
@@ -1933,6 +1938,7 @@ export default class SpacesPlugin extends Plugin {
     items: FolderItemLike[],
     view?: object | null
   ) => FolderItemLike[] = (folderPath, items, view) => {
+    this.admittedThisCall.clear();
     // Folder spaces. The vault root is answered with the
     // ROOT FOLDER's children, so the root itself never renders and its contents
     // sit at depth 0. Everything at or under the root is served by its own
@@ -1998,14 +2004,14 @@ export default class SpacesPlugin extends Plugin {
     const visible = filterVisibleItems(items, this.controller.currentSnapshot());
 
     const map = this.orderMapFor();
-    if (!map) return visible;
+    if (!map) return this.substituteCompacted(visible, view ?? null);
     // Obsidian's root folder path is "/"; storage uses "".
     // Own-property lookup: a folder legitimately named `constructor` or
     // `hasOwnProperty` would otherwise resolve up the prototype chain and hand
     // back a function.
     const key = folderPath === "/" ? "" : folderPath;
     const order = Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
-    if (!order) return visible;
+    if (!order) return this.substituteCompacted(visible, view ?? null);
 
     const byPath = new Map<string, FolderItemLike>();
     const live: string[] = [];
@@ -2014,12 +2020,68 @@ export default class SpacesPlugin extends Plugin {
       // An item we cannot key cannot be ordered safely. Leave the folder
       // natively sorted rather than partially ordered — a predictable no-op
       // beats a tree that is subtly missing something — but still FILTERED.
-      if (typeof p !== "string" || byPath.has(p)) return visible;
+      if (typeof p !== "string" || byPath.has(p)) {
+        return this.substituteCompacted(visible, view ?? null);
+      }
       byPath.set(p, item);
       live.push(p);
     }
-    return applyOrder(order, live).map((p) => byPath.get(p) as FolderItemLike);
+    return this.substituteCompacted(
+      applyOrder(order, live).map((p) => byPath.get(p) as FolderItemLike),
+      view ?? null
+    );
   };
+
+  /**
+   * Swap each compacted run's head for its tip, in place.
+   *
+   * IN PLACE and LAST, after filtering and ordering. A stored order is keyed by
+   * the real child path, so substituting first would leave `applyOrder`
+   * searching for a path that is no longer live; it would be skipped as
+   * unlisted and the user's arrangement would silently fall back to native
+   * sort. Substituting in place also means a run keeps the position its FIRST
+   * segment had, which is where the reader expects it and is why this feature
+   * needs no comparator of its own.
+   *
+   * Each tip is recorded as admitted for this call. The tip is an out-of-input
+   * item, and `isAllowed` rejects those unless `livePermits` says otherwise -
+   * and a rejection makes `patch` return the RAW items, which renders the
+   * folder unfiltered and puts the whole vault inside the space.
+   */
+  private substituteCompacted(
+    out: FolderItemLike[],
+    view: object | null
+  ): FolderItemLike[] {
+    const ix = this.chainIndexNow;
+    if (!ix || ix.runByHead.size === 0) return out;
+    let swapped = false;
+    const next = out.map((item) => {
+      const p = item.file?.path;
+      if (typeof p !== "string") return item;
+      const run = ix.runByHead.get(p);
+      if (!run) return item;
+      const [tipItem] = itemsForPaths(view, [run.tip]);
+      // A tip the view cannot resolve is left uncompacted rather than dropped.
+      // Fail-open to the honest tree is what this transform does everywhere.
+      if (!tipItem) return item;
+      this.admittedThisCall.add(run.tip);
+      swapped = true;
+      return tipItem;
+    });
+    return swapped ? next : out;
+  }
+
+  /**
+   * Tips this transform call substituted, for the seam's subset guard.
+   *
+   * Cleared at the top of every transform and read by `livePermits` straight
+   * afterwards, because `isAllowed` runs on the array the transform just
+   * returned. Not keyed by folder path: the hoist branch re-enters the
+   * transform for a DIFFERENT folder than the one `isAllowed` will check,
+   * so a folder-keyed record would miss. Per call is the same discipline
+   * `permitsForThisCall` documents.
+   */
+  private admittedThisCall = new Set<string>();
 
   /**
    * The active space's USABLE root (`rootOf`), or null when it is curated,
@@ -2127,6 +2189,9 @@ export default class SpacesPlugin extends Plugin {
     // apply from any path is also a failsafe against a stuck mask —
     // the mask must never outlive the switch that set it.
     this.setSwitchMask(false);
+    // Before the adapter is applied: the adapter's pass reads this index, and
+    // applying the snapshot is what schedules that pass.
+    this.rebuildChainIndex(snap);
     this.applyAdapterSnapshot(snap);
     // These two lines are NOT order-coupled. `filterAndOrderFolder` reads
     // `controller.currentSnapshot()`, which the controller assigns before it
@@ -2179,6 +2244,47 @@ export default class SpacesPlugin extends Plugin {
     // `repaintStep` here bounds that risk for this step; the other four
     // remain a known gap.
     this.repaintStep("reportMissingRootIfNeeded", () => this.missingRoot.report());
+  }
+
+  /**
+   * Every compacted run in the active space, or null when compaction is off.
+   *
+   * Built ONCE per snapshot, not per sort-seam call, because three consumers
+   * read it on two different schedules: the seam substitutes and admits during
+   * a sort, and `ExplorerAdapter` labels during a MutationObserver pass that
+   * runs at a different time. A per-call record would be empty by the time the
+   * adapter looked.
+   *
+   * Rebuilt rather than patched: the runs are a function of the snapshot, and
+   * a snapshot is already the thing that changes when membership or visibility
+   * does.
+   */
+  private chainIndexNow: ChainIndex | null = null;
+
+  private rebuildChainIndex(snap: VisibilitySnapshot | null): void {
+    if (snap === null || !this.defs.get().settings.compactFolderChains) {
+      this.chainIndexNow = null;
+      return;
+    }
+    const visible = snap.visiblePaths();
+    const isFolder = (p: string): boolean =>
+      this.app.vault.getAbstractFileByPath(p) instanceof TFolder;
+    const tree: ChainTree = {
+      visibleChildrenOf: (folderPath) => {
+        const f = this.app.vault.getAbstractFileByPath(folderPath);
+        if (!(f instanceof TFolder)) return [];
+        return f.children.map((c) => c.path).filter((p) => visible.has(p));
+      },
+      isFolder,
+      // Scaffold is the reason, not merely "a folder that is visible": a
+      // folder the user added as a member reports `exact-member` and must keep
+      // its own row.
+      isScaffold: (p) => isFolder(p) && snap.decisionFor(p).reason === "scaffold",
+      parentOf: (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
+      nameOf: (p) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
+    };
+    const folders = [...visible].filter(isFolder);
+    this.chainIndexNow = buildChainIndex(folders, tree);
   }
 
   /**
@@ -2261,8 +2367,14 @@ export default class SpacesPlugin extends Plugin {
    * this reads that. Caching WITHIN one call is the optimisation; caching
    * ACROSS calls is the bug above.
    */
-  private readonly livePermits: Permits = (folderPath, itemPath) =>
-    this.permitsForThisCall?.(folderPath, itemPath) ?? false;
+  private readonly livePermits: Permits = (folderPath, itemPath) => {
+    // Two independent reasons an out-of-input item may be returned, checked
+    // separately so a bug in one cannot admit what the other would refuse:
+    // a folder space hoisting its root's children, and a compacted run
+    // substituting its tip.
+    if (this.permitsForThisCall?.(folderPath, itemPath) ?? false) return true;
+    return typeof itemPath === "string" && this.admittedThisCall.has(itemPath);
+  };
 
   /**
    * This call's resolved permits, or `null` when none applies — set exactly
