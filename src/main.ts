@@ -78,6 +78,7 @@ import {
 import { filterVisibleItems } from "./visibility/visibleItems";
 import {
   buildChainIndex,
+  sameChainIndex,
   type ChainIndex,
   type ChainTree,
 } from "./visibility/compactChains";
@@ -2329,7 +2330,11 @@ export default class SpacesPlugin extends Plugin {
       nameOf: (p) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
     };
     const folders = [...visible].filter(isFolder);
-    this.chainIndexNow = buildChainIndex(folders, tree);
+    // Keep the previous object when the runs are unchanged: the re-sort memo
+    // compares the index by identity, and `onSnapshotApplied` fires on every
+    // `file-open`, so a fresh object each time would re-sort on every one.
+    const next = buildChainIndex(folders, tree);
+    if (!sameChainIndex(this.chainIndexNow, next)) this.chainIndexNow = next;
   }
 
   /**

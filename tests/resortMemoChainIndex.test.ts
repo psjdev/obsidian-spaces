@@ -75,3 +75,48 @@ describe("applyFilterAndOrdering memo and the chain index", () => {
     expect(sameResortSignature(after, h.plugin["currentResortSignature"]())).toBe(true);
   });
 });
+
+describe("the chain index is only replaced when the runs change", () => {
+  function compactOn() {
+    const h = makePluginForSeam({
+      compactFolderChains: true,
+      tree: TREE,
+      visible: VISIBLE,
+      members: ["Clients/Meetings/a.md"],
+    });
+    h.plugin["ensureOrderingPatched"]();
+    const sort = vi.spyOn(h.view, "sort");
+    return { h, sort };
+  }
+
+  it("does not re-sort on a second snapshot that leaves the tree alone", () => {
+    const { h, sort } = compactOn();
+    const snap = h.plugin["controller"].currentSnapshot();
+    h.plugin["onSnapshotApplied"](snap);
+    expect(sort).toHaveBeenCalledTimes(1);
+    const index = h.plugin["chainIndexNow"];
+    expect(index).not.toBe(null);
+
+    // A file-open: same tree, a fresh apply.
+    h.plugin["onSnapshotApplied"](snap);
+    h.plugin["onSnapshotApplied"](snap);
+    expect(sort).toHaveBeenCalledTimes(1);
+    expect(h.plugin["chainIndexNow"]).toBe(index);
+  });
+
+  it("re-sorts when the runs genuinely change", () => {
+    const { h, sort } = compactOn();
+    const snap = h.plugin["controller"].currentSnapshot()!;
+    h.plugin["onSnapshotApplied"](snap);
+    expect(sort).toHaveBeenCalledTimes(1);
+
+    // Meetings drops out of the space, so Clients no longer leads onward.
+    const narrowed = {
+      decisionFor: snap.decisionFor,
+      visiblePaths: () => new Set(VISIBLE.filter((p) => p !== "Clients/Meetings")),
+    };
+    h.plugin["controller"] = { currentSnapshot: () => narrowed } as never;
+    h.plugin["onSnapshotApplied"](narrowed);
+    expect(sort).toHaveBeenCalledTimes(2);
+  });
+});

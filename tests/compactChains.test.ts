@@ -6,7 +6,7 @@
  * the deepest folder wearing a longer label.
  */
 import { describe, expect, it } from "vitest";
-import { buildChainIndex, runFrom, type ChainTree } from "../src/visibility/compactChains";
+import { buildChainIndex, runFrom, sameChainIndex, type ChainTree } from "../src/visibility/compactChains";
 
 /**
  * A tree written as a path-to-children map. Any path not listed is a note.
@@ -157,5 +157,56 @@ describe("buildChainIndex", () => {
     const ix = buildChainIndex(["Picked", "Picked/A", "Picked/A/B"], b);
     expect(ix.runByHead.get("Picked/A")?.tip).toBe("Picked/A/B");
     expect(ix.runByHead.has("Picked")).toBe(false);
+  });
+});
+
+describe("sameChainIndex", () => {
+  const WORK = {
+    Work: ["Work/Clients"],
+    "Work/Clients": ["Work/Clients/Northwind"],
+    "Work/Clients/Northwind": ["Work/Clients/Northwind/notes.md"],
+  };
+  const indexOf = (children: Record<string, string[]>) =>
+    buildChainIndex(Object.keys(children), treeOf(children));
+
+  it("treats two indexes built from the same tree as the same", () => {
+    expect(sameChainIndex(indexOf(WORK), indexOf(WORK))).toBe(true);
+  });
+
+  it("treats an empty index as the same as an empty index", () => {
+    expect(sameChainIndex(indexOf({}), indexOf({}))).toBe(true);
+  });
+
+  it("treats null as the same as null, and as different from any index", () => {
+    expect(sameChainIndex(null, null)).toBe(true);
+    expect(sameChainIndex(null, indexOf({}))).toBe(false);
+    expect(sameChainIndex(indexOf({}), null)).toBe(false);
+  });
+
+  it("differs when the tip differs", () => {
+    const shorter = {
+      Work: ["Work/Clients"],
+      "Work/Clients": ["Work/Clients/a.md", "Work/Clients/b.md"],
+    };
+    expect(sameChainIndex(indexOf(WORK), indexOf(shorter))).toBe(false);
+  });
+
+  it("differs when the segments differ but the tip does not", () => {
+    const a = buildChainIndex(["Work"], treeOf(WORK));
+    const b = buildChainIndex(["Work"], treeOf(WORK));
+    b.runByHead.get("Work")!.segments = ["Work", "Renamed", "Northwind"];
+    expect(sameChainIndex(a, b)).toBe(false);
+  });
+
+  it("differs when a head exists in one and not the other", () => {
+    const more = { ...WORK, Other: ["Other/Sub"], "Other/Sub": ["Other/Sub/x.md"] };
+    expect(sameChainIndex(indexOf(WORK), indexOf(more))).toBe(false);
+    expect(sameChainIndex(indexOf(more), indexOf(WORK))).toBe(false);
+  });
+
+  it("differs when the same number of heads are different heads", () => {
+    const a = indexOf({ A: ["A/B"], "A/B": ["A/B/x.md"] });
+    const b = indexOf({ C: ["C/D"], "C/D": ["C/D/x.md"] });
+    expect(sameChainIndex(a, b)).toBe(false);
   });
 });

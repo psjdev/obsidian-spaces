@@ -99,3 +99,31 @@ export function buildChainIndex(folders: readonly string[], tree: ChainTree): Ch
   }
   return { runByHead, runByTip };
 }
+
+/**
+ * Whether two indexes describe the same runs: the same heads, each with the
+ * same tip and the same segments in the same order. `runByTip` is derived from
+ * `runByHead`, so comparing heads covers both.
+ *
+ * Exists so the plugin can keep the PREVIOUS index object when a rebuild
+ * produced nothing new. The re-sort memo compares the index by identity, and a
+ * fresh object per snapshot would defeat it on every `file-open`. Runs are one
+ * per compacted chain, so a direct comparison is cheap.
+ *
+ * `null` means "no index" (compaction off, paused, or no snapshot) and equals
+ * only itself.
+ */
+export function sameChainIndex(a: ChainIndex | null, b: ChainIndex | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (a.runByHead.size !== b.runByHead.size) return false;
+  for (const [head, runA] of a.runByHead) {
+    const runB = b.runByHead.get(head);
+    if (!runB || runA.tip !== runB.tip) return false;
+    if (runA.segments.length !== runB.segments.length) return false;
+    for (let i = 0; i < runA.segments.length; i++) {
+      if (runA.segments[i] !== runB.segments[i]) return false;
+    }
+  }
+  return true;
+}
