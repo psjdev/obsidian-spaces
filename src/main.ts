@@ -138,9 +138,11 @@ interface ResortSignature {
   visible: Set<string> | null;
   /**
    * `chainIndexNow`, by identity. Compaction changes what the seam RETURNS
-   * without moving visibility, so toggling the setting moves none of the
-   * other three fields. `rebuildChainIndex` allocates a fresh index per
-   * snapshot, so identity over-invalidates and never under-invalidates.
+   * without moving visibility, so toggling the setting, or a folder turning
+   * from scaffold to member, moves none of the other three fields.
+   * `rebuildChainIndex` keeps the previous object while the runs are
+   * unchanged (`sameChainIndex`) and replaces it when they change, so
+   * identity moves exactly when the runs do.
    */
   chainIndex: ChainIndex | null;
 }
@@ -2653,6 +2655,9 @@ export default class SpacesPlugin extends Plugin {
    * (`chainIndexNow`) by identity, because compaction changes what the seam
    * RETURNS without changing visibility, so flipping `compactFolderChains`
    * moves none of the other three and the tree would keep its old shape.
+   * That is only affordable because `rebuildChainIndex` reuses the previous
+   * index object while the runs are unchanged; a fresh object per snapshot
+   * would defeat the memo on every `file-open`.
    * Outside the key are
    * only Obsidian's own triggers — a vault mutation re-sorts that folder
    * anyway, a native sort-mode pick calls `sort()` itself — plus a freshly

@@ -119,4 +119,29 @@ describe("the chain index is only replaced when the runs change", () => {
     h.plugin["onSnapshotApplied"](narrowed);
     expect(sort).toHaveBeenCalledTimes(2);
   });
+
+  it("re-sorts when the runs change but the visible set does not", () => {
+    const { h, sort } = compactOn();
+    const snap = h.plugin["controller"].currentSnapshot()!;
+    h.plugin["onSnapshotApplied"](snap);
+    expect(sort).toHaveBeenCalledTimes(1);
+
+    // Meetings goes from scaffold to a picked member: same rows, but Clients
+    // no longer leads onward, so only the index can move the memo key.
+    const promoted = {
+      decisionFor: (p: string) =>
+        p === "Clients/Meetings"
+          ? {
+              visible: true,
+              reason: "exact-member" as const,
+              canRemoveMembership: true,
+              overridesIgnore: false,
+            }
+          : snap.decisionFor(p),
+      visiblePaths: () => new Set(VISIBLE),
+    };
+    h.plugin["controller"] = { currentSnapshot: () => promoted } as never;
+    h.plugin["onSnapshotApplied"](promoted);
+    expect(sort).toHaveBeenCalledTimes(2);
+  });
 });

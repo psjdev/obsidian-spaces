@@ -198,6 +198,23 @@ describe("sameChainIndex", () => {
     expect(sameChainIndex(a, b)).toBe(false);
   });
 
+  it("differs when segments hold the same names in a different order", () => {
+    const a = buildChainIndex(["Work"], treeOf(WORK));
+    const b = buildChainIndex(["Work"], treeOf(WORK));
+    a.runByHead.get("Work")!.segments = ["A", "B", "C"];
+    b.runByHead.get("Work")!.segments = ["A", "C", "B"];
+    expect(sameChainIndex(a, b)).toBe(false);
+  });
+
+  it("differs when one run is a strict prefix of the other with the same head and tip", () => {
+    const a = buildChainIndex(["Work"], treeOf(WORK));
+    const b = buildChainIndex(["Work"], treeOf(WORK));
+    a.runByHead.get("Work")!.segments = ["Work", "Clients"];
+    b.runByHead.get("Work")!.segments = ["Work", "Clients", "Northwind"];
+    expect(sameChainIndex(a, b)).toBe(false);
+    expect(sameChainIndex(b, a)).toBe(false);
+  });
+
   it("differs when a head exists in one and not the other", () => {
     const more = { ...WORK, Other: ["Other/Sub"], "Other/Sub": ["Other/Sub/x.md"] };
     expect(sameChainIndex(indexOf(WORK), indexOf(more))).toBe(false);
