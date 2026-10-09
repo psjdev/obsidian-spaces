@@ -8,7 +8,9 @@
  * nothing can be stashed wrong.
  */
 import { describe, expect, it } from "vitest";
-import { applyCompactLabels } from "../src/explorer/ExplorerAdapter";
+import { ExplorerAdapter, applyCompactLabels } from "../src/explorer/ExplorerAdapter";
+import { CLS } from "../src/explorer/selectors";
+import type { VisibilitySnapshot } from "../src/visibility/VisibilityEngine";
 import { buildChainIndex } from "../src/visibility/compactChains";
 
 function row(host: HTMLElement, path: string, text: string): HTMLElement {
@@ -76,6 +78,36 @@ describe("applyCompactLabels", () => {
     expect(title.children.length).toBe(3);
   });
 
+  it("does not rebuild the spans on a repeated pass", () => {
+    // Same text and same child count would also come from tearing the spans
+    // down and rebuilding them every pass, which is DOM churn on every
+    // mutation the observer sees. Identity is what tells the two apart.
+    const host = document.createElement("div");
+    const title = row(host, "Work/Clients", "Clients");
+    applyCompactLabels([title], INDEX);
+    const first = Array.from(title.children);
+    applyCompactLabels([title], INDEX);
+    const second = Array.from(title.children);
+    expect(second.length).toBe(3);
+    second.forEach((el, i) => expect(el).toBe(first[i]));
+  });
+
+  it("adds spaces-compacted with the label and removes it with the restore", () => {
+    const host = document.createElement("div");
+    const title = row(host, "Work/Clients", "Clients");
+    applyCompactLabels([title], INDEX);
+    expect(title.parentElement!.classList.contains(CLS.compacted)).toBe(true);
+    applyCompactLabels([title], null);
+    expect(title.parentElement!.classList.contains(CLS.compacted)).toBe(false);
+  });
+
+  it("never gives the class to a row that is not a tip", () => {
+    const host = document.createElement("div");
+    const title = row(host, "Archive", "Archive");
+    applyCompactLabels([title], INDEX);
+    expect(title.parentElement!.classList.contains(CLS.compacted)).toBe(false);
+  });
+
   it("draws each part as its own span, so a stylesheet can tell them apart", () => {
     // The reason `compactLabel` returns parts rather than a finished string:
     // muted separators and dimmed leading folders are style changes only if
@@ -97,5 +129,61 @@ describe("applyCompactLabels", () => {
     applyCompactLabels([title], EMPTY);
     expect(title.children.length).toBe(0);
     expect(title.textContent).toBe("Clients");
+  });
+});
+
+/**
+ * The wiring, through a REAL adapter. The pure function above cannot notice if
+ * `applyNow` stops calling it or `clearOwnedClasses` stops restoring.
+ */
+describe("ExplorerAdapter label wiring", () => {
+  const SNAP: VisibilitySnapshot = {
+    decisionFor: () => ({
+      visible: true,
+      reason: "scaffold",
+      canRemoveMembership: false,
+      overridesIgnore: false,
+    }),
+    visiblePaths: () => new Set(["Work", "Work/Clients"]),
+  };
+
+  function mount(): { container: HTMLElement; title: HTMLElement } {
+    document.body.innerHTML = `<div class="nav-files-container">
+      <div class="tree-item"><div class="tree-item-self" data-path="Work/Clients">Clients</div></div>
+    </div>`;
+    const container = document.querySelector(".nav-files-container") as HTMLElement;
+    return { container, title: container.querySelector("[data-path]") as HTMLElement };
+  }
+
+  it("applyNow labels a tip row from the index it was handed", () => {
+    const { container, title } = mount();
+    const a = new ExplorerAdapter();
+    a.bind(container);
+    a.setChainIndex(INDEX);
+    a.apply(SNAP);
+    expect(title.textContent).toBe("Work/Clients");
+    expect(title.parentElement!.classList.contains(CLS.compacted)).toBe(true);
+    a.unbind();
+  });
+
+  it("labels nothing when no index was handed over", () => {
+    const { container, title } = mount();
+    const a = new ExplorerAdapter();
+    a.bind(container);
+    a.apply(SNAP);
+    expect(title.textContent).toBe("Clients");
+    a.unbind();
+  });
+
+  it("unbind restores the plain name and leaves no spans or class behind", () => {
+    const { container, title } = mount();
+    const a = new ExplorerAdapter();
+    a.bind(container);
+    a.setChainIndex(INDEX);
+    a.apply(SNAP);
+    a.unbind();
+    expect(title.textContent).toBe("Clients");
+    expect(title.children.length).toBe(0);
+    expect(title.parentElement!.classList.contains(CLS.compacted)).toBe(false);
   });
 });

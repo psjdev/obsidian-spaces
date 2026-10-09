@@ -26,6 +26,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { CLS_ELSEWHERE, SEL } from "../src/explorer/selectors";
+import { applyCompactLabels } from "../src/explorer/ExplorerAdapter";
+import { buildChainIndex } from "../src/visibility/compactChains";
+
+const COMPACT_TREE = {
+  visibleChildrenOf: (p: string) =>
+    p === "Work" ? ["Work/Clients"] : p === "Work/Clients" ? ["Work/Clients/a.md"] : [],
+  isFolder: (p: string) => p === "Work" || p === "Work/Clients",
+  isScaffold: (p: string) => p === "Work" || p === "Work/Clients",
+  parentOf: (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
+  nameOf: (p: string) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
+};
+const INDEX = buildChainIndex(["Work"], COMPACT_TREE);
 
 // `process.cwd()` rather than `import.meta.url`: under the jsdom environment
 // the module URL is an http one and `fileURLToPath` refuses it. Vitest runs
@@ -313,5 +325,36 @@ describe("picker column layout", () => {
     view.appendChild(filter);
     const matching = rules.filter((r) => filter.matches(r.selector));
     expect(matching.some((r) => r.style.getPropertyValue("flex-shrink") === "0")).toBe(true);
+  });
+});
+
+describe("compacted row label roles", () => {
+  // `applyCompactLabels` classes each span `spaces-compact-<role>` from
+  // `compactLabel`'s roles. The stylesheet cannot import them, so a role
+  // renamed on one side only would silently stop dimming.
+  const dimmed = ["spaces-compact-lead", "spaces-compact-sep"];
+  for (const role of ["lead", "sep", "tip"] as const) {
+    it(`spaces-compact-${role} is the class a rendered span carries`, () => {
+      const host = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "tree-item-inner";
+      title.setAttribute("data-path", "Work/Clients");
+      title.textContent = "Clients";
+      host.appendChild(title);
+      applyCompactLabels([title], INDEX);
+      expect(title.querySelector(`.spaces-compact-${role}`)).not.toBeNull();
+    });
+  }
+
+  it("the stylesheet steps back the lead and the separator, and leaves the tip alone", () => {
+    for (const cls of dimmed) {
+      const span = document.createElement("span");
+      span.className = cls;
+      const matching = rules.filter((r) => span.matches(r.selector));
+      expect(matching.some((r) => r.style.getPropertyValue("opacity") !== ""), cls).toBe(true);
+    }
+    const tip = document.createElement("span");
+    tip.className = "spaces-compact-tip";
+    expect(rules.filter((r) => tip.matches(r.selector))).toHaveLength(0);
   });
 });

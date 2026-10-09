@@ -1221,10 +1221,11 @@ export default class SpacesPlugin extends Plugin {
       // in a tree that is now the whole vault — the same mismatch the dimming
       // would be, so it is cleared in the same place and for the same reason.
       //
-      // Cleared BEFORE the adapter is applied, matching `onSnapshotApplied`.
-      // The order now matters: the adapter's pass reads this index (it hands
-      // it over in `applyAdapterSnapshot`), so nulling it afterwards would let
-      // that pass paint the joined labels onto the whole-vault tree.
+      // Cleared BEFORE the adapter is applied, matching `onSnapshotApplied`,
+      // which states that order and relies on it. The adapter is now a reader
+      // of this index (handed over in `applyAdapterSnapshot`), so the two
+      // places must not disagree about it. Not a paint bug today: a null
+      // snapshot makes the adapter clear and return without reading the index.
       //
       // Clearing here is only half of it: `onSnapshotApplied` keeps
       // arriving while paused (every `file-open`, every coalesced vault

@@ -761,6 +761,27 @@ describe("SpacesPlugin.onSnapshotApplied — the controller's apply callback", (
 
     plugin["adapter"].unbind();
   });
+
+  it("hands the adapter the plugin's own chain index, not one of its own", () => {
+    // `rebuildChainIndex` is stubbed to a sentinel: with the setting off the
+    // real one yields null, and null on both sides would pass even with the
+    // handover deleted. Identity proves there is ONE producer.
+    const plugin = makeFolderSpacePlugin("Projects/Work");
+    const fakeBody = document.createElement("div");
+    (plugin as unknown as { app: unknown }).app = {
+      ...folderSpaceApp,
+      workspace: { ...folderSpaceApp.workspace, containerEl: { ownerDocument: { body: fakeBody } } },
+    };
+    const sentinel = { runByHead: new Map(), runByTip: new Map() };
+    vi.spyOn(plugin as unknown as { rebuildChainIndex: () => void }, "rebuildChainIndex")
+      .mockImplementation(() => {
+        (plugin as unknown as { chainIndexNow: unknown }).chainIndexNow = sentinel;
+      });
+
+    plugin["onSnapshotApplied"](passthrough);
+
+    expect(plugin["adapter"]["chainIndex"]).toBe(sentinel);
+  });
 });
 
 /**
