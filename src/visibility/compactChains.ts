@@ -8,7 +8,7 @@
  * folder is not.
  *
  * Pure. No DOM, no `"obsidian"` import, no knowledge of the sort seam. The
- * caller supplies the tree as four questions, so this module cannot care
+ * caller supplies the tree as five questions, so this module cannot care
  * whether the answers come from a vault, a snapshot or a test fixture.
  */
 

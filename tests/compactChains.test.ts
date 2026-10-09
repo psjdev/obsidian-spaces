@@ -8,18 +8,25 @@
 import { describe, expect, it } from "vitest";
 import { buildChainIndex, runFrom, type ChainTree } from "../src/visibility/compactChains";
 
-/** A tree written as a path-to-children map. Any path not listed is a note. */
+/**
+ * A tree written as a path-to-children map. Any path not listed is a note.
+ *
+ * `isFolder` and `isScaffold` are answered INDEPENDENTLY, not one in terms of
+ * the other. A fixture that defined `isScaffold` as `isFolder && !member` made
+ * every `isFolder` guard in the module unreachable, so a mutation deleting one
+ * stayed green.
+ */
 function treeOf(
   children: Record<string, string[]>,
-  opts: { members?: string[] } = {}
+  opts: { members?: string[]; notFolders?: string[] } = {}
 ): ChainTree {
   const members = new Set(opts.members ?? []);
-  const isFolder = (p: string): boolean => Object.prototype.hasOwnProperty.call(children, p);
+  const notFolders = new Set(opts.notFolders ?? []);
+  const listed = (p: string): boolean => Object.prototype.hasOwnProperty.call(children, p);
   return {
     visibleChildrenOf: (p) => children[p] ?? [],
-    isFolder,
-    // Every folder is scaffold unless the test says it is a member.
-    isScaffold: (p) => isFolder(p) && !members.has(p),
+    isFolder: (p) => listed(p) && !notFolders.has(p),
+    isScaffold: (p) => listed(p) && !members.has(p),
     parentOf: (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
     nameOf: (p) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
   };
@@ -73,18 +80,18 @@ describe("runFrom", () => {
     expect(runFrom("Work", t)).toBeNull();
   });
 
-  // Review Focus 3. Run detection reads VISIBILITY, not the vault.
-  it("counts only visible children, so hidden siblings do not stop a run", () => {
-    const t = treeOf({
-      Work: ["Work/Clients"],
-      "Work/Clients": ["Work/Clients/Northwind"],
-      "Work/Clients/Northwind": ["Work/Clients/Northwind/a.md"],
-    });
-    expect(runFrom("Work", t)?.tip).toBe("Work/Clients/Northwind");
+  it("returns null for something that is not a folder, even when it is scaffold", () => {
+    // Pins the `isFolder(start)` half of the first guard. Without it this
+    // walks the children the fixture gives and returns a two-segment run.
+    const t = treeOf({ X: ["X/y"], "X/y": ["X/y/z.md"] }, { notFolders: ["X"] });
+    expect(runFrom("X", t)).toBeNull();
   });
 
-  it("returns null for a note", () => {
-    expect(runFrom("Work/a.md", treeOf({ Work: ["Work/a.md"] }))).toBeNull();
+  it("does not extend into a child that is not a folder, even when it is scaffold", () => {
+    // Pins the `isFolder(only)` half. Without it the run reaches `X/y` and
+    // comes back two segments long.
+    const t = treeOf({ X: ["X/y"], "X/y": ["X/y/z.md"] }, { notFolders: ["X/y"] });
+    expect(runFrom("X", t)).toBeNull();
   });
 });
 
@@ -118,5 +125,37 @@ describe("buildChainIndex", () => {
     const ix = buildChainIndex(["Archive"], t);
     expect(ix.runByHead.size).toBe(0);
     expect(ix.runByTip.size).toBe(0);
+  });
+
+  it("indexes a run that starts under a branching parent", () => {
+    // `Clients` has two visible children so it is no run itself, but the chain
+    // below `Northwind` still is one and must not be lost along with it.
+    const b = treeOf({
+      Clients: ["Clients/Northwind", "Clients/Contoso"],
+      "Clients/Northwind": ["Clients/Northwind/2026"],
+      "Clients/Northwind/2026": ["Clients/Northwind/2026/a.md"],
+      "Clients/Contoso": ["Clients/Contoso/b.md"],
+    });
+    const ix = buildChainIndex(
+      ["Clients", "Clients/Northwind", "Clients/Northwind/2026", "Clients/Contoso"],
+      b
+    );
+    expect(ix.runByHead.get("Clients/Northwind")?.tip).toBe("Clients/Northwind/2026");
+    expect(ix.runByHead.has("Clients")).toBe(false);
+  });
+
+  it("indexes a run that starts under a member folder", () => {
+    // The member keeps its own row, and the chain below it is still a chain.
+    const b = treeOf(
+      {
+        Picked: ["Picked/A"],
+        "Picked/A": ["Picked/A/B"],
+        "Picked/A/B": ["Picked/A/B/a.md"],
+      },
+      { members: ["Picked"] }
+    );
+    const ix = buildChainIndex(["Picked", "Picked/A", "Picked/A/B"], b);
+    expect(ix.runByHead.get("Picked/A")?.tip).toBe("Picked/A/B");
+    expect(ix.runByHead.has("Picked")).toBe(false);
   });
 });
