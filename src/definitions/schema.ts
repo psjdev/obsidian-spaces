@@ -396,6 +396,10 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // non-boolean collapse to the same answer. Strict for the same reason:
         // `showPinnedFolder: 1` must not read as true.
         showPinnedFolder: st.showPinnedFolder === true,
+        // Defaults to FALSE like the keys above, so absent and non-boolean
+        // collapse to the same answer. Strict for the same reason:
+        // `compactFolderChains: 1` must not read as true.
+        compactFolderChains: st.compactFolderChains === true,
         // Defaults to FALSE for the same reason as the two above, and because
         // it changes how every existing install looks. Nothing here touches a
         // space's stored color: this key governs drawing alone.

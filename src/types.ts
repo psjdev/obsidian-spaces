@@ -131,6 +131,14 @@ interface SpacesSettings {
    */
   showPinnedFolder: boolean;
   /**
+   * Whether a run of folders that only leads onward draws as one row.
+   *
+   * A display preference, not a property of a space: someone who finds deep
+   * chains noisy finds them noisy everywhere, so nothing is stored per space
+   * and `schemaVersionFor` is untouched.
+   */
+  compactFolderChains: boolean;
+  /**
    * Whether *All* sits pinned to the LEFT of the switcher strip, outside
    * the scrolling rail, the way the `+` control is pinned to the right. *All*
    * is already the first entry; pinning it means the other icons scroll past it
@@ -289,6 +297,9 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     // OFF, unlike `showSpaceHeader`: this annotates a detail only some care
     // about, and adding chrome to an existing install unasked reads as a bug.
     showPinnedFolder: false,
+    // Off by default. This changes how every curated space draws, and an
+    // update must not rearrange an explorer the user was reading.
+    compactFolderChains: false,
     // OFF by default: this rearranges a strip every existing install already
     // reads fluently, and doing that unasked on an update reads as a bug.
     pinAllSpace: false,

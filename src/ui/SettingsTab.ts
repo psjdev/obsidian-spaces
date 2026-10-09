@@ -284,6 +284,13 @@ export class SpacesSettingTab extends PluginSettingTab {
         control: { type: "toggle", key: "showPinnedFolder" },
       },
       {
+        name: "Compact folder chains",
+        desc:
+          "Shows a run of folders that leads to a single folder as one row. " +
+          "Affects spaces that gather notes from across your vault.",
+        control: { type: "toggle", key: "compactFolderChains" },
+      },
+      {
         // Led by "All" rather than "Pin All …": sentence case is linted,
         // and mid-sentence the view's own label is indistinguishable from
         // the quantifier — "Pin all …" would read as pinning every icon.
