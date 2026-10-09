@@ -23,6 +23,15 @@
 .spaces-scaffold > .tree-item-self { opacity: 0.45; }
 .spaces-visitor > .tree-item-self { opacity: 0.62; font-style: italic; }
 
+/* A compacted row reads as one path. The folders it only passed through step
+   back so the folder the row actually IS stays legible at a glance. Targeting
+   the roles rather than the whole row is what lets a presentation variant be
+   a style change: `compactLabel` draws each part as its own span. */
+.spaces-compact-lead,
+.spaces-compact-sep {
+  opacity: 0.6;
+}
+
 /* The elsewhere group's boundary (folder-space design §5). A border on the
    first row rather than a separator element: the tree is Obsidian's, and a
    row we already class costs nothing to draw on. Unlike the de-emphasis pair

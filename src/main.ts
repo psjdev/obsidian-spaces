@@ -1216,20 +1216,25 @@ export default class SpacesPlugin extends Plugin {
       // visitor rows still greyed and italicised, against a tree where those
       // words mean nothing: rows dimmed for a reason the user cannot see.
       //
-      // Clearing here is only half of it: `applyAdapterSnapshot` holds the
-      // paused state, so the next recompute cannot paint them back. See its
-      // comment for why the guard lives there and not at this call site.
-      this.applyAdapterSnapshot(null);
       // The chain index is the adapter's OTHER input, and the guard inside
       // `applyAdapterSnapshot` does not cover it. Left live it describes runs
       // in a tree that is now the whole vault — the same mismatch the dimming
       // would be, so it is cleared in the same place and for the same reason.
       //
-      // Clearing here is again only half of it: `onSnapshotApplied` keeps
+      // Cleared BEFORE the adapter is applied, matching `onSnapshotApplied`.
+      // The order now matters: the adapter's pass reads this index (it hands
+      // it over in `applyAdapterSnapshot`), so nulling it afterwards would let
+      // that pass paint the joined labels onto the whole-vault tree.
+      //
+      // Clearing here is only half of it: `onSnapshotApplied` keeps
       // arriving while paused (every `file-open`, every coalesced vault
       // flush) and would rebuild it, so `rebuildChainIndex` holds the paused
       // state itself, exactly as `applyAdapterSnapshot` does.
       this.chainIndexNow = null;
+      // Clearing here is only half of it: `applyAdapterSnapshot` holds the
+      // paused state, so the next recompute cannot paint them back. See its
+      // comment for why the guard lives there and not at this call site.
+      this.applyAdapterSnapshot(null);
     } else {
       this.ensureOrderingPatched();
       // And put it back, explicitly. Nothing else re-seeds the adapter:
@@ -2340,6 +2345,12 @@ export default class SpacesPlugin extends Plugin {
     // itself: a new caller must not be able to reintroduce the bug by
     // forgetting a check. Resume clears the flag before re-seeding through
     // this method, so the classes come back with one ordinary call.
+    //
+    // The index is handed over first, so the pass `apply` runs reads this
+    // snapshot's runs and not the previous one's. It is the SAME object the
+    // sort seam reads: the adapter never builds its own, so the labels and the
+    // substitution cannot disagree about what is compacted.
+    this.adapter.setChainIndex(this.chainIndexNow);
     this.adapter.apply(this.filteringPaused ? null : snap, this.elsewhereFirstPath());
   }
 

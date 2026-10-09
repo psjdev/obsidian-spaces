@@ -305,6 +305,7 @@ describe("pause-filtering", () => {
       currentSnapshot: () => snap,
     } as unknown as SpacesPlugin["controller"];
     h.plugin["adapter"] = {
+      setChainIndex: () => undefined,
       apply: (s: object | null) => {
         applied.push(s);
         return 0;

@@ -99,6 +99,10 @@ export const SEL = {
 export const CLS = {
   scaffold: "spaces-scaffold",
   visitor: "spaces-visitor",
+  // Deliberately NOT in `ALL_OWNED_CLASSES`: the per-row class loop would
+  // strip it each pass, and `applyCompactLabels` owns it alongside the label
+  // text it belongs to.
+  compacted: "spaces-compacted",
 } as const;
 
 /**

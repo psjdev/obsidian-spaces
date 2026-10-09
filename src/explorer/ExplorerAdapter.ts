@@ -1,5 +1,7 @@
 import { ALL_OWNED_CLASSES, CLS, CLS_ELSEWHERE, SEL } from "./selectors";
 import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
+import { compactLabel } from "../ui/compactLabel";
+import type { ChainIndex } from "../visibility/compactChains";
 
 /**
  * The only module that WRITES to Obsidian's explorer tree.
@@ -37,6 +39,13 @@ export class ExplorerAdapter {
    * call returned.
    */
   private elsewhereFirst: string | null = null;
+  private chainIndex: ChainIndex | null = null;
+
+  /** Set with the snapshot, because the runs are a function of it. */
+  setChainIndex(index: ChainIndex | null): void {
+    this.chainIndex = index;
+  }
+
   private frame = 0;
   private healthy = true;
   private healthListener: ((healthy: boolean) => void) | null = null;
@@ -115,6 +124,12 @@ export class ExplorerAdapter {
       for (const cls of ALL_OWNED_CLASSES) {
         c.querySelectorAll(`.${cls}`).forEach((el) => el.classList.remove(cls));
       }
+      // Through the one function that owns this class, so the text it replaced
+      // is restored with it. Stripping the class alone would leave a row reading
+      // `Work/Clients` with nothing left to say it should not.
+      const titles: HTMLElement[] = [];
+      c.querySelectorAll<HTMLElement>(SEL.titleWithPath).forEach((t) => titles.push(t));
+      applyCompactLabels(titles, null);
     }
   }
 
@@ -226,6 +241,56 @@ export class ExplorerAdapter {
         }
       }
     }
+    applyCompactLabels(titles, this.chainIndex);
     return changed;
+  }
+}
+
+/**
+ * Put the joined label on each compacted tip row, and take it off everything
+ * else.
+ *
+ * Exported and free of adapter state so it can be asserted directly. The text
+ * belongs to Obsidian, which also uses it for inline rename, so restoring it
+ * exactly matters more than the labelling does.
+ *
+ * RESTORATION IS STATELESS. The original text of a folder row is the path's
+ * last segment, so nothing is stashed in a data attribute and nothing can be
+ * stashed wrong, or go stale against a row Obsidian re-rendered.
+ */
+export function applyCompactLabels(
+  titles: readonly HTMLElement[],
+  index: ChainIndex | null
+): void {
+  for (const title of titles) {
+    const path = title.getAttribute("data-path");
+    if (!path) continue;
+    const run = index?.runByTip.get(path);
+    const wrapper = title.parentElement;
+    if (run) {
+      const parts = compactLabel(run.segments);
+      const text = parts.map((p) => p.text).join("");
+      // Compared on the concatenated text, not on the parts: it is what
+      // changes when a run changes, and `textContent` already reads through
+      // the spans. Rebuilding them every pass would churn the DOM on every
+      // mutation the observer sees.
+      if (title.textContent !== text) {
+        title.replaceChildren(
+          ...parts.map((p) => {
+            // Created on the row's own window: a popout explorer is not
+            // this one's document.
+            return title.ownerDocument.win.createSpan({
+              cls: `spaces-compact-${p.role}`,
+              text: p.text,
+            });
+          })
+        );
+      }
+      wrapper?.classList.add(CLS.compacted);
+    } else if (wrapper?.classList.contains(CLS.compacted)) {
+      const name = path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path;
+      if (title.textContent !== name) title.textContent = name;
+      wrapper.classList.remove(CLS.compacted);
+    }
   }
 }
