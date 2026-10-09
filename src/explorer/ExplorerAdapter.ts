@@ -254,6 +254,18 @@ export class ExplorerAdapter {
  * belongs to Obsidian, which also uses it for inline rename, so restoring it
  * exactly matters more than the labelling does.
  *
+ * WHAT IS WRITTEN, AND WHAT IS NOT. `titles` are `[data-path]` elements, which
+ * in Obsidian are `.tree-item-self` — the ROW, whose children are the collapse
+ * chevron and `.tree-item-inner`. The row is never written. The label goes on
+ * `SEL.rowText` inside it, resolved per row, so the chevron and the element
+ * Obsidian makes contenteditable for inline rename both survive a
+ * compact-then-restore cycle untouched.
+ *
+ * FAILS OPEN PER ROW. A row with no text element is skipped entirely — not
+ * labelled on the row as a fallback, and not even classed. A row we cannot
+ * label correctly is better left exactly as Obsidian drew it than rebuilt into
+ * a shape Obsidian did not make and will not restore.
+ *
  * RESTORATION IS STATELESS. The original text of a folder row is the path's
  * last segment, so nothing is stashed in a data attribute and nothing can be
  * stashed wrong, or go stale against a row Obsidian re-rendered.
@@ -267,6 +279,13 @@ export function applyCompactLabels(
     if (!path) continue;
     const run = index?.runByTip.get(path);
     const wrapper = title.parentElement;
+    // `:scope >` is deliberate: a collapsed folder still holds its
+    // `.tree-item-children` subtree in the DOM, and a plain descendant query
+    // from the WRAPPER would find a child row's text element first. Searching
+    // the row itself keeps that impossible either way, and the direct-child
+    // form says so.
+    const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
+    if (!textEl) continue;
     if (run) {
       const parts = compactLabel(run.segments);
       const text = parts.map((p) => p.text).join("");
@@ -274,12 +293,12 @@ export function applyCompactLabels(
       // changes when a run changes, and `textContent` already reads through
       // the spans. Rebuilding them every pass would churn the DOM on every
       // mutation the observer sees.
-      if (title.textContent !== text) {
-        title.replaceChildren(
+      if (textEl.textContent !== text) {
+        textEl.replaceChildren(
           ...parts.map((p) => {
             // Created on the row's own window: a popout explorer is not
             // this one's document.
-            return title.ownerDocument.win.createSpan({
+            return textEl.ownerDocument.win.createSpan({
               cls: `spaces-compact-${p.role}`,
               text: p.text,
             });
@@ -289,7 +308,7 @@ export function applyCompactLabels(
       wrapper?.classList.add(CLS.compacted);
     } else if (wrapper?.classList.contains(CLS.compacted)) {
       const name = path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path;
-      if (title.textContent !== name) title.textContent = name;
+      if (textEl.textContent !== name) textEl.textContent = name;
       wrapper.classList.remove(CLS.compacted);
     }
   }

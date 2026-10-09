@@ -335,14 +335,25 @@ describe("compacted row label roles", () => {
   const dimmed = ["spaces-compact-lead", "spaces-compact-sep"];
   for (const role of ["lead", "sep", "tip"] as const) {
     it(`spaces-compact-${role} is the class a rendered span carries`, () => {
-      const host = document.createElement("div");
+      // The real row shape: a `.tree-item` wrapper holding the
+      // `[data-path]` row (`.tree-item-self`), which holds the collapse
+      // chevron and the `.tree-item-inner` the label is written to. The
+      // spans land in the text element, not on the row.
+      const wrapper = document.createElement("div");
+      wrapper.className = "tree-item";
       const title = document.createElement("div");
-      title.className = "tree-item-inner";
+      title.className = "tree-item-self";
       title.setAttribute("data-path", "Work/Clients");
-      title.textContent = "Clients";
-      host.appendChild(title);
+      const chevron = document.createElement("div");
+      chevron.className = "tree-item-icon collapse-icon";
+      const textEl = document.createElement("div");
+      textEl.className = "tree-item-inner";
+      textEl.textContent = "Clients";
+      title.appendChild(chevron);
+      title.appendChild(textEl);
+      wrapper.appendChild(title);
       applyCompactLabels([title], INDEX);
-      expect(title.querySelector(`.spaces-compact-${role}`)).not.toBeNull();
+      expect(textEl.querySelector(`.spaces-compact-${role}`)).not.toBeNull();
     });
   }
 

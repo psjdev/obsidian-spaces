@@ -83,6 +83,22 @@ export const SEL = {
    */
   navHeader: ".nav-header",
   treeRow: ".tree-item-self",
+  /**
+   * The TEXT element inside a row, and the only thing in the tree whose
+   * contents this plugin ever writes (`applyCompactLabels`).
+   *
+   * Measured against 1.13.7: the `[data-path]` element is `.tree-item-self`,
+   * and its children are the collapse chevron (`.tree-item-icon`) and this.
+   * Writing the label onto the `[data-path]` row therefore DESTROYS the
+   * chevron and this element, and a row rebuilt that way does not come back
+   * when the label is removed — it is left as a bare text node until Obsidian
+   * itself re-renders. Obsidian also makes THIS element contenteditable for
+   * inline rename, so it is the element the user's own edits land on.
+   *
+   * Resolved from the row, never assumed: a row that does not have one is
+   * left exactly as Obsidian drew it rather than labelled on the row instead.
+   */
+  rowText: ".tree-item-inner",
 } as const;
 
 /**

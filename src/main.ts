@@ -1986,12 +1986,18 @@ export default class SpacesPlugin extends Plugin {
     const root = this.activeSpaceRoot();
     if (root !== null && isVaultRoot(folderPath)) {
       // Resolved ONCE here, before the hoist can hand
-      // the seam an out-of-input item — the only case `isAllowed`
-      // (nativeExplorerSort.ts) ever actually calls `livePermits` for (every
-      // other folder's `out` is an identity subset of `items`, so the
-      // permission check there always short-circuits unreached). This is
+      // the seam an out-of-input item. This used to be the only case
+      // `isAllowed` (nativeExplorerSort.ts) ever called `livePermits` for,
+      // because every other folder's `out` was an identity subset of `items`
+      // and the permission check short-circuited unreached. Compaction
+      // falsified that: `substituteCompacted` can return a run's tip for ANY
+      // folder, so `isAllowed` consults `livePermits` for ordinary folders
+      // too, and the field this sets is read there as well — see
+      // `permitsForThisCall`'s own comment for why a value left behind by an
+      // earlier call is still harmless. This is
       // the one call site for the whole sort-seam invocation this call is
-      // part of: the recursive `filterAndOrderFolder(root, hoisted)` call below
+      // part of: the recursive `filterAndOrderFolder(root, hoisted, view)`
+      // call below
       // reaches this branch again only if `root` were ALSO the vault root,
       // which `activeSpaceRoot()` never returns (a space root may not be the
       // vault root), so it does not re-resolve. `livePermits` reads this
@@ -2650,20 +2656,20 @@ export default class SpacesPlugin extends Plugin {
    * of the transform — `filterVisibleItems` asks `decisionFor(p).visible`, and
    * `buildVisibilitySnapshot` answers that with `visible.has(p)` and nothing
    * else); the resolved order map by identity (`DefinitionStore.mutate` clones
-   * on every write, so it over-invalidates, never under); and the selection,
-   * so two spaces showing the same rows are told apart; and the chain index
+   * on every write, so it over-invalidates, never under); the selection, so
+   * two spaces showing the same rows are told apart; and the chain index
    * (`chainIndexNow`) by identity, because compaction changes what the seam
    * RETURNS without changing visibility, so flipping `compactFolderChains`
    * moves none of the other three and the tree would keep its old shape.
    * That is only affordable because `rebuildChainIndex` reuses the previous
    * index object while the runs are unchanged; a fresh object per snapshot
    * would defeat the memo on every `file-open`.
-   * Outside the key are
-   * only Obsidian's own triggers — a vault mutation re-sorts that folder
-   * anyway, a native sort-mode pick calls `sort()` itself — plus a freshly
-   * patched view, which `ensureOrderingPatched` invalidates explicitly. If
-   * `requestResort` fails the memo is dropped, so the next event retries
-   * rather than leaving the previous filter on screen.
+   *
+   * Outside the key are only Obsidian's own triggers — a vault mutation
+   * re-sorts that folder anyway, a native sort-mode pick calls `sort()`
+   * itself — plus a freshly patched view, which `ensureOrderingPatched`
+   * invalidates explicitly. If `requestResort` fails the memo is dropped, so
+   * the next event retries rather than leaving the previous filter on screen.
    */
   private applyFilterAndOrdering(): void {
     if (this.sortedViews.length === 0) return;

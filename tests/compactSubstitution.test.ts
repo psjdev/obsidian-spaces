@@ -188,6 +188,13 @@ describe("compaction through the real sort seam", () => {
     const out = h.sortRootThroughSeam();
     // `patch` returns the INPUT array when it rejects, so "is this the
     // fallback?" is a question about the array, not only about its contents.
+    // Both halves are asserted. Identity is the question the sentence above
+    // asks — `rawRootItems()` re-runs the native sort, so it is an equal copy
+    // of the array the seam was handed rather than that array itself, which
+    // makes this the weaker of the two here; the value comparison is what
+    // actually catches the fallback, since a rejection would hand back
+    // `["Secret", "Work"]`.
+    expect(out).not.toBe(raw);
     expect(out).not.toEqual(raw);
     expect(out).toHaveLength(1);
   });
