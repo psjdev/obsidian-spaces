@@ -1,4 +1,4 @@
-import { ALL_OWNED_CLASSES, CLS, CLS_ELSEWHERE, SEL } from "./selectors";
+import { ALL_OWNED_CLASSES, CLS, CLS_COMPACT_PREFIX, CLS_ELSEWHERE, SEL } from "./selectors";
 import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
 import { compactLabel } from "../ui/compactLabel";
 import type { ChainIndex } from "../visibility/compactChains";
@@ -124,9 +124,9 @@ export class ExplorerAdapter {
       for (const cls of ALL_OWNED_CLASSES) {
         c.querySelectorAll(`.${cls}`).forEach((el) => el.classList.remove(cls));
       }
-      // Through the one function that owns this class, so the text it replaced
-      // is restored with it. Stripping the class alone would leave a row reading
-      // `Work/Clients` with nothing left to say it should not.
+      // Through the one function that owns this class, so the prefix element
+      // it inserted goes with it. Stripping the class alone would leave a row
+      // reading `Work/Clients` with nothing left to say it should not.
       const titles: HTMLElement[] = [];
       c.querySelectorAll<HTMLElement>(SEL.titleWithPath).forEach((t) => titles.push(t));
       applyCompactLabels(titles, null);
@@ -256,19 +256,26 @@ export class ExplorerAdapter {
  *
  * WHAT IS WRITTEN, AND WHAT IS NOT. `titles` are `[data-path]` elements, which
  * in Obsidian are `.tree-item-self` — the ROW, whose children are the collapse
- * chevron and `.tree-item-inner`. The row is never written. The label goes on
- * `SEL.rowText` inside it, resolved per row, so the chevron and the element
- * Obsidian makes contenteditable for inline rename both survive a
- * compact-then-restore cycle untouched.
+ * chevron and `.tree-item-inner`. NEITHER is written. `.tree-item-inner`
+ * especially: Obsidian seeds its inline-rename editor from that element's
+ * text, so a joined label written there offered `Clients/Meetings` for a
+ * folder named `Meetings` and the commit failed with ENOENT against
+ * `Clients/Clients/Meetings` — a compacted folder could not be renamed at all.
+ * `SEL.rowText` documents that in full.
  *
- * FAILS OPEN PER ROW. A row with no text element is skipped entirely — not
- * labelled on the row as a fallback, and not even classed. A row we cannot
- * label correctly is better left exactly as Obsidian drew it than rebuilt into
- * a shape Obsidian did not make and will not restore.
+ * Instead ONE element of our own (`CLS_COMPACT_PREFIX`) carries the lead and
+ * the separator, inserted as a sibling immediately before the text element.
+ * The row reads `Clients/` + `Meetings` exactly as it did, and the inner still
+ * holds only `Meetings`.
  *
- * RESTORATION IS STATELESS. The original text of a folder row is the path's
- * last segment, so nothing is stashed in a data attribute and nothing can be
- * stashed wrong, or go stale against a row Obsidian re-rendered.
+ * FAILS OPEN PER ROW. A row with no text element is skipped entirely — no
+ * prefix, and not even classed. There is nothing to anchor the prefix to, and
+ * a class with no label is a style on a row that reads as an ordinary folder.
+ *
+ * RESTORATION IS REMOVING ONE ELEMENT, plus the class. Nothing else. No text
+ * is rewritten, so nothing can be restored wrongly, nothing is stashed in a
+ * data attribute, and the row comes back as the elements Obsidian built rather
+ * than as a rebuild that resembles them.
  */
 export function applyCompactLabels(
   titles: readonly HTMLElement[],
@@ -283,33 +290,49 @@ export function applyCompactLabels(
     // `.tree-item-children` subtree in the DOM, and a plain descendant query
     // from the WRAPPER would find a child row's text element first. Searching
     // the row itself keeps that impossible either way, and the direct-child
-    // form says so.
+    // form says so. The same reasoning applies to the prefix below.
     const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
     if (!textEl) continue;
+    const existing = title.querySelector<HTMLElement>(`:scope > .${CLS_COMPACT_PREFIX}`);
     if (run) {
-      const parts = compactLabel(run.segments);
+      // The TIP part is dropped, and that is not an oversight. `compactLabel`
+      // still returns it because it describes the whole label; the element it
+      // would be drawn into already contains it, as the folder's real name,
+      // and writing that element is the defect this shape exists to avoid.
+      // A run is two segments or more (`runFrom`), so what is left is never
+      // empty.
+      const parts = compactLabel(run.segments).filter((p) => p.role !== "tip");
       const text = parts.map((p) => p.text).join("");
+      let prefix = existing;
+      if (!prefix) {
+        // Created on the row's own window: a popout explorer is not this
+        // one's document.
+        prefix = textEl.ownerDocument.win.createSpan({ cls: CLS_COMPACT_PREFIX });
+        title.insertBefore(prefix, textEl);
+      }
       // Compared on the concatenated text, not on the parts: it is what
       // changes when a run changes, and `textContent` already reads through
       // the spans. Rebuilding them every pass would churn the DOM on every
-      // mutation the observer sees.
-      if (textEl.textContent !== text) {
-        textEl.replaceChildren(
-          ...parts.map((p) => {
-            // Created on the row's own window: a popout explorer is not
-            // this one's document.
-            return textEl.ownerDocument.win.createSpan({
+      // mutation the observer sees — and REUSING the prefix rather than
+      // appending a second one is what keeps a repeated pass idempotent.
+      if (prefix.textContent !== text) {
+        prefix.replaceChildren(
+          ...parts.map((p) =>
+            textEl.ownerDocument.win.createSpan({
               cls: `spaces-compact-${p.role}`,
               text: p.text,
-            });
-          })
+            })
+          )
         );
       }
       wrapper?.classList.add(CLS.compacted);
-    } else if (wrapper?.classList.contains(CLS.compacted)) {
-      const name = path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path;
-      if (textEl.textContent !== name) textEl.textContent = name;
-      wrapper.classList.remove(CLS.compacted);
+    } else {
+      // Unconditional, and cheap: both are no-ops on a row that was never
+      // compacted. Gating them on the class would make the class the record
+      // of what to undo, which is the kind of stashed state this pass does
+      // not keep.
+      existing?.remove();
+      wrapper?.classList.remove(CLS.compacted);
     }
   }
 }

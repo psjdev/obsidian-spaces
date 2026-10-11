@@ -329,33 +329,67 @@ describe("picker column layout", () => {
 });
 
 describe("compacted row label roles", () => {
+  /**
+   * The real row shape: a `.tree-item` wrapper holding the `[data-path]` row
+   * (`.tree-item-self`), whose children are the collapse chevron and
+   * `.tree-item-inner`.
+   *
+   * `.tree-item-inner` is NEVER written — Obsidian seeds its inline-rename
+   * editor from it, and a joined label there makes a compacted folder
+   * unrenameable. The lead and separator spans go into an owned prefix
+   * element inserted before it, so what the stylesheet has to reach is now a
+   * span one level deeper than it used to be.
+   */
+  function compactedRow(): { title: HTMLElement; textEl: HTMLElement } {
+    const wrapper = document.createElement("div");
+    wrapper.className = "tree-item";
+    const title = document.createElement("div");
+    title.className = "tree-item-self";
+    title.setAttribute("data-path", "Work/Clients");
+    const chevron = document.createElement("div");
+    chevron.className = "tree-item-icon collapse-icon";
+    const textEl = document.createElement("div");
+    textEl.className = "tree-item-inner";
+    textEl.textContent = "Clients";
+    title.appendChild(chevron);
+    title.appendChild(textEl);
+    wrapper.appendChild(title);
+    applyCompactLabels([title], INDEX);
+    return { title, textEl };
+  }
+
   // `applyCompactLabels` classes each span `spaces-compact-<role>` from
   // `compactLabel`'s roles. The stylesheet cannot import them, so a role
   // renamed on one side only would silently stop dimming.
   const dimmed = ["spaces-compact-lead", "spaces-compact-sep"];
-  for (const role of ["lead", "sep", "tip"] as const) {
+  for (const role of ["lead", "sep"] as const) {
     it(`spaces-compact-${role} is the class a rendered span carries`, () => {
-      // The real row shape: a `.tree-item` wrapper holding the
-      // `[data-path]` row (`.tree-item-self`), which holds the collapse
-      // chevron and the `.tree-item-inner` the label is written to. The
-      // spans land in the text element, not on the row.
-      const wrapper = document.createElement("div");
-      wrapper.className = "tree-item";
-      const title = document.createElement("div");
-      title.className = "tree-item-self";
-      title.setAttribute("data-path", "Work/Clients");
-      const chevron = document.createElement("div");
-      chevron.className = "tree-item-icon collapse-icon";
-      const textEl = document.createElement("div");
-      textEl.className = "tree-item-inner";
-      textEl.textContent = "Clients";
-      title.appendChild(chevron);
-      title.appendChild(textEl);
-      wrapper.appendChild(title);
-      applyCompactLabels([title], INDEX);
-      expect(textEl.querySelector(`.spaces-compact-${role}`)).not.toBeNull();
+      const { title } = compactedRow();
+      expect(title.querySelector(`.spaces-compact-${role}`)).not.toBeNull();
     });
   }
+
+  it("the tip is not rendered, so the stylesheet has nothing of ours to reach", () => {
+    // `compactLabel` still returns the tip part; the adapter deliberately
+    // does not draw it, because `.tree-item-inner` already is it.
+    const { title, textEl } = compactedRow();
+    expect(title.querySelector(".spaces-compact-tip")).toBeNull();
+    expect(textEl.children.length).toBe(0);
+  });
+
+  it("the dimmed spans are reachable from inside the owned prefix", () => {
+    // The rules are written unscoped, so they must match a span wherever the
+    // adapter puts it. Asserted against the REAL nesting rather than a bare
+    // span, which is what would silently stop being true if the rules ever
+    // gained an ancestor the prefix does not provide.
+    const { title } = compactedRow();
+    for (const cls of dimmed) {
+      const span = title.querySelector<HTMLElement>(`.${cls}`);
+      expect(span, cls).not.toBeNull();
+      const matching = rules.filter((r) => span!.matches(r.selector));
+      expect(matching.some((r) => r.style.getPropertyValue("opacity") !== ""), cls).toBe(true);
+    }
+  });
 
   it("the stylesheet steps back the lead and the separator, and leaves the tip alone", () => {
     for (const cls of dimmed) {
