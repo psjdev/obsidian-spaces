@@ -82,6 +82,7 @@ import {
   type ChainIndex,
   type ChainTree,
 } from "./visibility/compactChains";
+import type { CompactLabelOptions } from "./ui/compactLabel";
 import type { VisibilitySnapshot } from "./visibility/VisibilityEngine";
 import {
   elsewhereOf,
@@ -2373,8 +2374,32 @@ export default class SpacesPlugin extends Plugin {
     // snapshot's runs and not the previous one's. It is the SAME object the
     // sort seam reads: the adapter never builds its own, so the labels and the
     // substitution cannot disagree about what is compacted.
-    this.adapter.setChainIndex(this.chainIndexNow);
+    this.adapter.setChainIndex(this.chainIndexNow, this.compactLabelOptions());
     this.adapter.apply(this.filteringPaused ? null : snap, this.elsewhereFirstPath());
+  }
+
+  /**
+   * The two label settings, read fresh and shaped for `compactLabel`.
+   *
+   * Read HERE rather than held, for the same reason `elsewhereFirstPath` is:
+   * both settings change without this method being re-created, and the
+   * definitions subscriber reaches this through `controller.refresh()` on
+   * every write. Neither moves the chain index — abbreviation changes how a
+   * run READS, not which folders form one — so `rebuildChainIndex` keeps the
+   * previous object, the re-sort memo correctly declines to re-sort, and the
+   * adapter's own pass redraws the labels on its own.
+   *
+   * The threshold converts from string to number at this single point. It is
+   * stored as a string because the settings tab has only `toggle` and
+   * `dropdown` to offer, and a dropdown's value is a string; `schema.ts`
+   * guarantees it is one of four numerals, so `Number` cannot produce NaN.
+   */
+  private compactLabelOptions(): CompactLabelOptions {
+    const settings = this.defs.get().settings;
+    return {
+      abbreviate: settings.abbreviateCompactedPaths,
+      threshold: Number(settings.compactPathThreshold),
+    };
   }
 
   /**

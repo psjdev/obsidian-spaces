@@ -8,6 +8,7 @@ import {
   type StripPlacement,
   type ActiveSpaceStyle,
   type DropIndicatorStyle,
+  type CompactPathThreshold,
 } from "../types";
 import { normalizeTag } from "../visibility/tagMatch";
 import { canonicalPath } from "../visibility/glob";
@@ -19,6 +20,12 @@ export type ValidationResult =
 const COLOR = /^#[0-9a-f]{6}$/i;
 const STRIP_PLACEMENTS = new Set(["bottom", "top", "left", "right"]);
 const DROP_INDICATOR_STYLES = new Set(["box", "line"]);
+/**
+ * Compared as STRINGS, so a hand-edited `compactPathThreshold: 4` falls back
+ * rather than being accepted as a second spelling of the same setting. See
+ * `CompactPathThreshold` for why the stored value is a string at all.
+ */
+const COMPACT_PATH_THRESHOLDS = new Set(["3", "4", "5", "6"]);
 /**
  * Each stored value and the style it means. `box` and `bold` were the names
  * up to 0.6.0: `box` drew the theme's shading and nothing else by then, which
@@ -400,6 +407,32 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // collapse to the same answer. Strict for the same reason:
         // `compactFolderChains: 1` must not read as true.
         compactFolderChains: st.compactFolderChains === true,
+        // `!== false`, and this is the ONE key on this list that is looser
+        // than its neighbours on purpose.
+        //
+        // Every boolean above answers "absent or unrecognised means OFF",
+        // because turning something on uninvited rearranges an explorer
+        // someone was reading. This one defaults ON, so the question inverts:
+        // absent or unrecognised must mean ON, and only a literal `false` --
+        // the value the toggle itself writes -- turns it off.
+        //
+        // Why it differs: without it, compaction is actively broken on a deep
+        // vault. The joined label overflows a narrow pane, `text-overflow:
+        // ellipsis` truncates from the right, and the TIP is the first thing
+        // lost -- the one segment that says which folder the row is. The
+        // opt-in a user already made by enabling `compactFolderChains` should
+        // not also require opting into it working. A strict check here would
+        // leave a document holding any unrecognised value on the broken label,
+        // which is the failure this setting exists to remove.
+        abbreviateCompactedPaths: st.abbreviateCompactedPaths !== false,
+        // Degrades rather than rejects, like `stripPlacement` and
+        // `dropIndicatorStyle` above: an unusable threshold is a cosmetic
+        // complaint and must never cost someone their spaces.
+        compactPathThreshold:
+          typeof st.compactPathThreshold === "string" &&
+          COMPACT_PATH_THRESHOLDS.has(st.compactPathThreshold)
+            ? (st.compactPathThreshold as CompactPathThreshold)
+            : "3",
         // Defaults to FALSE for the same reason as the two above, and because
         // it changes how every existing install looks. Nothing here touches a
         // space's stored color: this key governs drawing alone.

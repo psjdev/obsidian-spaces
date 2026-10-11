@@ -32,6 +32,16 @@
   opacity: 0.6;
 }
 
+/* The stand-in for the folders a shortened label left out. Drawn FAINTER than
+   the lead beside it, because it is not a folder name at all: a reader should
+   see "there was more above this" without mistaking `..` for a folder that is
+   actually called that. A separate rule rather than another selector on the
+   pair above is the whole reason `gap` is its own role -- the parts are
+   already addressable, so this is a style change and nothing else. */
+.spaces-compact-gap {
+  opacity: 0.45;
+}
+
 /* The elsewhere group's boundary (folder-space design §5). A border on the
    first row rather than a separator element: the tree is Obsidian's, and a
    row we already class costs nothing to draw on. Unlike the de-emphasis pair

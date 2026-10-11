@@ -28,8 +28,27 @@
 import { describe, expect, it } from "vitest";
 import { ExplorerAdapter, applyCompactLabels } from "../src/explorer/ExplorerAdapter";
 import { CLS, CLS_COMPACT_PREFIX, SEL } from "../src/explorer/selectors";
+import type { CompactLabelOptions } from "../src/ui/compactLabel";
 import type { VisibilitySnapshot } from "../src/visibility/VisibilityEngine";
-import { buildChainIndex } from "../src/visibility/compactChains";
+import { buildChainIndex, type ChainIndex } from "../src/visibility/compactChains";
+
+/** The label the feature shipped with: the whole joined path, never shortened. */
+const PLAIN: CompactLabelOptions = { abbreviate: false, threshold: 3 };
+/** Shortening on at the shipped default. */
+const ABBREV: CompactLabelOptions = { abbreviate: true, threshold: 3 };
+
+/**
+ * `applyCompactLabels` with the shipped label, so every assertion below about
+ * the prefix, the text element and restoration reads the way it did before
+ * shortening existed. The shortening block passes `ABBREV` explicitly.
+ */
+const label = (
+  titles: readonly HTMLElement[],
+  index: ChainIndex | null,
+  opts: CompactLabelOptions = PLAIN
+): void => {
+  applyCompactLabels(titles, index, opts);
+};
 
 interface Row {
   /** The `.tree-item` wrapper, which carries our classes. */
@@ -96,7 +115,7 @@ describe("applyCompactLabels", () => {
   it("makes a tip row READ as the joined path", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     // What the user sees is the row, which is now the prefix plus Obsidian's
     // own text element. Neither half says `Work/Clients` on its own.
     expect(r.title.textContent).toBe("Work/Clients");
@@ -115,10 +134,10 @@ describe("applyCompactLabels", () => {
     const r = row(host, "Work/Clients", "Clients");
     const before = r.textEl.textContent;
 
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.textEl.textContent).toBe("Clients");
 
-    applyCompactLabels([r.title], null);
+    label([r.title], null);
     expect(r.textEl.textContent).toBe("Clients");
     expect(r.textEl.textContent).toBe(before);
   });
@@ -130,7 +149,7 @@ describe("applyCompactLabels", () => {
     // the defect in the first place.
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.textEl.children.length).toBe(0);
     expect(Array.from(r.textEl.childNodes).map((n) => n.nodeType)).toEqual([3]);
   });
@@ -138,7 +157,7 @@ describe("applyCompactLabels", () => {
   it("puts the prefix immediately BEFORE the text element, inside the row", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     const prefix = prefixOf(r.title);
     expect(prefix).not.toBeNull();
     expect(prefix!.textContent).toBe("Work/");
@@ -151,7 +170,7 @@ describe("applyCompactLabels", () => {
   it("leaves a row that is not a tip alone", () => {
     const host = document.createElement("div");
     const r = row(host, "Archive", "Archive");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.textEl.textContent).toBe("Archive");
     expect(prefixOf(r.title)).toBeNull();
   });
@@ -160,8 +179,8 @@ describe("applyCompactLabels", () => {
   it("takes the prefix away when the index goes away", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
-    applyCompactLabels([r.title], null);
+    label([r.title], INDEX);
+    label([r.title], null);
     expect(prefixOf(r.title)).toBeNull();
     expect(r.title.textContent).toBe("Clients");
   });
@@ -169,8 +188,8 @@ describe("applyCompactLabels", () => {
   it("takes the prefix away when a row stops being a tip", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
-    applyCompactLabels([r.title], EMPTY);
+    label([r.title], INDEX);
+    label([r.title], EMPTY);
     expect(prefixOf(r.title)).toBeNull();
     expect(r.title.textContent).toBe("Clients");
   });
@@ -178,8 +197,8 @@ describe("applyCompactLabels", () => {
   it("is idempotent, so a repeated pass does not stack prefixes", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.title.querySelectorAll(`.${CLS_COMPACT_PREFIX}`).length).toBe(1);
     expect(r.title.textContent).toBe("Work/Clients");
     expect(prefixOf(r.title)!.children.length).toBe(2);
@@ -191,10 +210,10 @@ describe("applyCompactLabels", () => {
     // mutation the observer sees. Identity is what tells the two apart.
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     const firstPrefix = prefixOf(r.title);
     const first = Array.from(firstPrefix!.children);
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     const second = Array.from(prefixOf(r.title)!.children);
     expect(prefixOf(r.title)).toBe(firstPrefix);
     expect(second.length).toBe(2);
@@ -204,16 +223,16 @@ describe("applyCompactLabels", () => {
   it("adds spaces-compacted with the prefix and removes it with the restore", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.wrapper.classList.contains(CLS.compacted)).toBe(true);
-    applyCompactLabels([r.title], null);
+    label([r.title], null);
     expect(r.wrapper.classList.contains(CLS.compacted)).toBe(false);
   });
 
   it("never gives the class to a row that is not a tip", () => {
     const host = document.createElement("div");
     const r = row(host, "Archive", "Archive");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.wrapper.classList.contains(CLS.compacted)).toBe(false);
   });
 
@@ -224,7 +243,7 @@ describe("applyCompactLabels", () => {
     // the roles survive the move off `.tree-item-inner`.
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(Array.from(prefixOf(r.title)!.children).map((c) => c.className)).toEqual([
       "spaces-compact-lead",
       "spaces-compact-sep",
@@ -238,7 +257,7 @@ describe("applyCompactLabels", () => {
     // the defect.
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.title.querySelector(".spaces-compact-tip")).toBeNull();
     expect(r.title.textContent).toBe("Work/Clients");
   });
@@ -246,8 +265,8 @@ describe("applyCompactLabels", () => {
   it("restores by removing one element, leaving no spans behind", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
-    applyCompactLabels([r.title], EMPTY);
+    label([r.title], INDEX);
+    label([r.title], EMPTY);
     expect(r.title.querySelectorAll("[class^='spaces-compact']").length).toBe(0);
     expect(r.title.textContent).toBe("Clients");
   });
@@ -267,11 +286,11 @@ describe("applyCompactLabels", () => {
     const chevronBefore = r.chevron;
     const textBefore = r.textEl;
 
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     expect(r.title.querySelector(SEL.rowText)).toBe(textBefore);
     expect(r.chevron.parentElement).toBe(r.title);
 
-    applyCompactLabels([r.title], null);
+    label([r.title], null);
     expect(Array.from(r.title.children)).toEqual([chevronBefore, textBefore]);
     expect(r.title.querySelector(SEL.rowText)).toBe(textBefore);
     expect(r.chevron.parentElement).toBe(r.title);
@@ -281,7 +300,7 @@ describe("applyCompactLabels", () => {
   it("writes no text of its own onto the data-path row", () => {
     const host = document.createElement("div");
     const r = row(host, "Work/Clients", "Clients");
-    applyCompactLabels([r.title], INDEX);
+    label([r.title], INDEX);
     // Everything the row reads comes from an element. A bare text node here
     // is the signature of a label written onto the row itself.
     const own = Array.from(r.title.childNodes).filter((n) => n.nodeType === 3);
@@ -296,7 +315,7 @@ describe("applyCompactLabels", () => {
   it("leaves a row with no text element completely alone", () => {
     const host = document.createElement("div");
     const title = rowWithoutText(host, "Work/Clients", "Clients");
-    applyCompactLabels([title], INDEX);
+    label([title], INDEX);
     expect(title.textContent).toBe("Clients");
     expect(title.children.length).toBe(0);
     expect(prefixOf(title)).toBeNull();
@@ -312,7 +331,7 @@ describe("applyCompactLabels", () => {
     children.className = "tree-item-children";
     parent.wrapper.appendChild(children);
     const child = row(children, "Work/Clients/a.md", "a");
-    applyCompactLabels([parent.title, child.title], INDEX);
+    label([parent.title, child.title], INDEX);
     expect(parent.title.textContent).toBe("Work/Clients");
     expect(prefixOf(child.title)).toBeNull();
     expect(child.textEl.textContent).toBe("a");
@@ -352,7 +371,7 @@ describe("ExplorerAdapter label wiring", () => {
     const { container, title, textEl } = mount();
     const a = new ExplorerAdapter();
     a.bind(container);
-    a.setChainIndex(INDEX);
+    a.setChainIndex(INDEX, PLAIN);
     a.apply(SNAP);
     // Trimmed: `mount` builds the row from indented HTML, so the row carries
     // Obsidian-irrelevant whitespace text nodes the hand-built fixture above
@@ -377,7 +396,7 @@ describe("ExplorerAdapter label wiring", () => {
     const { container, title, textEl } = mount();
     const a = new ExplorerAdapter();
     a.bind(container);
-    a.setChainIndex(INDEX);
+    a.setChainIndex(INDEX, PLAIN);
     a.apply(SNAP);
     a.unbind();
     expect(prefixOf(title)).toBeNull();
@@ -387,5 +406,245 @@ describe("ExplorerAdapter label wiring", () => {
     // The chevron and the text element are still Obsidian's own.
     expect(title.querySelector(SEL.rowText)).toBe(textEl);
     expect(title.querySelector(".collapse-icon")).not.toBeNull();
+  });
+});
+
+/**
+ * A SHORTENED row, and the tooltip that makes it readable.
+ *
+ * The run here is the one measured in a real vault at a 246px pane:
+ * `Research/2026/Q4/Projects/Atlas/Design/Decisions`, 48 characters, whose
+ * joined label overflowed so far that `.tree-item-inner` — the TIP, the one
+ * segment naming the row — was laid out at a client width of zero. Shortened
+ * to `../Design/Decisions` it fits, and the folders it passed through move to
+ * a tooltip instead of being silently cut off.
+ *
+ * Everything the suite above pins still holds here, and two of those
+ * assertions are repeated against the shortened label rather than assumed:
+ * `.tree-item-inner` is still never written, and restoration still returns the
+ * row to Obsidian's own elements.
+ */
+describe("applyCompactLabels, shortened", () => {
+  const CHAIN = [
+    "Research",
+    "Research/2026",
+    "Research/2026/Q4",
+    "Research/2026/Q4/Projects",
+    "Research/2026/Q4/Projects/Atlas",
+    "Research/2026/Q4/Projects/Atlas/Design",
+    "Research/2026/Q4/Projects/Atlas/Design/Decisions",
+  ];
+  const TIP = CHAIN[CHAIN.length - 1];
+  const FULL = "Research/2026/Q4/Projects/Atlas/Design/Decisions";
+
+  const DEEP_TREE = {
+    visibleChildrenOf: (p: string) => {
+      const i = CHAIN.indexOf(p);
+      if (i >= 0 && i < CHAIN.length - 1) return [CHAIN[i + 1]];
+      if (p === TIP) return [`${TIP}/why.md`];
+      return [];
+    },
+    isFolder: (p: string) => CHAIN.includes(p),
+    isScaffold: (p: string) => CHAIN.includes(p),
+    parentOf: (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
+    nameOf: (p: string) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
+  };
+  const DEEP = buildChainIndex(CHAIN, DEEP_TREE);
+  /** Nothing indexed, which is what restoration hands the pass. */
+  const NONE = buildChainIndex([], DEEP_TREE);
+
+  const deepRow = (): ReturnType<typeof row> =>
+    row(document.createElement("div"), TIP, "Decisions");
+
+  it("renders the prefix as ../Design/, so the row reads ../Design/Decisions", () => {
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    expect(prefixOf(r.title)!.textContent).toBe("../Design/");
+    expect(r.title.textContent).toBe("../Design/Decisions");
+  });
+
+  it("still never writes the text element", () => {
+    // The defect the whole feature is shaped around does not get a pass
+    // because the label got shorter.
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    expect(r.textEl.textContent).toBe("Decisions");
+    expect(r.textEl.children.length).toBe(0);
+    expect(Array.from(r.textEl.childNodes).map((n) => n.nodeType)).toEqual([3]);
+    label([r.title], null, ABBREV);
+    expect(r.textEl.textContent).toBe("Decisions");
+  });
+
+  it("gives the gap its own span, so a stylesheet can tell it from a name", () => {
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    expect(Array.from(prefixOf(r.title)!.children).map((c) => c.className)).toEqual([
+      "spaces-compact-gap",
+      "spaces-compact-sep",
+      "spaces-compact-lead",
+      "spaces-compact-sep",
+    ]);
+  });
+
+  it("draws the whole joined path when shortening is off", () => {
+    const r = deepRow();
+    label([r.title], DEEP, PLAIN);
+    expect(r.title.textContent).toBe(FULL);
+    expect(prefixOf(r.title)!.textContent).toBe("Research/2026/Q4/Projects/Atlas/Design/");
+  });
+
+  it("switches back to the whole path when the setting goes off", () => {
+    // The same row, re-passed. The prefix is REUSED, so this also pins that
+    // the idempotence check compares text rather than skipping the rebuild.
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    label([r.title], DEEP, PLAIN);
+    expect(r.title.textContent).toBe(FULL);
+    expect(r.title.querySelectorAll(`.${CLS_COMPACT_PREFIX}`).length).toBe(1);
+    expect(r.title.querySelector(".spaces-compact-gap")).toBeNull();
+  });
+
+  it("leaves a run at the threshold in full", () => {
+    // Three folders, the run the design names, at the default threshold of 3.
+    const host = document.createElement("div");
+    const tree = {
+      visibleChildrenOf: (p: string) =>
+        p === "Clients"
+          ? ["Clients/Northwind"]
+          : p === "Clients/Northwind"
+            ? ["Clients/Northwind/Meetings"]
+            : p === "Clients/Northwind/Meetings"
+              ? ["Clients/Northwind/Meetings/a.md"]
+              : [],
+      isFolder: (p: string) => !p.endsWith(".md"),
+      isScaffold: (p: string) => !p.endsWith(".md"),
+      parentOf: DEEP_TREE.parentOf,
+      nameOf: DEEP_TREE.nameOf,
+    };
+    const index = buildChainIndex(["Clients"], tree);
+    const r = row(host, "Clients/Northwind/Meetings", "Meetings");
+    label([r.title], index, ABBREV);
+    expect(r.title.textContent).toBe("Clients/Northwind/Meetings");
+    expect(r.title.querySelector(".spaces-compact-gap")).toBeNull();
+    expect(r.title.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("carries the full path in aria-label when it shortened the label", () => {
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    expect(r.title.getAttribute("aria-label")).toBe(FULL);
+  });
+
+  it("sets no aria-label when the label was NOT shortened", () => {
+    const r = deepRow();
+    label([r.title], DEEP, PLAIN);
+    expect(r.title.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("takes the aria-label off when shortening is turned off", () => {
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    label([r.title], DEEP, PLAIN);
+    expect(r.title.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("takes the aria-label off on restoration", () => {
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    label([r.title], null, ABBREV);
+    expect(r.title.hasAttribute("aria-label")).toBe(false);
+    expect(prefixOf(r.title)).toBeNull();
+    expect(r.title.textContent).toBe("Decisions");
+  });
+
+  it("takes the aria-label off when the row stops being a tip", () => {
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    label([r.title], NONE, ABBREV);
+    expect(r.title.hasAttribute("aria-label")).toBe(false);
+  });
+
+  /**
+   * The attribute is ours only where our element is. A blanket removal would
+   * delete one Obsidian had put on a row this plugin never labelled, which is
+   * a loss of a real accessible name for no gain.
+   */
+  it("leaves an aria-label alone on a row it never compacted", () => {
+    const r = row(document.createElement("div"), "Archive", "Archive");
+    r.title.setAttribute("aria-label", "Obsidian's own");
+    label([r.title], DEEP, ABBREV);
+    expect(r.title.getAttribute("aria-label")).toBe("Obsidian's own");
+  });
+
+  it("restores by removing one element, leaving no spans and no attribute", () => {
+    const r = deepRow();
+    const chevronBefore = r.chevron;
+    const textBefore = r.textEl;
+    label([r.title], DEEP, ABBREV);
+    label([r.title], NONE, ABBREV);
+    expect(Array.from(r.title.children)).toEqual([chevronBefore, textBefore]);
+    expect(r.title.querySelectorAll("[class^='spaces-compact']").length).toBe(0);
+    expect(r.title.hasAttribute("aria-label")).toBe(false);
+  });
+
+  /** Through a real adapter, so the wiring cannot quietly stop passing them. */
+  describe("through the adapter", () => {
+    const SNAP: VisibilitySnapshot = {
+      decisionFor: () => ({
+        visible: true,
+        reason: "scaffold",
+        canRemoveMembership: false,
+        overridesIgnore: false,
+      }),
+      visiblePaths: () => new Set(CHAIN),
+    };
+
+    function mountDeep(): { container: HTMLElement; title: HTMLElement } {
+      document.body.innerHTML = `<div class="nav-files-container">
+        <div class="tree-item nav-folder">
+          <div class="tree-item-self nav-folder-title is-clickable mod-collapsible" data-path="${TIP}">
+            <div class="tree-item-icon collapse-icon"></div>
+            <div class="tree-item-inner nav-folder-title-content">Decisions</div>
+          </div>
+        </div>
+      </div>`;
+      const container = document.querySelector(".nav-files-container") as HTMLElement;
+      return { container, title: container.querySelector("[data-path]") as HTMLElement };
+    }
+
+    it("applyNow shortens and tooltips from the options it was handed", () => {
+      const { container, title } = mountDeep();
+      const a = new ExplorerAdapter();
+      a.bind(container);
+      a.setChainIndex(DEEP, ABBREV);
+      a.apply(SNAP);
+      expect(title.textContent!.trim()).toBe("../Design/Decisions");
+      expect(title.getAttribute("aria-label")).toBe(FULL);
+      expect((title.querySelector(SEL.rowText) as HTMLElement).textContent).toBe("Decisions");
+      a.unbind();
+    });
+
+    it("draws the whole path, and no tooltip, with shortening off", () => {
+      const { container, title } = mountDeep();
+      const a = new ExplorerAdapter();
+      a.bind(container);
+      a.setChainIndex(DEEP, PLAIN);
+      a.apply(SNAP);
+      expect(title.textContent!.trim()).toBe(FULL);
+      expect(title.hasAttribute("aria-label")).toBe(false);
+      a.unbind();
+    });
+
+    it("unbind takes the tooltip off with the prefix", () => {
+      const { container, title } = mountDeep();
+      const a = new ExplorerAdapter();
+      a.bind(container);
+      a.setChainIndex(DEEP, ABBREV);
+      a.apply(SNAP);
+      a.unbind();
+      expect(title.hasAttribute("aria-label")).toBe(false);
+      expect(prefixOf(title)).toBeNull();
+      expect((title.querySelector(SEL.rowText) as HTMLElement).textContent).toBe("Decisions");
+    });
   });
 });

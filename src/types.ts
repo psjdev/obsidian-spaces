@@ -103,6 +103,24 @@ export type ActiveSpaceStyle = "shaded" | "boxed" | "bolded";
  */
 export type DropIndicatorStyle = "box" | "line";
 
+/**
+ * How long a run of folders has to be before a compacted row shortens it.
+ *
+ * STRINGS, not numbers, and that is a deliberate consequence of the control.
+ * `SettingsTab` declares its controls to Obsidian's settings API, which offers
+ * `toggle` and `dropdown` and nothing else -- there is no free-text number
+ * field to store an integer from. A dropdown's value is a string, so the
+ * setting is a string, and the one place it is read converts it. Storing a
+ * number would mean the document and the control disagreed about the shape of
+ * the same setting.
+ *
+ * The range starts at 3 because 2 is the shortest run that compacts at all and
+ * abbreviating one is strictly worse (see `compactLabel`), and stops at 6
+ * because a run longer than six folders is already past any pane width this
+ * helps with.
+ */
+export type CompactPathThreshold = "3" | "4" | "5" | "6";
+
 interface SpacesSettings {
   globalIgnore: string[];
   /**
@@ -138,6 +156,26 @@ interface SpacesSettings {
    * and `schemaVersionFor` is untouched.
    */
   compactFolderChains: boolean;
+  /**
+   * Whether a long compacted run draws as `..` plus the last two folders
+   * instead of the whole joined path.
+   *
+   * ON by default, unlike every other boolean on this page, and the asymmetry
+   * is the point. Without it compaction is actively BROKEN on a deep vault:
+   * measured at a 246px pane, the joined label of a seven folder run overflows
+   * and `text-overflow: ellipsis` truncates from the right, leaving the tip's
+   * element at a client width of zero. The one segment that identifies the row
+   * is the first thing lost, which is worse than not compacting. Someone who
+   * turned `compactFolderChains` on has already opted in; they should not have
+   * to opt in a second time to it working.
+   *
+   * Only meaningful while `compactFolderChains` is on, and kept separate for
+   * the same reason as `showPinnedFolder`: it answers a different question,
+   * how a compacted row READS rather than whether rows compact at all.
+   */
+  abbreviateCompactedPaths: boolean;
+  /** How long a run must be before the above applies. See `CompactPathThreshold`. */
+  compactPathThreshold: CompactPathThreshold;
   /**
    * Whether *All* sits pinned to the LEFT of the switcher strip, outside
    * the scrolling rail, the way the `+` control is pinned to the right. *All*
@@ -300,6 +338,15 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     // Off by default. This changes how every curated space draws, and an
     // update must not rearrange an explorer the user was reading.
     compactFolderChains: false,
+    // ON, and the one Appearance boolean whose default is not about leaving an
+    // existing install alone. A deep run's joined label overflows a narrow
+    // pane and the ellipsis eats the TIP, so compaction without this is
+    // compaction that hides the one segment naming the row. Nothing changes
+    // for anyone until they turn `compactFolderChains` on themselves.
+    abbreviateCompactedPaths: true,
+    // The shortest run worth shortening. Three folders still fit a narrow
+    // pane, so the default shortens only what is longer than that.
+    compactPathThreshold: "3",
     // OFF by default: this rearranges a strip every existing install already
     // reads fluently, and doing that unasked on an update reads as a bug.
     pinAllSpace: false,

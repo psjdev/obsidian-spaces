@@ -1,7 +1,19 @@
 import { ALL_OWNED_CLASSES, CLS, CLS_COMPACT_PREFIX, CLS_ELSEWHERE, SEL } from "./selectors";
 import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
-import { compactLabel } from "../ui/compactLabel";
+import { compactLabel, isAbbreviated, type CompactLabelOptions } from "../ui/compactLabel";
 import type { ChainIndex } from "../visibility/compactChains";
+
+/**
+ * The attribute a compacted-and-shortened row carries the full path in.
+ *
+ * Measured against Obsidian 1.13.7 in the running app: a `[data-path]` row has
+ * exactly `class`, `data-path`, `draggable` and an inline `style`, so this is
+ * ours alone on these rows -- and hovering a row given one produced
+ * Obsidian's own `.tooltip` element reading the attribute's text, the same
+ * mechanism its `.nav-action-button` icons use. Nothing else was needed: no
+ * `title`, no `data-tooltip-position`.
+ */
+const ARIA_LABEL = "aria-label";
 
 /**
  * The only module that WRITES to Obsidian's explorer tree.
@@ -40,10 +52,28 @@ export class ExplorerAdapter {
    */
   private elsewhereFirst: string | null = null;
   private chainIndex: ChainIndex | null = null;
+  /**
+   * Seeded to the shipped defaults rather than to "no abbreviation".
+   *
+   * It is only ever read with a non-null `chainIndex`, which cannot exist
+   * before `setChainIndex` has supplied both — so this value is unreachable in
+   * practice. It matches `DEFAULT_DEFINITIONS` anyway, so the failure mode if
+   * that ever stops being true is the default label rather than a silently
+   * disabled setting.
+   */
+  private labelOptions: CompactLabelOptions = { abbreviate: true, threshold: 3 };
 
-  /** Set with the snapshot, because the runs are a function of it. */
-  setChainIndex(index: ChainIndex | null): void {
+  /**
+   * Set with the snapshot, because the runs are a function of it.
+   *
+   * The options are a REQUIRED second argument, not a separate setter with a
+   * default, so a caller cannot hand over an index and forget them — which
+   * would silently draw every row with the shipped label whatever the user had
+   * chosen, and pass the whole suite.
+   */
+  setChainIndex(index: ChainIndex | null, options: CompactLabelOptions): void {
     this.chainIndex = index;
+    this.labelOptions = options;
   }
 
   private frame = 0;
@@ -129,7 +159,10 @@ export class ExplorerAdapter {
       // reading `Work/Clients` with nothing left to say it should not.
       const titles: HTMLElement[] = [];
       c.querySelectorAll<HTMLElement>(SEL.titleWithPath).forEach((t) => titles.push(t));
-      applyCompactLabels(titles, null);
+      // The options are never read on this path — a null index labels nothing
+      // — but they are passed rather than defaulted, so this call stays the
+      // same shape as the one in `applyNow`.
+      applyCompactLabels(titles, null, this.labelOptions);
     }
   }
 
@@ -241,7 +274,7 @@ export class ExplorerAdapter {
         }
       }
     }
-    applyCompactLabels(titles, this.chainIndex);
+    applyCompactLabels(titles, this.chainIndex, this.labelOptions);
     return changed;
   }
 }
@@ -272,14 +305,28 @@ export class ExplorerAdapter {
  * prefix, and not even classed. There is nothing to anchor the prefix to, and
  * a class with no label is a style on a row that reads as an ordinary folder.
  *
- * RESTORATION IS REMOVING ONE ELEMENT, plus the class. Nothing else. No text
- * is rewritten, so nothing can be restored wrongly, nothing is stashed in a
- * data attribute, and the row comes back as the elements Obsidian built rather
- * than as a rebuild that resembles them.
+ * RESTORATION IS REMOVING ONE ELEMENT, plus the class, plus the tooltip
+ * attribute when this pass put one there. Nothing else. No text is rewritten,
+ * so nothing can be restored wrongly, nothing is stashed in a data attribute,
+ * and the row comes back as the elements Obsidian built rather than as a
+ * rebuild that resembles them.
+ *
+ * THE TOOLTIP. A row whose label was SHORTENED no longer shows the folders it
+ * passed through, so the full joined path goes on the row as `aria-label`,
+ * which Obsidian renders as its own tooltip on hover (verified in the running
+ * app — see `ARIA_LABEL`). It is set only while the label is abbreviated: a
+ * row drawing its whole path has nothing a tooltip could add, and a stale one
+ * would claim a shortening that is no longer happening.
+ *
+ * Taken off only on a row this pass had a PREFIX on, never blanket-removed.
+ * The attribute is ours only where our element is, and stripping it from every
+ * uncompacted row would quietly delete one Obsidian had put somewhere we never
+ * touched.
  */
 export function applyCompactLabels(
   titles: readonly HTMLElement[],
-  index: ChainIndex | null
+  index: ChainIndex | null,
+  opts: CompactLabelOptions
 ): void {
   for (const title of titles) {
     const path = title.getAttribute("data-path");
@@ -301,7 +348,8 @@ export function applyCompactLabels(
       // and writing that element is the defect this shape exists to avoid.
       // A run is two segments or more (`runFrom`), so what is left is never
       // empty.
-      const parts = compactLabel(run.segments).filter((p) => p.role !== "tip");
+      const label = compactLabel(run.segments, opts);
+      const parts = label.filter((p) => p.role !== "tip");
       const text = parts.map((p) => p.text).join("");
       let prefix = existing;
       if (!prefix) {
@@ -325,13 +373,34 @@ export function applyCompactLabels(
           )
         );
       }
+      // Asked of the PARTS, not recomputed from `opts`, so one rule decides
+      // both what is drawn and whether anything was left out. A later variant
+      // that elides differently gets the tooltip without touching this line.
+      if (isAbbreviated(label)) {
+        // The whole label, which is what the row would have read. Joined from
+        // the run's own segments rather than from `run.tip`: a run that starts
+        // below the vault root has a tip path with ancestors the label never
+        // claimed, and the tooltip must say what was hidden, not more.
+        title.setAttribute(ARIA_LABEL, run.segments.join("/"));
+      } else {
+        title.removeAttribute(ARIA_LABEL);
+      }
       wrapper?.classList.add(CLS.compacted);
     } else {
       // Unconditional, and cheap: both are no-ops on a row that was never
       // compacted. Gating them on the class would make the class the record
       // of what to undo, which is the kind of stashed state this pass does
       // not keep.
-      existing?.remove();
+      //
+      // The tooltip is the one exception, and it is gated on our own ELEMENT
+      // rather than on a class we might have left behind: `aria-label` is a
+      // DOM attribute anyone may use, and a blanket removal here would strip
+      // one Obsidian had put on a row this plugin never labelled. Our prefix
+      // being present is the honest record that the attribute is ours.
+      if (existing) {
+        existing.remove();
+        title.removeAttribute(ARIA_LABEL);
+      }
       wrapper?.classList.remove(CLS.compacted);
     }
   }

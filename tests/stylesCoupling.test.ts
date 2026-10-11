@@ -38,6 +38,28 @@ const COMPACT_TREE = {
   nameOf: (p: string) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
 };
 const INDEX = buildChainIndex(["Work"], COMPACT_TREE);
+/** The whole joined path, which is what a two-folder run always draws. */
+const PLAIN_LABEL = { abbreviate: false, threshold: 3 };
+
+/**
+ * A run long enough to be SHORTENED at the default threshold, so the `gap`
+ * span is actually rendered and the stylesheet's reach for it can be asserted
+ * against the real nesting rather than a hand-built span.
+ */
+const DEEP_CHAIN = ["A", "A/B", "A/B/C", "A/B/C/D"];
+const DEEP_TREE = {
+  visibleChildrenOf: (p: string) => {
+    const i = DEEP_CHAIN.indexOf(p);
+    if (i >= 0 && i < DEEP_CHAIN.length - 1) return [DEEP_CHAIN[i + 1]];
+    if (p === "A/B/C/D") return ["A/B/C/D/a.md"];
+    return [];
+  },
+  isFolder: (p: string) => DEEP_CHAIN.includes(p),
+  isScaffold: (p: string) => DEEP_CHAIN.includes(p),
+  parentOf: COMPACT_TREE.parentOf,
+  nameOf: COMPACT_TREE.nameOf,
+};
+const DEEP_INDEX = buildChainIndex(DEEP_CHAIN, DEEP_TREE);
 
 // `process.cwd()` rather than `import.meta.url`: under the jsdom environment
 // the module URL is an http one and `fileURLToPath` refuses it. Vitest runs
@@ -340,23 +362,32 @@ describe("compacted row label roles", () => {
    * element inserted before it, so what the stylesheet has to reach is now a
    * span one level deeper than it used to be.
    */
-  function compactedRow(): { title: HTMLElement; textEl: HTMLElement } {
+  function compactedRow(
+    path = "Work/Clients",
+    name = "Clients",
+    index = INDEX,
+    opts = PLAIN_LABEL
+  ): { title: HTMLElement; textEl: HTMLElement } {
     const wrapper = document.createElement("div");
     wrapper.className = "tree-item";
     const title = document.createElement("div");
     title.className = "tree-item-self";
-    title.setAttribute("data-path", "Work/Clients");
+    title.setAttribute("data-path", path);
     const chevron = document.createElement("div");
     chevron.className = "tree-item-icon collapse-icon";
     const textEl = document.createElement("div");
     textEl.className = "tree-item-inner";
-    textEl.textContent = "Clients";
+    textEl.textContent = name;
     title.appendChild(chevron);
     title.appendChild(textEl);
     wrapper.appendChild(title);
-    applyCompactLabels([title], INDEX);
+    applyCompactLabels([title], index, opts);
     return { title, textEl };
   }
+
+  /** The same row, from a run long enough that the label is shortened. */
+  const shortenedRow = (): { title: HTMLElement; textEl: HTMLElement } =>
+    compactedRow("A/B/C/D", "D", DEEP_INDEX, { abbreviate: true, threshold: 3 });
 
   // `applyCompactLabels` classes each span `spaces-compact-<role>` from
   // `compactLabel`'s roles. The stylesheet cannot import them, so a role
@@ -389,6 +420,34 @@ describe("compacted row label roles", () => {
       const matching = rules.filter((r) => span!.matches(r.selector));
       expect(matching.some((r) => r.style.getPropertyValue("opacity") !== ""), cls).toBe(true);
     }
+  });
+
+  /**
+   * `gap` is a role of its own precisely so the stylesheet can draw `..` as
+   * the marker it is rather than as a very short folder name. That is only
+   * true while the class the adapter writes and the class the stylesheet
+   * reaches for are the same string, which neither side can check alone.
+   */
+  it("spaces-compact-gap is the class a shortened label's stand-in carries", () => {
+    const { title } = shortenedRow();
+    const span = title.querySelector<HTMLElement>(".spaces-compact-gap");
+    expect(span).not.toBeNull();
+    expect(span!.textContent).toBe("..");
+    const matching = rules.filter((r) => span!.matches(r.selector));
+    expect(matching.some((r) => r.style.getPropertyValue("opacity") !== "")).toBe(true);
+  });
+
+  it("the stylesheet draws the gap fainter than the lead beside it", () => {
+    const opacityOf = (cls: string): number => {
+      const span = document.createElement("span");
+      span.className = cls;
+      const values = rules
+        .filter((r) => span.matches(r.selector))
+        .map((r) => r.style.getPropertyValue("opacity"))
+        .filter(Boolean);
+      return Number(values[values.length - 1]);
+    };
+    expect(opacityOf("spaces-compact-gap")).toBeLessThan(opacityOf("spaces-compact-lead"));
   });
 
   it("the stylesheet steps back the lead and the separator, and leaves the tip alone", () => {
