@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPropertyIndex } from "../src/visibility/PropertyIndex";
+import { createLazyPropertySnapshot } from "../src/visibility/ObsidianPropertyIndex";
+import { createPropertyIndex, type PropertySnapshot } from "../src/visibility/PropertyIndex";
 import { normalizeValue } from "../src/visibility/propertyValues";
 
 // Counts normalization so the tests below can tell when value buckets are built.
@@ -112,5 +113,52 @@ describe("the pure property index", () => {
 
   it("does not answer for an inherited key", () => {
     expect(createPropertyIndex([entry("a.md", { x: 1 })], 1).pathsWithKey("constructor")).toEqual([]);
+  });
+});
+
+describe("readiness", () => {
+  it("builds nothing until something asks", () => {
+    let built = 0;
+    const lazy = createLazyPropertySnapshot(() => {
+      built++;
+      return { status: "ready", index: createPropertyIndex([], 1) };
+    });
+    expect(built).toBe(0);
+    expect(lazy().status).toBe("ready");
+    expect(built).toBe(1);
+  });
+
+  it("reports unavailable rather than an empty index", () => {
+    const lazy = createLazyPropertySnapshot(() => ({ status: "unavailable" }));
+    const snapshot = lazy();
+    expect(snapshot.status).toBe("unavailable");
+    // The caller cannot reach a query at all, which is the point: an empty
+    // array must never stand in for "not ready".
+    expect("index" in snapshot).toBe(false);
+  });
+
+  it("builds once and keeps answering from the same ready snapshot", () => {
+    let built = 0;
+    const lazy = createLazyPropertySnapshot(() => {
+      built++;
+      return { status: "ready", index: createPropertyIndex([], 2) };
+    });
+    const first = lazy();
+    expect(lazy()).toBe(first);
+    expect(built).toBe(1);
+  });
+
+  it("asks again after unavailable, so a warming cache can become ready", () => {
+    let built = 0;
+    const lazy = createLazyPropertySnapshot((): PropertySnapshot => {
+      built++;
+      return built === 1
+        ? { status: "unavailable" }
+        : { status: "ready", index: createPropertyIndex([], 3) };
+    });
+    expect(lazy().status).toBe("unavailable");
+    expect(lazy().status).toBe("ready");
+    expect(lazy().status).toBe("ready");
+    expect(built).toBe(2);
   });
 });
