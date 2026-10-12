@@ -35,8 +35,10 @@
  *
  * The document reach is for teardown ALONE, because the outgoing-container
  * window is the only thing it is for. The sweep's other two callers -- a
- * paused apply and an unhealthy pass -- still hold their containers and ask
- * only those.
+ * paused apply and an unhealthy pass -- still hold their containers, so they
+ * ask those AND the record, and skip only the documents. The record is not
+ * optional on that path: a row the explorer detached while the pause was
+ * being entered is in no container either.
  */
 import { describe, expect, it, afterEach } from "vitest";
 import { ExplorerAdapter } from "../src/explorer/ExplorerAdapter";
@@ -302,13 +304,44 @@ describe("teardown sweeps the whole tree, not the render window", () => {
     expect(a["drawn"].size).toBe(0);
   });
 
+  it("still reaches a DETACHED row on a paused apply, through the record", () => {
+    // The `"bound"` scope is the containers AND the record, not the
+    // containers alone. The explorer windows its tree, so a row the plugin
+    // drew a prefix on can be detached by the time the pause arrives -- it is
+    // in no container, and the paused path deliberately asks no document. The
+    // record is the only thing left that reaches it, and without it the user
+    // pauses filtering and a `Clients/` prefix stays on a row that scrolls
+    // back into view reading the wrong thing.
+    const c = container(TIP);
+    const a = new ExplorerAdapter(() => true);
+    a.bind(c);
+    a.setChainIndex(INDEX, ON);
+    a.apply(SNAP);
+    const title = titleIn(c, TIP);
+    expect(prefixOf(title)).not.toBeNull();
+    expect(title.getAttribute("aria-label")).toBe(FULL);
+
+    // The row scrolls out of the render window.
+    (title.parentElement as HTMLElement).remove();
+
+    // The pause, which never touches a document.
+    a.apply(null);
+
+    expect(prefixOf(title)).toBeNull();
+    expect(title.hasAttribute("aria-label")).toBe(false);
+    expect(a["drawn"].size).toBe(0);
+
+    a.unbind();
+  });
+
   it("sweeps only the bound tree on a paused apply, and the document on unbind", () => {
     // A paused apply is an ORDINARY state, not a degraded one, and it reaches
     // the sweep on every `file-open` while the pause is on. The document reach
     // exists for the outgoing-container window -- the moment between
     // `changeLayout()` replacing `.nav-files-container` and the adapter being
-    // re-bound -- which a pause is not in. Asking the whole document for four
-    // classes on every paused apply is work for a window that is not open.
+    // re-bound -- which a pause is not in. Asking every document for our
+    // three classes and our prefix element on every paused apply is work for
+    // a window that is not open.
     const c = container(TIP);
     const elsewhere = document.createElement("div");
     elsewhere.className = CLS.scaffold;
@@ -335,7 +368,8 @@ describe("teardown sweeps the whole tree, not the render window", () => {
     // The unhealthy branch runs on every MutationObserver pass for as long as
     // the tree looks unrecognisable, which can be the rest of the session.
     // Same reasoning as the paused branch: the containers are still held, so
-    // the document reach buys nothing and costs four queries a pass.
+    // the document reach buys nothing and costs four queries a pass -- one
+    // per owned class, plus the prefix element.
     const c = container(TIP);
     const elsewhere = document.createElement("div");
     elsewhere.className = CLS.scaffold;

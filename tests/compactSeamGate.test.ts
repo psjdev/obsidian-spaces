@@ -19,13 +19,17 @@
  * `Decisions` nested underneath it. That is worse than doing nothing, which is
  * why "the index is null" is the required outcome rather than a nicety.
  *
- * ONE MORE STATE IS NOT HERE, and deliberately: a patched seam whose re-sort
- * SUCCEEDED, where `substituteCompacted` still failed open for one run because
- * this pane holds no tree item for its tip. Every question this gate can ask
- * answers "live", and that one chain is nested anyway. It is not a property of
- * the seam, so it is not settled by a gate: `applyCompactLabels` measures it
- * off the drawn tree instead (`drawnWhereTheHeadWas`, pinned in
- * `tests/compactRowLabel.test.ts`).
+ * ONE MORE STATE IS NOT SETTLED BY ANY GATE, and the last block in this file
+ * is about it: an override DISPLACED after `patch` succeeded. Another plugin
+ * assigns its own `getSortedFolderItems` over ours without calling through,
+ * so `isPatched` still answers true -- it records that `patch` SUCCEEDED, not
+ * that the override is still in the call chain -- and every question below
+ * answers "live" over a tree nothing of ours sorted. That is deliberate:
+ * tightening `isPatched` to an identity test would turn compaction off for a
+ * plugin that WRAPS our override and calls through, which is perfectly live.
+ * What makes the looseness safe is the label pass measuring the drawn tree
+ * instead (`drawnWhereTheHeadWas`). The two are one decision, and the last
+ * block here drives the pair end to end.
  *
  * A SECOND PANE is the same bug through a different door: `patch` is per view,
  * the index is one object, and the adapter labels every bound container. One
@@ -211,6 +215,26 @@ describe("the chain index is gated on the sort seam being live", () => {
     expect(h.labelledPaths()).toEqual([]);
   });
 
+  it("takes a label already on screen off when the re-sort is refused", () => {
+    // Dropping both copies of the index stops anything NEW being labelled; it
+    // removes nothing already drawn. Usually the re-sort mutates the tree and
+    // the adapter's own next frame restores the rows -- but when every pane
+    // throws, nothing mutates, no frame is scheduled, and a joined path from
+    // the last successful round sits in the explorer until the next
+    // `file-open`. Nobody calls `applyNow()` by hand here, which is the
+    // point.
+    const h = harness();
+    expect(h.labelledPaths()).toEqual([TIP]);
+
+    (h.view as { sort: () => void }).sort = () => {
+      throw new Error("Spaces test: this pane's sort() throws");
+    };
+    h.plugin["lastResort"] = null;
+    h.plugin["applyFilterAndOrdering"]();
+
+    expect(h.labelledPaths()).toEqual([]);
+  });
+
   it("re-sorts the panes that already substituted when a LIVE index is dropped", () => {
     // The index is live for the whole `requestResort` loop, so a pane that
     // sorted before a later pane threw has ALREADY rendered the
@@ -287,5 +311,84 @@ describe("the chain index is gated on the sort seam being live", () => {
     h.plugin["rebuildChainIndex"](snap);
     expect(h.plugin["chainIndexNow"]).not.toBe(null);
     expect(lookups).toBe(1);
+  });
+});
+
+/**
+ * THE STATE F3 AND F7 SHARE, end to end.
+ *
+ * `isPatched` records that `patch` SUCCEEDED, not that the override is still
+ * in the view's call chain, and F7 ruled deliberately against tightening it:
+ * a plugin that WRAPS our override and calls through is still live, and a
+ * strict identity test would turn compaction off for that user. What makes
+ * that ruling safe is the other half of the pair. A plugin that REPLACES the
+ * property instead is invisible to every gate -- `isPatched` answers true,
+ * `requestResort` answers true, the index is built -- and the tree it renders
+ * is the honest nested one, because our transform is no longer on the stack.
+ * Only the drawn tree knows, and `drawnWhereTheHeadWas` is what asks it.
+ *
+ * THE PANE IS RENDERED BY THE SEAM HERE, not written out beside the
+ * assertion: `renderNested` installs a `view.sort()` that rebuilds the
+ * container from whatever `getSortedFolderItems` returns. So the nesting
+ * below is a consequence of the displacement rather than a second claim about
+ * it, and a fixture cannot arrange a row the seam would not have drawn.
+ */
+describe("a displaced override is caught at the label, not at the gate", () => {
+  const NOTE = `${TIP}/a.md`;
+
+  function nested() {
+    return makePluginForSeam({
+      compactFolderChains: true,
+      tree: TREE,
+      visible: VISIBLE,
+      members: [NOTE],
+      renderNested: true,
+    });
+  }
+
+  it("draws the chain as ONE row and labels it while the override is ours", () => {
+    // The control, and it is what makes the `[]` below attributable: the same
+    // fixture, the same index, one row at depth 0 where the head was.
+    const h = nested();
+    expect(h.renderedRows()).toEqual([
+      { path: TIP, depth: 0 },
+      { path: NOTE, depth: 1 },
+    ]);
+    expect(h.labelledPaths()).toEqual([TIP]);
+  });
+
+  it("labels nothing once another plugin replaces the override", () => {
+    const h = nested();
+    expect(h.labelledPaths()).toEqual([TIP]);
+
+    // Another plugin assigns its own `getSortedFolderItems` over ours and
+    // does not call through. `patch` installed an own property; this replaces
+    // it, and `installed` still holds the view, so the module still says
+    // patched -- which is exactly the state `unpatch` contemplates when it
+    // checks the live property against the override it stored.
+    const proto = Object.getPrototypeOf(h.view) as {
+      getSortedFolderItems: (folder: unknown) => unknown;
+    };
+    (h.view as unknown as Record<string, unknown>).getSortedFolderItems =
+      proto.getSortedFolderItems;
+
+    // Whatever changed dropped the memo, so the next apply really re-sorts.
+    h.plugin["lastResort"] = null;
+    h.plugin["onSnapshotApplied"](h.plugin["controller"].currentSnapshot());
+
+    // EVERY GATE STILL SAYS LIVE. This is the point: nothing upstream can see
+    // what happened.
+    expect(h.plugin["sortedViews"].length).toBe(1);
+    expect(h.plugin["chainIndexNow"]).not.toBe(null);
+    // And the tree is drawn nested, because our transform is off the stack.
+    expect(h.renderedRows()).toEqual([
+      { path: "Clients", depth: 0 },
+      { path: TIP, depth: 1 },
+      { path: NOTE, depth: 2 },
+    ]);
+    // So the joined path must not be stamped on it. Without the display check
+    // this reads ["Clients/Meetings"] -- `Clients/Meetings` written on a
+    // folder the user can see sitting under `Clients`.
+    expect(h.labelledPaths()).toEqual([]);
   });
 });

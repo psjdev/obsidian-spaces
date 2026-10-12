@@ -101,8 +101,34 @@ export interface SeamHarnessOptions {
    *
    * Bound BEFORE the snapshot is applied, the order `bindExplorer` and
    * `controller.refresh()` run in.
+   *
+   * A FLAT list, which is what most suites here need: one row per path, all
+   * siblings, drawn whatever the seam does. Ignored under `renderNested`,
+   * which lets the seam decide what exists instead — see there for why that
+   * independence matters.
    */
   rows?: string[];
+  /**
+   * Draw the pane the way Obsidian does: rebuilt by `view.sort()` from
+   * whatever the seam returns, recursively.
+   *
+   * AN ADDITION, NOT A REPLACEMENT. The flat `rows:` path above stays the
+   * default and stays faithful for the suites that need one row and no
+   * nesting. This mode exists for the questions that are about WHERE a row is
+   * drawn, which is the half of compaction a flat fixture cannot pose: a
+   * chain that compacted draws as one row where its head was, and a chain
+   * that did not draws nested, and here the difference comes out of the seam
+   * rather than out of the test's own markup.
+   *
+   * It also makes `requestResort` mean something. `sort()` is the renderer,
+   * so a forced re-sort really does redraw the pane and a test can assert the
+   * TREE instead of a call count.
+   *
+   * The container is bound EMPTY, before the patch, because that is the order
+   * production runs in: `bindExplorer` binds and patches, and only the first
+   * re-sort puts rows in it.
+   */
+  renderNested?: boolean;
 }
 
 /**
@@ -166,7 +192,10 @@ function shapeSeam(view: Record<string, unknown>, shape: SeamShape): void {
  * perfectly healthy, and a pause/resume test would be measuring the fixture
  * rather than the plugin.
  */
-function seamView(fileItems: Record<string, SeamItem>): {
+function seamView(
+  fileItems: Record<string, SeamItem>,
+  onSort: () => void
+): {
   fileItems: Record<string, SeamItem>;
   sortOrder: string;
   getSortedFolderItems(folder: unknown): FolderItemLike[];
@@ -182,7 +211,7 @@ function seamView(fileItems: Record<string, SeamItem>): {
       return kids.flatMap((c) => (fileItems[c.path] ? [fileItems[c.path]] : []));
     },
     sort(): void {
-      // Nothing to re-render here.
+      onSort();
     },
   };
   return Object.assign(Object.create(proto) as typeof proto, {
@@ -191,15 +220,88 @@ function seamView(fileItems: Record<string, SeamItem>): {
   });
 }
 
-/** One explorer row in the shape `applyCompactLabels` is handed. */
-function rowMarkup(path: string): string {
-  const name = nameOf(path);
-  return `<div class="tree-item nav-folder">
-    <div class="tree-item-self nav-folder-title" data-path="${path}">
-      <div class="tree-item-icon collapse-icon"></div>
-      <div class="tree-item-inner nav-folder-title-content">${name}</div>
-    </div>
-  </div>`;
+/**
+ * One explorer row, in the shape `applyCompactLabels` is handed and
+ * `compact-chains.mjs` measures in a running Obsidian: a `.tree-item` wrapper
+ * whose first child is the `[data-path]` `.tree-item-self`, which holds the
+ * collapse chevron and `.tree-item-inner`.
+ *
+ * ONE definition, used by both render modes, so the flat fixture and the
+ * nested one cannot drift about what a row looks like.
+ */
+function rowElement(doc: Document, path: string): HTMLElement {
+  const wrapper = doc.createElement("div");
+  wrapper.className = "tree-item nav-folder";
+  const self = doc.createElement("div");
+  self.className = "tree-item-self nav-folder-title";
+  self.setAttribute("data-path", path);
+  const icon = doc.createElement("div");
+  icon.className = "tree-item-icon collapse-icon";
+  const inner = doc.createElement("div");
+  inner.className = "tree-item-inner nav-folder-title-content";
+  inner.textContent = nameOf(path);
+  self.appendChild(icon);
+  self.appendChild(inner);
+  wrapper.appendChild(self);
+  return wrapper;
+}
+
+/**
+ * Rebuild the pane from whatever the view's seam returns, the way Obsidian's
+ * own `sort()` does.
+ *
+ * THE DOM IS A CONSEQUENCE OF THE SEAM HERE, not a second claim about it.
+ * Nothing hand-nests the markup beside an assertion: this walks down from the
+ * vault root asking `view.getSortedFolderItems` for each folder's rows and
+ * draws exactly what comes back. So a chain that compacted draws as one row
+ * where its head was, a chain that did not draws nested, and no test can
+ * arrange one while the seam is doing the other.
+ *
+ * IT RENDERS ONLY WHAT THE SEAM RETURNS, which rules out the state the first
+ * review's DEFECT 3 probe rested on. A pane that holds no tree item for a path
+ * cannot draw a row for it, because the rows ARE those items' elements
+ * (`itemsForPaths`'s docblock records the measurement). A fixture with a
+ * `rows:` list deciding independently of `fileItems` what exists can model a
+ * rendered row with no item behind it, and Obsidian cannot produce one.
+ *
+ * TOP-LEVEL ROWS GO DIRECTLY INTO `.nav-files-container`, with no root
+ * wrapper, and a folder's children into a `.tree-item-children
+ * nav-folder-children` that is a direct child of its `.tree-item`, after the
+ * `.tree-item-self`. Both are measured shapes: `compact-chains.mjs` asserts a
+ * top-level compacted row is at `depth 0`, counting `.nav-folder-children`
+ * ancestors.
+ *
+ * `seen` is a cycle brake and nothing more. A run's tip is returned for its
+ * head's parent and the run's hidden segments answer `[]`, so no path is
+ * reached twice on any path the transform produces; a fixture that broke that
+ * should fail an assertion, not hang the suite.
+ */
+function renderNestedInto(
+  container: HTMLElement,
+  view: { getSortedFolderItems(folder: unknown): FolderItemLike[] },
+  nodes: Map<string, TFolder | TFile>,
+  rootNode: TFolder | TFile | undefined
+): void {
+  const doc = container.ownerDocument;
+  const seen = new Set<string>();
+  const draw = (folder: TFolder | TFile | undefined, into: HTMLElement): void => {
+    if (!folder) return;
+    for (const item of view.getSortedFolderItems(folder)) {
+      const path = item.file?.path;
+      if (typeof path !== "string" || seen.has(path)) continue;
+      seen.add(path);
+      const wrapper = rowElement(doc, path);
+      into.appendChild(wrapper);
+      const node = nodes.get(path);
+      if (!(node instanceof TFolder)) continue;
+      const kids = doc.createElement("div");
+      kids.className = "tree-item-children nav-folder-children";
+      wrapper.appendChild(kids);
+      draw(node, kids);
+    }
+  };
+  container.replaceChildren();
+  draw(rootNode, container);
 }
 
 /**
@@ -277,9 +379,9 @@ export interface SeamHarness {
   plugin: SpacesPlugin;
   view: { sort(): void };
   /**
-   * The container `opts.rows` was drawn into, or null when none were asked
-   * for. Detached from `document.body`, so no suite can bleed rows into
-   * another's.
+   * The container `opts.rows` or `opts.renderNested` drew into, or null when
+   * neither was asked for. Detached from `document.body`, so no suite can
+   * bleed rows into another's.
    */
   container: HTMLElement | null;
   /**
@@ -287,6 +389,15 @@ export interface SeamHarness {
    * on, which is the only on-screen evidence that a chain was labelled.
    */
   labelledPaths(): string[];
+  /**
+   * Every drawn row, in document order, with the depth the user sees it at:
+   * the number of `.tree-item-children` wrappers between it and the pane.
+   *
+   * The on-screen half of compaction, and the only thing that can tell a
+   * chain that compacted from one that did not. `compact-chains.mjs` measures
+   * exactly this in a running Obsidian and calls a top-level row `depth 0`.
+   */
+  renderedRows(): { path: string; depth: number }[];
 }
 
 /**
@@ -444,9 +555,14 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
       .map((p) => [p, folderItem(p) as SeamItem])
   );
   const rootNode = nodes.get("");
+  // Assigned once the container exists, which is after the view: `sort()`
+  // renders into a container that `bindExplorer`'s order says is built later.
+  // Null until then, and null forever in the flat mode, where `sort()` has
+  // nothing to re-render.
+  let renderTree: (() => void) | null = null;
   // Enough of an explorer view for `probe()` to answer "ok", so
   // `ensureOrderingPatched` will install the real override on it.
-  const view = seamView(fileItems);
+  const view = seamView(fileItems, () => renderTree?.());
   // Captured BEFORE the patch, or this would call the override and report the
   // seam's own output as though it were the raw tree. Captured before
   // `shapeSeam` too, so a `"absent"` pane can still be asked what the raw
@@ -461,7 +577,10 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
     opts.secondPane === undefined
       ? null
       : (() => {
-          const v = seamView({});
+          const v = seamView({}, () => {
+            // A second pane renders nothing: it exists for `probe`, `patch`
+            // and `requestResort`, and no test reads its tree.
+          });
           shapeSeam(v as unknown as Record<string, unknown>, opts.secondPane);
           return v as object;
         })();
@@ -477,10 +596,19 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
   // in (`bindExplorer` binds the adapter and installs the seam patch, and only
   // then does `controller.refresh()` reach `onSnapshotApplied`).
   let container: HTMLElement | null = null;
-  if (opts.rows) {
+  if (opts.rows || opts.renderNested) {
     container = document.createElement("div");
     container.className = "nav-files-container";
-    container.innerHTML = opts.rows.map(rowMarkup).join("");
+    if (opts.renderNested) {
+      // EMPTY at bind time, and filled by the first `requestResort`. That is
+      // the production sequence, and it is also what makes the rendered tree
+      // evidence about the seam: nothing put a row here that the seam did not
+      // return.
+      const pane = container;
+      renderTree = () => renderNestedInto(pane, view, nodes, rootNode);
+    } else if (opts.rows) {
+      for (const path of opts.rows) container.appendChild(rowElement(document, path));
+    }
     plugin["adapter"].bind(container);
   }
 
@@ -535,6 +663,20 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
     plugin,
     view,
     container,
+    renderedRows: () => {
+      if (!container) return [];
+      const out: { path: string; depth: number }[] = [];
+      container.querySelectorAll<HTMLElement>("[data-path]").forEach((title) => {
+        const path = title.getAttribute("data-path");
+        if (!path) return;
+        let depth = 0;
+        for (let el = title.parentElement; el && el !== container; el = el.parentElement) {
+          if (el.classList.contains("tree-item-children")) depth += 1;
+        }
+        out.push({ path, depth });
+      });
+      return out;
+    },
     labelledPaths: () => {
       if (!container) return [];
       const out: string[] = [];

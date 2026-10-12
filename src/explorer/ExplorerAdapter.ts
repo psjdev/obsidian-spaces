@@ -431,8 +431,9 @@ export class ExplorerAdapter {
    * user can sit in all day), and its unhealthy branch, which runs on every
    * MutationObserver pass while the DOM contract looks broken. Both still hold
    * their containers; neither is in that window. Sweeping the whole document
-   * there asks for four classes across the whole app, repeatedly, to find
-   * rows that are by definition inside the tree we are bound to.
+   * there asks every document for our three owned classes and our prefix
+   * element, repeatedly, to find rows that are by definition inside the tree
+   * we are bound to.
    */
   private clearOwnedClasses(reach: "bound" | "everywhere"): void {
     const roots: ParentNode[] = [...this.containers];
@@ -741,14 +742,36 @@ export function applyCompactLabels(
  * MEASURED, NOT PREDICTED, and that is the whole point. The index is a promise
  * that the sort seam substituted the run's tip for its head, so the chain
  * draws as one row at the head's position. `main.ts` gates the index on a live
- * seam and drops it when a re-sort is refused, which settles every state that
- * is knowable before or after the attempt — but `substituteCompacted` ALSO
- * fails open per run, leaving a chain nested when this pane holds no tree item
- * for that run's tip. In that state the patch is on, `sort()` succeeded, every
- * up-front check says "live", `runByTip` still holds the run, and the joined
- * path lands on a folder the user can see sitting under its own parent. No
- * gate upstream can see that door; this pass can, because the answer is in the
- * DOM in front of it. A compacted row's DISPLAYED position is the truth.
+ * seam and drops it when a re-sort is refused, which settles every state the
+ * seam can be asked about.
+ *
+ * THE STATE IT CANNOT BE ASKED ABOUT is an override DISPLACED after `patch`
+ * succeeded — the one `seamIsPatchedEverywhere`'s own docblock names, and the
+ * one `unpatch` contemplates when it compares the live property against the
+ * override it stored. Another plugin assigns its own `getSortedFolderItems`
+ * over ours without calling through: `isPatched` still answers true because
+ * `patch` DID succeed, `requestResort` still answers true, the index is still
+ * built — and the tree that renders is the honest nested one, because our
+ * transform is no longer on the stack. Every gate says live and nothing
+ * substituted. The joined path would land on a folder the user can see
+ * sitting under its own parent, which is the worst outcome in this feature.
+ *
+ * SO THIS IS THE OTHER HALF OF F7's RULING. `isPatched` is deliberately
+ * `installed.has(v)` and not an identity test, because a plugin that WRAPS
+ * our override and calls through is still live and a strict test would turn
+ * compaction off for that user. That ruling is only safe because a plugin
+ * that REPLACES it is caught here, at the label, which is the only place it
+ * matters. `tests/compactSeamGate.test.ts` drives the pair end to end.
+ *
+ * The same measurement would also cover a per-run fail-open in
+ * `substituteCompacted`, IF a pane ever held a row for a path it has no tree
+ * item for. Obsidian does not produce that — the explorer's rows ARE those
+ * items' elements (`itemsForPaths`'s docblock records the measurement) — so
+ * it is a clause, not the reason.
+ *
+ * No gate upstream can see any of this; this pass can, because the answer is
+ * in the DOM in front of it. A compacted row's DISPLAYED position is the
+ * truth.
  *
  * `hiddenSegments` is exactly the question to ask: it maps every folder of a
  * run that gets NO row — the head and each intermediate, excluding the tip —
@@ -766,7 +789,12 @@ export function applyCompactLabels(
  * is the `.tree-item-children` subtree, and ITS parent is the ancestor row's
  * own `.tree-item` — whose direct-child `[data-path]` row carries the path.
  * `:scope >` for the same reason the rest of this pass uses it: a descendant
- * query would find a child row first.
+ * query would find a child row first. Dropping either `:scope >` or
+ * `SEL.treeRow` from that query survives the whole suite, and deliberately
+ * has no fixture: killing them would need a `.tree-item` with no path-bearing
+ * self of its own, which is DOM Obsidian does not build. They are defensive
+ * terms, and inventing a tree to pin them would be inventing the very thing
+ * this helper exists to stop trusting.
  *
  * EVERY UNKNOWN RESOLVES TOWARD LABELLING. No ancestor row (a top-level run,
  * or a row Obsidian has detached) is not nested, so it labels; a DOM that does
@@ -888,8 +916,8 @@ function drawRow(
  * Unconditional, and cheap: removing the prefix element and the row class are
  * both no-ops on a row that was never compacted. Gating them on the class
  * would make the class the record of what to undo, which is the kind of
- * stashed state this pass does not keep. The third removal, the tooltip, is
- * the one exception below.
+ * stashed state this pass does not keep. The tooltip, below, is the third
+ * removal and the only conditional one.
  *
  * The tooltip is the one exception, and it is taken off only where this
  * module put it: `aria-label` is a DOM attribute anyone may use, and a blanket

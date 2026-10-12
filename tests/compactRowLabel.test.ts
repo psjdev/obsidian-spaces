@@ -753,18 +753,31 @@ describe("applyCompactLabels, shortened", () => {
  * The index is a promise that the sort seam substituted the run's tip for its
  * head, so the chain draws as one row at the head's position. The gate in
  * `main.ts` settles every way the seam can be dead BEFORE the attempt, and
- * `applyFilterAndOrdering` settles the refusal after it — but there is one
- * state neither can see. `substituteCompacted` fails open per run when a pane
- * cannot resolve that run's tip item: the patch is on, `sort()` succeeded,
- * every up-front check says "live", and this one chain still rendered NESTED.
- * `runByTip` holds it all the same, so the joined path landed on a folder
- * visibly sitting under its own parent.
+ * `applyFilterAndOrdering` settles the refusal after it — but neither can be
+ * asked about an override DISPLACED after `patch` succeeded. Another plugin
+ * assigns its own `getSortedFolderItems` over ours without calling through:
+ * `isPatched` still answers true, `requestResort` still answers true, the
+ * index is still built, and the pane renders the honest NESTED tree because
+ * our transform is off the stack. `runByTip` holds the run all the same, so
+ * the joined path would land on a folder visibly sitting under its own
+ * parent.
+ *
+ * That state and `isPatched`'s deliberate looseness are ONE DECISION:
+ * tightening the gate would turn compaction off for a plugin that merely
+ * WRAPS our override, and this check is what makes leaving it loose safe.
+ * `tests/compactSeamGate.test.ts` drives the pair end to end, against a pane
+ * the seam itself renders; the four tests below pin the rule in isolation.
  *
  * So the pass stops predicting and MEASURES. A row that is a tip but is drawn
  * UNDER one of its own run's hidden segments is a chain that did not compact,
  * whatever anything upstream believed, and the answer is in the DOM in front
- * of the pass. Every unknown resolves toward labelling, so a tree that does
- * not match this shape costs nothing.
+ * of the pass. The same measurement would cover a per-run fail-open in
+ * `substituteCompacted` too, IF a pane ever held a row for a path it has no
+ * tree item for — Obsidian does not do that, since the rows ARE those items'
+ * elements, so it is a clause and not the reason.
+ *
+ * Every unknown resolves toward labelling, so a tree that does not match this
+ * shape costs nothing.
  */
 describe("applyCompactLabels only labels a tip drawn where the head was", () => {
   const TIP = "Top/Work/Clients/Meetings";

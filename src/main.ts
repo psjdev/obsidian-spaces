@@ -2325,15 +2325,21 @@ export default class SpacesPlugin extends Plugin {
     // The re-sort comes before the ADAPTER because whether it actually
     // happened is half the answer to "may these rows be labelled". Every way
     // the seam can be dead BEFORE the attempt is settled inside
-    // `rebuildChainIndex` — the setting, the pause, no pane at all, and each
+    // `rebuildChainIndex` — no snapshot, the setting, the pause, and each
     // pane the gate finds unpatched — and the one that is only knowable AFTER
     // it, `requestResort` refusing, is settled by `applyFilterAndOrdering`,
-    // which drops the index and the adapter's copy together. (A substitution
-    // that fails open for one run is settled by neither, because it is not a
-    // property of the seam at all: `applyCompactLabels` measures that one off
-    // the drawn tree. See `drawnWhereTheHeadWas`.) Labelling first would stamp
-    // the joined path onto a tree nothing re-sorted. (The re-sort is NOT coupled to the adapter the other
-    // way round: `filterAndOrderFolder` reads `controller.currentSnapshot()`,
+    // which drops the index and the adapter's copy together. Labelling first
+    // would stamp the joined path onto a tree nothing re-sorted.
+    //
+    // ONE STATE IS SETTLED BY NEITHER, because it is not a property of the
+    // seam: an override DISPLACED after `patch` succeeded, where every
+    // question up here answers "live" and the pane renders the honest nested
+    // tree because our transform is off the stack. `applyCompactLabels`
+    // measures that one off the drawn tree — see `drawnWhereTheHeadWas`,
+    // which is also what makes `isPatched`'s deliberate looseness safe.
+    //
+    // (The re-sort is NOT coupled to the adapter the other way round:
+    // `filterAndOrderFolder` reads `controller.currentSnapshot()`,
     // which the controller assigns before it calls this callback at all.
     // Reading `this.adapter.currentSnapshot()` instead WOULD couple them, by
     // making a domain decision depend on the DOM layer's working copy.)
@@ -2441,17 +2447,36 @@ export default class SpacesPlugin extends Plugin {
    * seen from the unpatched pane, since the adapter labels every bound
    * container from the one index. `isPatched` is the module's own record that
    * `patch` SUCCEEDED on a view -- not that the override is still in that
-   * view's call chain, which `unpatch` itself contemplates it may not be
-   * (`nativeExplorerSort.ts` checks `getSortedFolderItems !== entry.override`
-   * before restoring). It is the right question anyway: "absent from the
-   * build", "`patch` declined because another plugin holds the property" and
-   * "the patch step threw before it got there" all answer the same way
-   * without this method having to tell them apart, and a plugin that WRAPS
-   * our override and calls through is still live -- a stricter identity test
-   * would silently turn compaction off for that user. An override that was
-   * genuinely displaced is caught where it matters, at the label:
-   * `drawnWhereTheHeadWas` asks the DOM whether the chain actually compacted
-   * rather than taking this record's word for it.
+   * view's call chain, which `unpatch` itself contemplates it may not be: it
+   * restores by `delete` only when `getSortedFolderItems === entry.override`
+   * still holds (`nativeExplorerSort.ts`), and warns instead when it does
+   * not. It is the right question anyway: "absent from the build", "`patch`
+   * declined because another plugin holds the property" and "the patch step
+   * threw before it got there" all answer the same way without this method
+   * having to tell them apart, and a plugin that WRAPS our override and calls
+   * through is still live -- a stricter identity test would silently turn
+   * compaction off for that user.
+   *
+   * THAT LOOSENESS IS ONLY SAFE BECAUSE OF THE LABEL PASS, and the two are
+   * one decision. A plugin that REPLACES the property rather than wrapping it
+   * leaves this gate answering "live" over a tree nothing of ours sorted.
+   * `applyCompactLabels` catches it where it matters, by asking the DOM
+   * whether the chain actually compacted rather than taking this record's
+   * word for it (`drawnWhereTheHeadWas`). Loosen or tighten one of the two
+   * and the other has to move with it;
+   * `tests/compactSeamGate.test.ts` drives the pair end to end.
+   *
+   * NOT `sortedViews`, although on this gate's domain the two cannot differ.
+   * They are equal BY CONSTRUCTION, and three places keep them so:
+   * `installed.set` happens only inside `patch`, whose one caller pushes to
+   * `sortedViews` on the same `if`; `installed.delete` happens
+   * unconditionally at the top of `unpatch`, whose only two callers
+   * (`ensureOrderingPatched`'s release loop and `teardownOrdering`) drop the
+   * same view from `sortedViews`; and a view neither has seen is absent from
+   * both. So this is not a behavioural choice but a question of WHO IS ASKED:
+   * `isPatched` asks the module that owns the fact, rather than this file's
+   * bookkeeping about it. A future reader who simplifies one of those three
+   * invariant-keepers has been warned here.
    *
    * THROWING IS ANSWERED WITH FALSE. `bindExplorer` already guards step 5, so
    * `ensureOrderingPatched` throwing is a state the plugin carries on from
@@ -2869,10 +2894,12 @@ export default class SpacesPlugin extends Plugin {
    * invalidates explicitly. If `requestResort` fails the memo is dropped, so
    * the next event retries rather than leaving the previous filter on screen.
    *
-   * A failed re-sort ALSO drops the chain index, which is a second thing this
-   * method owns and its name does not say. See the comment on that line: the
-   * index is a promise that the substitution happened, and this is the one
-   * place that finds out it did not.
+   * A FAILED RE-SORT COSTS THREE MORE THINGS this method owns and its name
+   * does not say: it drops the chain index, drops the ADAPTER's copy of it,
+   * and re-sorts every pane a second time. See the comments on those lines.
+   * The index is a promise that the substitution happened, this is the one
+   * place that finds out it did not, and the adapter's copy is what would
+   * otherwise go on drawing the promise.
    */
   private applyFilterAndOrdering(): void {
     if (this.sortedViews.length === 0) return;
@@ -2884,9 +2911,10 @@ export default class SpacesPlugin extends Plugin {
       if (!requestResort(view)) every = false;
     }
     this.lastResort = every ? signature : null;
-    // THE FOURTH WAY THE INDEX OUTLIVES ITS SORT, and the only one that is
-    // not knowable before the attempt. `seamIsPatchedEverywhere` answers the
-    // others up front; here the patch is on and `sort()` still refused,
+    // THE ONE WAY THE INDEX CAN OUTLIVE ITS SORT THAT IS NOT KNOWABLE BEFORE
+    // THE ATTEMPT. `seamIsPatchedEverywhere` answers the others up front
+    // (`tests/compactSeamGate.test.ts` enumerates them); here the patch is on
+    // and `sort()` still refused,
     // so the tree keeps whatever it was last rendered as and the substitution
     // this index describes did not happen. The adapter must not label it: the
     // joined path on a row the chain is still nested under is the one outcome
@@ -2914,13 +2942,33 @@ export default class SpacesPlugin extends Plugin {
       // nothing else will — the next apply rebuilds a live index, that pane
       // re-sorts compacted, the other refuses again, and the row stays
       // unlabelled at a position it never earned. A second pass with the
-      // index gone renders those panes honestly; a pane that threw throws
-      // again and is no worse off. No recursion: `requestResort` reaches the
-      // seam, which now reads a null index.
+      // index gone renders those panes honestly. No recursion:
+      // `requestResort` reaches the seam, which now reads a null index.
+      //
+      // WHAT IT COSTS, said plainly. A pane whose `sort()` throws
+      // PERMANENTLY now throws twice per apply instead of once, and every
+      // apply renders the surviving panes compacted and then immediately
+      // honest — a visible flash, not merely double work. It is still the
+      // right trade: the flash happens only in a state that is already
+      // broken, and the alternative is a tree that is permanently wrong, with
+      // the tip folder's bare name sitting at the head's position forever.
+      // Re-sorting only the panes that returned true would avoid the second
+      // throw, at the cost of the loop above having to remember which those
+      // were; not worth it for a path that has already failed.
       //
       // Guarded on `hadIndex` so a refusal with compaction off — the ordinary
       // case — costs nothing.
       if (hadIndex) for (const view of this.sortedViews) requestResort(view);
+      // AND TAKE OFF WHAT IS ALREADY DRAWN. Dropping both copies of the
+      // index stops the adapter labelling anything NEW; it removes nothing an
+      // earlier, successful round put on screen. Usually the re-sort above mutates the
+      // tree and the observer's next frame restores the rows on its own — but
+      // when EVERY pane throws, nothing mutates, no pass is scheduled, and a
+      // stale joined path sits in the user's explorer until the next
+      // `file-open` or pane resize. One synchronous pass with a null index
+      // closes that, on a path that has already failed and so has nothing
+      // left to save.
+      this.adapter.applyNow();
     }
   }
 
