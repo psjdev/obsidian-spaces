@@ -5,7 +5,9 @@ import { createPropertyIndex, type PropertySnapshot } from "./PropertyIndex";
  * The vault walk and the frontmatter read, and nothing else.
  *
  * Mirrors `createObsidianTagIndex`: a snapshot built when the caller builds it
- * rather than queried live, so one recompute sees one consistent picture.
+ * rather than queried live. A READY snapshot is a consistent picture for as
+ * long as it is held; while the cache is cold each ask rebuilds, so one
+ * recompute may see more than one answer.
  *
  * READINESS IS A PROPERTY OF THE WALK. A file whose cache has not been parsed
  * yet reports `null`, and one such file makes the whole snapshot unavailable:

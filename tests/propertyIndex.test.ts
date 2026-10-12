@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createLazyPropertySnapshot } from "../src/visibility/ObsidianPropertyIndex";
+import type { App } from "obsidian";
+import { createLazyPropertySnapshot, createObsidianPropertySnapshot } from "../src/visibility/ObsidianPropertyIndex";
 import { createPropertyIndex, type PropertySnapshot } from "../src/visibility/PropertyIndex";
 import { normalizeValue } from "../src/visibility/propertyValues";
 
@@ -160,5 +161,47 @@ describe("readiness", () => {
     expect(lazy().status).toBe("ready");
     expect(lazy().status).toBe("ready");
     expect(built).toBe(2);
+  });
+});
+
+describe("createObsidianPropertySnapshot", () => {
+  type Cache = { frontmatter?: Record<string, unknown> } | null;
+  const fakeApp = (files: Array<{ path: string; cache: Cache }>): App =>
+    ({
+      vault: { getMarkdownFiles: () => files.map((f) => ({ path: f.path })) },
+      metadataCache: {
+        getFileCache: (file: { path: string }) => files.find((f) => f.path === file.path)!.cache,
+      },
+    }) as unknown as App;
+
+  it("is unavailable when a cache not yet parsed comes last in the walk", () => {
+    const snapshot = createObsidianPropertySnapshot(
+      fakeApp([
+        { path: "a.md", cache: { frontmatter: { x: 1 } } },
+        { path: "b.md", cache: { frontmatter: { x: 2 } } },
+        { path: "c.md", cache: null },
+      ]),
+      1
+    );
+    expect(snapshot.status).toBe("unavailable");
+    expect("index" in snapshot).toBe(false);
+  });
+
+  it("lets a note with a cache but no frontmatter contribute nothing", () => {
+    const snapshot = createObsidianPropertySnapshot(
+      fakeApp([
+        { path: "a.md", cache: {} },
+        { path: "b.md", cache: { frontmatter: { x: 1 } } },
+      ]),
+      1
+    );
+    expect(snapshot.status).toBe("ready");
+    if (snapshot.status !== "ready") return;
+    expect(snapshot.index.pathsWithKey("x")).toEqual(["b.md"]);
+  });
+
+  it("carries the generation it was given into the index", () => {
+    const snapshot = createObsidianPropertySnapshot(fakeApp([{ path: "a.md", cache: {} }]), 7);
+    expect(snapshot.status === "ready" && snapshot.index.generation).toBe(7);
   });
 });
