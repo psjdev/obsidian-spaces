@@ -610,6 +610,68 @@ describe("applyCompactLabels, shortened", () => {
     expect(r.title.getAttribute("aria-label")).toBe("Obsidian's own");
   });
 
+  /**
+   * DS-6. The sibling rule, on the branch that was missing it.
+   *
+   * A row drawn in FULL carries no tooltip of ours, so the branch that reaches
+   * that state used to call `removeAttribute` unconditionally — on a row we
+   * had never put an attribute on. `aria-label` is a plain DOM attribute that
+   * Obsidian and any other plugin may set for their own reasons, and a row
+   * being compacted says nothing about who set this one. Removing it strips a
+   * real accessible name from the screen reader for no gain, exactly as the
+   * blanket removal above would.
+   */
+  it("leaves an aria-label it did not set on a compacted row drawn in full", () => {
+    const r = deepRow();
+    r.title.setAttribute("aria-label", "Obsidian's own");
+    label([r.title], DEEP, PLAIN);
+    expect(prefixOf(r.title)).not.toBeNull();
+    expect(r.title.getAttribute("aria-label")).toBe("Obsidian's own");
+  });
+
+  /**
+   * And the row that survives a pass without a tooltip is still not ours on
+   * the NEXT one: our prefix being on the row is not a record that the
+   * attribute came from here.
+   */
+  it("still leaves it alone on a second pass over the same compacted row", () => {
+    const r = deepRow();
+    label([r.title], DEEP, PLAIN);
+    r.title.setAttribute("aria-label", "Obsidian's own");
+    label([r.title], DEEP, PLAIN);
+    expect(r.title.getAttribute("aria-label")).toBe("Obsidian's own");
+  });
+
+  /**
+   * The same rule on the RESTORE side. Our prefix being on the row is a
+   * record that the ROW is ours, not that the ATTRIBUTE is: a compacted row
+   * drawn in full never gets a tooltip from here, so an `aria-label` on one is
+   * somebody else's and survives being given back.
+   */
+  it("leaves an aria-label it did not set when it gives the row back", () => {
+    const r = deepRow();
+    label([r.title], DEEP, PLAIN);
+    expect(prefixOf(r.title)).not.toBeNull();
+    r.title.setAttribute("aria-label", "Obsidian's own");
+
+    label([r.title], null, PLAIN);
+
+    expect(prefixOf(r.title)).toBeNull();
+    expect(r.title.getAttribute("aria-label")).toBe("Obsidian's own");
+  });
+
+  /** The other side of the same rule: ours still comes off when it is ours. */
+  it("takes its OWN tooltip off when the row stops being shortened", () => {
+    const r = deepRow();
+    label([r.title], DEEP, ABBREV);
+    expect(r.title.getAttribute("aria-label")).toBe(FULL);
+    // The pane is widened and settles, so the kept decision is re-opened and
+    // the full label fits. There is nothing a tooltip could add now, and a
+    // stale one would claim a shortening that is no longer happening.
+    applyCompactLabels([r.title], DEEP, ABBREV, { remeasure: true, overflows: () => false });
+    expect(r.title.hasAttribute("aria-label")).toBe(false);
+  });
+
   it("restores by removing one element, leaving no spans and no attribute", () => {
     const r = deepRow();
     const chevronBefore = r.chevron;

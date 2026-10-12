@@ -27,6 +27,12 @@ function seeded() {
   });
   // Installs the override and registers the view in `sortedViews`.
   h.plugin["ensureOrderingPatched"]();
+  // The harness patches the seam BEFORE it applies the snapshot, the order
+  // production runs in (`bindExplorer` then `controller.refresh()`), so its own
+  // construction has already taken the first re-sort. Dropping the memo puts
+  // each test below back at "the next apply must sort", which is what their
+  // call counts are written against.
+  h.plugin["lastResort"] = null;
   const sort = vi.spyOn(h.view, "sort");
   return { h, sort };
 }
@@ -85,6 +91,12 @@ describe("the chain index is only replaced when the runs change", () => {
       members: ["Clients/Meetings/a.md"],
     });
     h.plugin["ensureOrderingPatched"]();
+    // The harness patches the seam BEFORE it applies the snapshot, the order
+    // production runs in (`bindExplorer` then `controller.refresh()`), so its own
+    // construction has already taken the first re-sort. Dropping the memo puts
+    // each test below back at "the next apply must sort", which is what their
+    // call counts are written against.
+    h.plugin["lastResort"] = null;
     const sort = vi.spyOn(h.view, "sort");
     return { h, sort };
   }

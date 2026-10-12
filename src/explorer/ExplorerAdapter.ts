@@ -72,7 +72,45 @@ export interface LabelPassOptions {
   remeasure?: boolean;
   /** The measuring step. Defaults to `rowOverflows`. */
   overflows?: OverflowProbe;
+  /**
+   * The caller's record of which rows currently carry a prefix element of
+   * ours. Rows are added as they are drawn and removed as they are restored.
+   *
+   * Teardown's reach problem, and the only thing that solves it. Obsidian
+   * renders a window of roughly 49 rows and DETACHES the rest, keeping each
+   * row's element on its own tree item so it can be re-attached on scroll. A
+   * detached row is in no container and in no document, so no query of any
+   * scope can find it. `onunload` makes that likelier rather than rarer: it
+   * runs `teardownOrdering()` before `adapter.unbind()`, and `unpatch` forces
+   * a `sort()` that re-renders the whole unfiltered vault, so in a vault big
+   * enough to window at all the compacted rows have moved before the sweep
+   * looks. A stale CLASS on such a row stops mattering when the stylesheet
+   * unloads; a stale prefix ELEMENT is still in the user's explorer after the
+   * plugin is gone.
+   *
+   * Optional so a test can drive this function without one. `ExplorerAdapter`
+   * always passes its own.
+   */
+  drawn?: Set<HTMLElement>;
 }
+
+/**
+ * The rows this module has written an `aria-label` onto.
+ *
+ * The one record of whose attribute it is, and it has to be a record rather
+ * than an inference. `aria-label` is a plain DOM attribute that Obsidian and
+ * any other plugin may set for their own reasons; a row having our prefix on
+ * it says the ROW is ours, not that the ATTRIBUTE is (a compacted row drawn in
+ * full never gets one from here). Removing one we did not set strips a real
+ * accessible name for no gain, so both removal sites ask this first.
+ *
+ * A WeakSet: it is keyed on elements, holds nothing alive, and needs no
+ * teardown of its own. It is module state rather than adapter state for the
+ * reason `applyCompactLabels` is a free function -- the question is about a
+ * row, not about an adapter, and a second adapter asking about the same row
+ * must get the same answer.
+ */
+const ourTooltips = new WeakSet<HTMLElement>();
 
 /**
  * The production probe: TWO comparisons, because the overflow this feature
@@ -156,6 +194,22 @@ export class ExplorerAdapter {
    * asks for the decision to be retaken.
    */
   private remeasure = false;
+
+  /**
+   * Every row this adapter currently has a prefix element on.
+   *
+   * See `LabelPassOptions.drawn` for why a record is the only thing that can
+   * reach a row Obsidian has detached. Held per adapter rather than per module
+   * because it is a list of what to UNDO, and undoing is this instance's job.
+   *
+   * It does not grow without bound: an entry goes in when a prefix is drawn
+   * and comes out when it is removed, so the size is the number of compacted
+   * tips the explorer is currently holding elements for, and `bindAll` calls
+   * `unbind()` first, which empties it on every layout change. The elements it
+   * keeps alive between those points are the same ones Obsidian is keeping
+   * alive on its own tree items.
+   */
+  private readonly drawn = new Set<HTMLElement>();
 
   /**
    * The measuring step, substitutable for the reason `OverflowProbe`
@@ -334,23 +388,64 @@ export class ExplorerAdapter {
    * already read. Keeping a public reader here would invite that back.
    */
 
+  /**
+   * Take everything of ours back off, wherever it ended up.
+   *
+   * THREE REACHES, because no one of them finds every row. The tree is
+   * WINDOWED and the containers are REPLACED, so "the rows I can see from the
+   * container I hold" — which is all this used to be — is the smallest of the
+   * three sets and the only one that is never enough.
+   *
+   *  - The bound CONTAINERS. Still first, and still necessary: a container may
+   *    be detached from its document by the time this runs (`changeLayout()`
+   *    replaces `.nav-files-container`, and `bindExplorer` unbinds when it
+   *    finds none), and a detached container is not reachable from the
+   *    document either.
+   *  - The DOCUMENTS those containers and rows belong to, asked for our own
+   *    classes rather than enumerated row by row. This is what reaches the
+   *    LIVE tree when the adapter is holding an outgoing container —
+   *    `bindExplorer` documents that exact window, where a cleanup scoped to
+   *    what we hold "can never reach the live tree either". Asking for our
+   *    classes also costs one query per class instead of a pass over every
+   *    row in the vault's rendered window.
+   *  - The RECORD of rows a prefix was drawn on, which is the only reach that
+   *    finds a row Obsidian has DETACHED — see `LabelPassOptions.drawn`.
+   *
+   * Overlap between the three is free: every removal here is idempotent.
+   */
   private clearOwnedClasses(): void {
-    for (const c of this.containers) {
+    const roots: ParentNode[] = [...this.containers];
+    const docs = new Set<Document>();
+    for (const c of this.containers) docs.add(c.ownerDocument);
+    // A remembered row's document, so a sweep still has a document to ask
+    // when every container has already gone (`unbind()` empties the list, and
+    // a popout explorer's rows do not belong to this one's document anyway).
+    for (const title of this.drawn) docs.add(title.ownerDocument);
+    for (const doc of docs) roots.push(doc);
+
+    for (const root of roots) {
       for (const cls of ALL_OWNED_CLASSES) {
-        c.querySelectorAll(`.${cls}`).forEach((el) => el.classList.remove(cls));
+        root.querySelectorAll(`.${cls}`).forEach((el) => el.classList.remove(cls));
       }
-      // Through the one function that owns this class, so the prefix element
-      // it inserted goes with it. Stripping the class alone would leave a row
-      // reading `Work/Clients` with nothing left to say it should not.
-      const titles: HTMLElement[] = [];
-      c.querySelectorAll<HTMLElement>(SEL.titleWithPath).forEach((t) => titles.push(t));
-      // The policy and the probe are never read on this path — a null index
-      // labels nothing, so nothing is drawn and nothing is measured — but both
-      // are passed rather than defaulted, so this call stays the same shape as
-      // the one in `applyNow` and there is one probe in this class rather than
-      // a second default to drift from it.
-      applyCompactLabels(titles, null, this.labelPolicy, { overflows: this.overflows });
+      // `CLS.compacted` needs no query of its own, although it is not in
+      // `ALL_OWNED_CLASSES`: `drawRow` only ever adds it to a row it also puts
+      // a prefix on, and `restoreRow` below takes the two off together. A
+      // query for it here would be a branch no test could reach.
+      //
+      // Found by OUR element rather than by walking every `[data-path]` row:
+      // the prefix is the thing that has to come off, and it is the one node
+      // in this tree that says so. `restoreRow` is the same function the
+      // ordinary pass gives a row back with, so there is one definition of
+      // "restored" rather than a second one that could drift.
+      root.querySelectorAll<HTMLElement>(`.${CLS_COMPACT_PREFIX}`).forEach((prefix) => {
+        const title = prefix.parentElement;
+        if (title) restoreRow(title, this.drawn);
+      });
     }
+
+    // Copied first: `restoreRow` deletes from the set it is iterating.
+    for (const title of [...this.drawn]) restoreRow(title, this.drawn);
+    this.drawn.clear();
   }
 
   /** Coalesce bursts of mutations into a single pass. */
@@ -469,6 +564,7 @@ export class ExplorerAdapter {
     applyCompactLabels(titles, this.chainIndex, this.labelPolicy, {
       remeasure,
       overflows: this.overflows,
+      drawn: this.drawn,
     });
     return changed;
   }
@@ -530,10 +626,11 @@ export class ExplorerAdapter {
  * row drawing its whole path has nothing a tooltip could add, and a stale one
  * would claim a shortening that is no longer happening.
  *
- * Taken off only on a row this pass had a PREFIX on, never blanket-removed.
- * The attribute is ours only where our element is, and stripping it from every
- * uncompacted row would quietly delete one Obsidian had put somewhere we never
- * touched.
+ * Taken off only on a row this pass PUT ONE ON, never blanket-removed and
+ * never inferred from the row being compacted. `aria-label` is a plain DOM
+ * attribute Obsidian and any other plugin may set for their own reasons, and
+ * stripping one we did not write would quietly delete a real accessible name.
+ * `ourTooltips` is the record both removal sites consult.
  */
 export function applyCompactLabels(
   titles: readonly HTMLElement[],
@@ -542,6 +639,7 @@ export function applyCompactLabels(
   pass: LabelPassOptions = {}
 ): void {
   const overflows = pass.overflows ?? rowOverflows;
+  const drawn = pass.drawn;
   /** The rows drawn in full that still need a verdict. */
   const undecided: { title: HTMLElement; run: Run }[] = [];
 
@@ -558,13 +656,13 @@ export function applyCompactLabels(
     if (!textEl) continue;
     const run = index?.runByTip.get(path);
     if (!run) {
-      restoreRow(title);
+      restoreRow(title, drawn);
       continue;
     }
     // Turned off means never measured. The answer could not change the label,
     // and reading a width forces a layout.
     if (!policy.abbreviateWhenOverflowing) {
-      drawRow(title, textEl, run, false);
+      drawRow(title, textEl, run, false, drawn);
       continue;
     }
     // Already showing what a "yes" would draw. For a long run that is the
@@ -573,10 +671,10 @@ export function applyCompactLabels(
     // it is the only label there is, so measuring it is work with one possible
     // outcome.
     if (!pass.remeasure && textOf(run, true) === prefixTextOn(title)) {
-      drawRow(title, textEl, run, true);
+      drawRow(title, textEl, run, true, drawn);
       continue;
     }
-    drawRow(title, textEl, run, false);
+    drawRow(title, textEl, run, false, drawn);
     undecided.push({ title, run });
   }
 
@@ -587,7 +685,7 @@ export function applyCompactLabels(
   // PASS THREE: writes only.
   for (const { title, run } of tooLong) {
     const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
-    if (textEl) drawRow(title, textEl, run, true);
+    if (textEl) drawRow(title, textEl, run, true, drawn);
   }
 }
 
@@ -632,12 +730,21 @@ function prefixTextOn(title: HTMLElement): string | null {
  * the kind of stashed state this pass does not keep. It is safe only because
  * no observer in `src/` watches attributes; one added later would have to read
  * this.
+ *
+ * REMOVING the tooltip is the one thing it does not do unconditionally, and
+ * that asymmetry is deliberate too (DS-6). Writing an attribute we own is
+ * ours to repeat; removing one is only ours when we put it there. A compacted
+ * row drawn in FULL carries no tooltip of ours, and being compacted says
+ * nothing about who set the `aria-label` it may be carrying -- Obsidian sets
+ * them on its own rows for its own reasons. `ourTooltips` is the record, for
+ * the reason given there.
  */
 function drawRow(
   title: HTMLElement,
   textEl: HTMLElement,
   run: Run,
-  abbreviate: boolean
+  abbreviate: boolean,
+  drawn?: Set<HTMLElement>
 ): void {
   const label = compactLabel(run.segments, { abbreviate });
   const parts = partsFor(run, abbreviate);
@@ -670,10 +777,13 @@ function drawRow(
     // the vault root has a tip path with ancestors the label never claimed,
     // and the tooltip must say what was hidden, not more.
     title.setAttribute(ARIA_LABEL, run.segments.join("/"));
-  } else {
+    ourTooltips.add(title);
+  } else if (ourTooltips.has(title)) {
     title.removeAttribute(ARIA_LABEL);
+    ourTooltips.delete(title);
   }
   title.parentElement?.classList.add(CLS.compacted);
+  drawn?.add(title);
 }
 
 /**
@@ -683,17 +793,22 @@ function drawRow(
  * compacted. Gating them on the class would make the class the record of what
  * to undo, which is the kind of stashed state this pass does not keep.
  *
- * The tooltip is the one exception, and it is gated on our own ELEMENT rather
- * than on a class we might have left behind: `aria-label` is a DOM attribute
- * anyone may use, and a blanket removal here would strip one Obsidian had put
- * on a row this plugin never labelled. Our prefix being present is the honest
- * record that the attribute is ours.
+ * The tooltip is the one exception, and it is taken off only where this
+ * module put it: `aria-label` is a DOM attribute anyone may use, and a blanket
+ * removal here would strip one Obsidian had put on a row this plugin never
+ * labelled -- or on one it labelled in full, which never carries a tooltip of
+ * ours. `ourTooltips` is that record, and `drawRow` reads the same one.
+ *
+ * `drawn` is the caller's record of rows carrying a prefix, kept in step here
+ * so teardown does not reach back into a row that has already been given back.
  */
-function restoreRow(title: HTMLElement): void {
+function restoreRow(title: HTMLElement, drawn?: Set<HTMLElement>): void {
   const prefix = title.querySelector<HTMLElement>(`:scope > .${CLS_COMPACT_PREFIX}`);
-  if (prefix) {
-    prefix.remove();
+  if (prefix) prefix.remove();
+  if (ourTooltips.has(title)) {
     title.removeAttribute(ARIA_LABEL);
+    ourTooltips.delete(title);
   }
   title.parentElement?.classList.remove(CLS.compacted);
+  drawn?.delete(title);
 }

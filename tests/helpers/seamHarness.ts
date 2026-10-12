@@ -17,6 +17,7 @@ import { DefinitionStore } from "../../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../../src/runtime/RuntimeStateStore";
 import type { SpaceController } from "../../src/controller/SpaceController";
 import type { FolderItemLike } from "../../src/layout/nativeExplorerSort";
+import { CLS_COMPACT_PREFIX } from "../../src/explorer/selectors";
 import type { VisibilitySnapshot } from "../../src/visibility/VisibilityEngine";
 import { DEFAULT_DEFINITIONS, SCHEMA_VERSION } from "../../src/types";
 
@@ -75,6 +76,130 @@ export interface SeamHarnessOptions {
    * holds to anything.
    */
   unknownToView?: string[];
+  /**
+   * How this pane's private sort seam behaves. Defaults to `"ok"`, the state
+   * every other suite here assumes.
+   */
+  seam?: SeamShape;
+  /**
+   * A SECOND explorer pane, with its own seam shape. Absent by default.
+   *
+   * Obsidian permits two file explorers (drag the Files tab into a split), and
+   * `patch` is per view while the chain index is one object shared by both. A
+   * second pane whose seam is not `"ok"` is the two-pane divergence state.
+   */
+  secondPane?: SeamShape;
+  /**
+   * Make `explorerViews()` throw, which is how `bindExplorer`'s step 5 fails:
+   * the step is wrapped in its own try/catch there, so the plugin carries on
+   * with NOTHING patched.
+   */
+  explorerViewsThrows?: boolean;
+  /**
+   * Paths to draw as explorer rows in a container bound to the plugin's real
+   * `ExplorerAdapter`, so a test can ask which rows were actually labelled.
+   *
+   * Bound BEFORE the snapshot is applied, the order `bindExplorer` and
+   * `controller.refresh()` run in.
+   */
+  rows?: string[];
+}
+
+/**
+ * How a pane's private sort seam behaves.
+ *
+ * Every shape but `"ok"` is a state in which nothing re-sorts the tree, so the
+ * compacted substitution never reaches the DOM however good the index is.
+ *
+ * - `"ok"` — the real seam; `probe` answers "ok" and `patch` installs.
+ * - `"absent"` — an Obsidian build exposing neither private method, so `probe`
+ *   answers "unknown".
+ * - `"refused"` — the seam is there, but its own property is non-configurable.
+ *   `patch` declines that shape outright rather than shadowing something it
+ *   could never remove, which is the co-installed-plugin case.
+ * - `"sort-throws"` — patched normally, but `sort()` throws, so
+ *   `requestResort` answers false and the tree keeps its previous render.
+ */
+export type SeamShape = "ok" | "absent" | "refused" | "sort-throws";
+
+/**
+ * Applies a seam shape to a view that currently has the real one.
+ *
+ * Called AFTER the native sort is captured and BEFORE `ensureOrderingPatched`,
+ * because `patch` reads the property descriptor it is about to shadow.
+ */
+function shapeSeam(view: Record<string, unknown>, shape: SeamShape): void {
+  if (shape === "absent") {
+    // From the PROTOTYPE, which is where `seamView` puts them.
+    const proto = Object.getPrototypeOf(view) as Record<string, unknown>;
+    delete proto.getSortedFolderItems;
+    delete proto.sort;
+    delete view.getSortedFolderItems;
+    delete view.sort;
+    return;
+  }
+  if (shape === "refused") {
+    Object.defineProperty(view, "getSortedFolderItems", {
+      value: view.getSortedFolderItems,
+      writable: true,
+      enumerable: true,
+      configurable: false,
+    });
+    return;
+  }
+  if (shape === "sort-throws") {
+    view.sort = (): void => {
+      throw new Error("Spaces test: this pane's sort() throws");
+    };
+  }
+}
+
+/**
+ * An explorer view whose two seam methods live on a PROTOTYPE.
+ *
+ * NOT an object literal, and the difference is load-bearing. `patch` shadows
+ * `getSortedFolderItems` with an OWN property and `unpatch` `delete`s that own
+ * property to restore what was underneath — which is how Obsidian's real
+ * `FileExplorerView` works, because its methods come from its class. A fixture
+ * holding the method as its own property loses it outright on the first
+ * unpatch, so every later `probe` answers "unknown" for a pane that is
+ * perfectly healthy, and a pause/resume test would be measuring the fixture
+ * rather than the plugin.
+ */
+function seamView(fileItems: Record<string, SeamItem>): {
+  fileItems: Record<string, SeamItem>;
+  sortOrder: string;
+  getSortedFolderItems(folder: unknown): FolderItemLike[];
+  sort(): void;
+} {
+  const proto = {
+    // Per folder, the way Obsidian's does: the RAW, unfiltered children. This
+    // is what `patch`'s override hands the transform, and what it falls back
+    // to when `isAllowed` rejects the result.
+    getSortedFolderItems(folder: unknown): FolderItemLike[] {
+      const kids = (folder as { children?: { path: string }[] } | null)?.children;
+      if (!Array.isArray(kids)) return [];
+      return kids.flatMap((c) => (fileItems[c.path] ? [fileItems[c.path]] : []));
+    },
+    sort(): void {
+      // Nothing to re-render here.
+    },
+  };
+  return Object.assign(Object.create(proto) as typeof proto, {
+    fileItems,
+    sortOrder: "alphabetical",
+  });
+}
+
+/** One explorer row in the shape `applyCompactLabels` is handed. */
+function rowMarkup(path: string): string {
+  const name = nameOf(path);
+  return `<div class="tree-item nav-folder">
+    <div class="tree-item-self nav-folder-title" data-path="${path}">
+      <div class="tree-item-icon collapse-icon"></div>
+      <div class="tree-item-inner nav-folder-title-content">${name}</div>
+    </div>
+  </div>`;
 }
 
 /**
@@ -151,6 +276,17 @@ export interface SeamHarness {
   /** The plugin and its one explorer view, for tests that drive the re-sort memo. */
   plugin: SpacesPlugin;
   view: { sort(): void };
+  /**
+   * The container `opts.rows` was drawn into, or null when none were asked
+   * for. Detached from `document.body`, so no suite can bleed rows into
+   * another's.
+   */
+  container: HTMLElement | null;
+  /**
+   * The paths of the rows the adapter has actually drawn a compacted prefix
+   * on, which is the only on-screen evidence that a chain was labelled.
+   */
+  labelledPaths(): string[];
 }
 
 /**
@@ -310,26 +446,51 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
   const rootNode = nodes.get("");
   // Enough of an explorer view for `probe()` to answer "ok", so
   // `ensureOrderingPatched` will install the real override on it.
-  const view = {
-    fileItems,
-    sortOrder: "alphabetical",
-    // Per folder, the way Obsidian's does: the RAW, unfiltered children. This
-    // is what `patch`'s override hands the transform, and what it falls back
-    // to when `isAllowed` rejects the result.
-    getSortedFolderItems(folder: unknown): FolderItemLike[] {
-      const kids = (folder as { children?: { path: string }[] } | null)?.children;
-      if (!Array.isArray(kids)) return [];
-      return kids.flatMap((c) => (fileItems[c.path] ? [fileItems[c.path]] : []));
-    },
-    sort(): void {
-      // Nothing to re-render here.
-    },
-  };
-  (plugin as unknown as { explorerViews: () => object[] }).explorerViews = () => [view];
+  const view = seamView(fileItems);
   // Captured BEFORE the patch, or this would call the override and report the
-  // seam's own output as though it were the raw tree.
+  // seam's own output as though it were the raw tree. Captured before
+  // `shapeSeam` too, so a `"absent"` pane can still be asked what the raw
+  // tree was.
   const nativeSortRoot = view.getSortedFolderItems.bind(view);
   const rawRootItems = (): FolderItemLike[] => nativeSortRoot(rootNode ?? null);
+
+  shapeSeam(view as unknown as Record<string, unknown>, opts.seam ?? "ok");
+  // A second pane needs only what `probe`, `patch` and `requestResort` read;
+  // nothing in these tests sorts through it, so it gets an empty item map.
+  const secondView =
+    opts.secondPane === undefined
+      ? null
+      : (() => {
+          const v = seamView({});
+          shapeSeam(v as unknown as Record<string, unknown>, opts.secondPane);
+          return v as object;
+        })();
+  const views = secondView === null ? [view as object] : [view as object, secondView];
+  (plugin as unknown as { explorerViews: () => object[] }).explorerViews = opts
+    .explorerViewsThrows
+    ? () => {
+        throw new Error("Spaces test: the workspace lookup throws");
+      }
+    : () => views;
+
+  // Rows first, then the patch, then the snapshot: the order production runs
+  // in (`bindExplorer` binds the adapter and installs the seam patch, and only
+  // then does `controller.refresh()` reach `onSnapshotApplied`).
+  let container: HTMLElement | null = null;
+  if (opts.rows) {
+    container = document.createElement("div");
+    container.className = "nav-files-container";
+    container.innerHTML = opts.rows.map(rowMarkup).join("");
+    plugin["adapter"].bind(container);
+  }
+
+  // Guarded the way `bindExplorer` guards its own step 5: a throw there does
+  // not stop the plugin, it just leaves nothing patched.
+  try {
+    plugin["ensureOrderingPatched"]();
+  } catch {
+    // The `explorerViewsThrows` shape. Nothing is patched; that is the point.
+  }
 
   // THE point of this harness: the real apply path, which is what calls
   // `rebuildChainIndex`.
@@ -373,5 +534,16 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
     patchSeam: () => plugin["ensureOrderingPatched"](),
     plugin,
     view,
+    container,
+    labelledPaths: () => {
+      if (!container) return [];
+      const out: string[] = [];
+      container.querySelectorAll<HTMLElement>("[data-path]").forEach((title) => {
+        if (!title.querySelector(`:scope > .${CLS_COMPACT_PREFIX}`)) return;
+        const p = title.getAttribute("data-path");
+        if (p) out.push(p);
+      });
+      return out;
+    },
   };
 }

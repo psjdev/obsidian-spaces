@@ -65,6 +65,7 @@ import { LayoutCoordinator } from "./layout/LayoutCoordinator";
 import { detectNativeWorkspaces, effectiveRestoreLayouts } from "./layout/nativeWorkspaces";
 import {
   displayedPaths,
+  isPatched as isExplorerSortPatched,
   itemsForPaths,
   nativeSortedItems,
   patch as patchExplorerSort,
@@ -1271,15 +1272,17 @@ export default class SpacesPlugin extends Plugin {
       //
       // Optional on the controller for the same reason `start()`'s repaint
       // steps are: the resume can be reached before `start()` has built one.
-      // Rebuilt before the adapter is applied, the same order
-      // `onSnapshotApplied` uses, and for the same reason: the adapter's pass
-      // reads this index. Needed explicitly here because resume does NOT go
-      // through `onSnapshotApplied` — without it the index would stay null
-      // until some unrelated recompute happened along, and compaction would
-      // silently not come back with the filtering it was paused beside.
+      // Index, then re-sort, then adapter — the same three lines in the same
+      // order as `onSnapshotApplied`, for the reasons written out there.
+      // Needed explicitly here because resume does NOT go through
+      // `onSnapshotApplied` — without it the index would stay null until some
+      // unrelated recompute happened along, and compaction would silently not
+      // come back with the filtering it was paused beside. Note that
+      // `ensureOrderingPatched()` above is what makes the index's seam gate
+      // answer true again on this path.
       this.rebuildChainIndex(this.controller?.currentSnapshot() ?? null);
-      this.applyAdapterSnapshot(this.controller?.currentSnapshot() ?? null);
       this.applyFilterAndOrdering();
+      this.applyAdapterSnapshot(this.controller?.currentSnapshot() ?? null);
     }
     // The marker describes what the tree IS, so it must not claim a filtered
     // tree while the filter is off.
@@ -2312,23 +2315,33 @@ export default class SpacesPlugin extends Plugin {
     // apply from any path is also a failsafe against a stuck mask —
     // the mask must never outlive the switch that set it.
     this.setSwitchMask(false);
-    // Before the adapter is applied: the adapter's pass reads this index, and
-    // applying the snapshot is what schedules that pass.
-    this.rebuildChainIndex(snap);
-    this.applyAdapterSnapshot(snap);
-    // These two lines are NOT order-coupled. `filterAndOrderFolder` reads
-    // `controller.currentSnapshot()`, which the controller assigns before it
-    // calls this callback at all. Reading `this.adapter.currentSnapshot()`
-    // instead WOULD couple them: `adapter.apply(snap)` would have to land
-    // first or the re-sort would filter against the outgoing snapshot, making
-    // a domain decision depend on the DOM layer's working copy.
+    // THREE LINES IN THIS ORDER, and two of the three orderings are
+    // load-bearing.
+    //
+    // The index comes FIRST because the sort seam reads it — a re-sort that
+    // ran before it was rebuilt would substitute the previous snapshot's runs
+    // — and because the re-sort memo keys on it.
+    //
+    // The re-sort comes before the ADAPTER because whether it actually
+    // happened is half the answer to "may these rows be labelled". Three of
+    // the four ways the seam can be dead are settled inside
+    // `rebuildChainIndex`; the fourth, `requestResort` refusing, is only
+    // knowable after the attempt, and `applyFilterAndOrdering` drops the index
+    // when it sees it. Labelling first would stamp the joined path onto a tree
+    // nothing re-sorted. (The re-sort is NOT coupled to the adapter the other
+    // way round: `filterAndOrderFolder` reads `controller.currentSnapshot()`,
+    // which the controller assigns before it calls this callback at all.
+    // Reading `this.adapter.currentSnapshot()` instead WOULD couple them, by
+    // making a domain decision depend on the DOM layer's working copy.)
     //
     // This is the ONLY place a re-sort may hang off. `onOutcome` — and so
     // `bindExplorer` — runs BEFORE `runtime.setSelection`, so re-sorting there
     // read the OUTGOING space's order; and with `restoreLayouts` off the
     // outcome is "skipped", `bindExplorer` never runs, and nothing sorts at
     // all. `host.apply` runs after the selection commits, on every path.
+    this.rebuildChainIndex(snap);
     this.applyFilterAndOrdering();
+    this.applyAdapterSnapshot(snap);
     // The header repaints on the same signal, and for the same
     // reason — this is the one place every switch converges AFTER
     // `runtime.setSelection` commits. Hanging it off the four
@@ -2381,8 +2394,63 @@ export default class SpacesPlugin extends Plugin {
    * Rebuilt rather than patched: the runs are a function of the snapshot, and
    * a snapshot is already the thing that changes when membership or visibility
    * does.
+   *
+   * NULL IS A REAL ANSWER, and not only when the setting is off. It also means
+   * "nothing is going to re-sort this tree", which `seamIsPatchedEverywhere`
+   * decides before the index is built and `applyFilterAndOrdering` decides
+   * again after the re-sort is attempted. Both write null here, and the
+   * adapter labels nothing from a null index, so the chain falls back to the
+   * honest nested tree rather than being labelled as something it is not
+   * drawn as.
    */
   private chainIndexNow: ChainIndex | null = null;
+
+  /**
+   * EVERY main-window explorer pane is running our sort override.
+   *
+   * THE GATE THE INDEX HANGS OFF, and the reason it exists: compaction is two
+   * mechanisms that have to agree. The sort seam substitutes a run's TIP for
+   * its HEAD, so the chain draws as one row; `ExplorerAdapter` writes the
+   * joined label onto whatever row that substitution produced. Only the first
+   * needs a patch. So whenever the patch is not on, the adapter labels a tree
+   * nothing re-sorted: the chain is still drawn NESTED and the joined path is
+   * stamped onto the head's row anyway, which reads as `Design/Decisions/2026`
+   * on a folder that is visibly `Design` with `Decisions` underneath it. Worse
+   * than doing nothing, so the index is null and nothing is labelled instead —
+   * the honest nested tree, which is what every other failure in this
+   * transform falls open to.
+   *
+   * EVERY pane, not one, and not `sortProbe`. `sortProbe` takes the BEST
+   * answer across the panes deliberately (one odd view must not spend the
+   * one-shot Notice and turn filtering off everywhere), so it answers "ok" for
+   * a split explorer with one pane patched and one not — which is the same bug
+   * seen from the unpatched pane, since the adapter labels every bound
+   * container from the one index. `isPatched` is the module's own record of
+   * where the override actually went, so "absent from the build", "`patch`
+   * declined because another plugin holds the property" and "the patch step
+   * threw before it got there" all answer the same way without this method
+   * having to tell them apart.
+   *
+   * THROWING IS ANSWERED WITH FALSE. `bindExplorer` already guards step 5, so
+   * `ensureOrderingPatched` throwing is a state the plugin carries on from
+   * with nothing patched — and whatever made it throw is still there when
+   * `rebuildChainIndex` reaches this on the very next apply. Letting it
+   * propagate here would take that apply down — the switch mask, the re-sort,
+   * the header, the strip — over a question whose safe answer is already "do
+   * not compact".
+   */
+  private seamIsPatchedEverywhere(): boolean {
+    try {
+      const views = this.explorerViews();
+      if (views.length === 0) return false;
+      for (const view of views) {
+        if (!isExplorerSortPatched(view)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   private rebuildChainIndex(snap: VisibilitySnapshot | null): void {
     // Paused means the tree is the whole vault, so there are no scaffold runs
@@ -2392,6 +2460,14 @@ export default class SpacesPlugin extends Plugin {
     // `file-open` and every coalesced vault flush, and `SpaceController`
     // knows nothing about the pause, so it keeps handing over a live snapshot.
     if (snap === null || this.filteringPaused || !this.defs.get().settings.compactFolderChains) {
+      this.chainIndexNow = null;
+      return;
+    }
+    // LAST of the guards above, and deliberately below the pause: this one
+    // walks the workspace's leaves, and a pause must not pay for a lookup it
+    // cannot use — the same discipline `ensureOrderingPatched` keeps, where
+    // `tests/productCommands.test.ts` pins it by counting.
+    if (!this.seamIsPatchedEverywhere()) {
       this.chainIndexNow = null;
       return;
     }
@@ -2766,6 +2842,11 @@ export default class SpacesPlugin extends Plugin {
    * itself — plus a freshly patched view, which `ensureOrderingPatched`
    * invalidates explicitly. If `requestResort` fails the memo is dropped, so
    * the next event retries rather than leaving the previous filter on screen.
+   *
+   * A failed re-sort ALSO drops the chain index, which is a second thing this
+   * method owns and its name does not say. See the comment on that line: the
+   * index is a promise that the substitution happened, and this is the one
+   * place that finds out it did not.
    */
   private applyFilterAndOrdering(): void {
     if (this.sortedViews.length === 0) return;
@@ -2776,6 +2857,18 @@ export default class SpacesPlugin extends Plugin {
       if (!requestResort(view)) every = false;
     }
     this.lastResort = every ? signature : null;
+    // THE FOURTH WAY THE INDEX OUTLIVES ITS SORT, and the only one that is
+    // not knowable before the attempt. `seamIsPatchedEverywhere` answers the
+    // other three up front; here the patch is on and `sort()` still refused,
+    // so the tree keeps whatever it was last rendered as and the substitution
+    // this index describes did not happen. The adapter must not label it: the
+    // joined path on a row the chain is still nested under is the one outcome
+    // worse than not compacting. Dropped here, at the one place the verdict
+    // exists, rather than at each of this method's four call sites.
+    //
+    // `lastResort` is already null above, so the next event retries; a retry
+    // that succeeds rebuilds the index from the snapshot in the ordinary way.
+    if (!every) this.chainIndexNow = null;
   }
 
   /** See `applyFilterAndOrdering` for why these four fields and no others. */
