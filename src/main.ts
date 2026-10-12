@@ -1859,7 +1859,7 @@ export default class SpacesPlugin extends Plugin {
           // the controller for the index at all.
           { pathsMatching: (tag) => this.controller.tagIndex().pathsMatching(tag) },
           // Called at most once per preview, and only for a property member.
-          () => this.controller.propertyIndex()
+          () => this.controller.drawnPropertyIndex()
         )(members),
       // The engine's own index, for resolving a stored member to a live path.
       vaultIndex: () => this.controller.vaultIndex(),

@@ -128,20 +128,22 @@ function splitBatch(
   return { added, already };
 }
 
-const STILL_READING = "Spaces: still reading note properties. Try again in a moment.";
+const STILL_READING = "Spaces has not read this vault's properties yet. Try again in a moment.";
 
 /**
  * The property index for a space about to be written to, or `"unknown"` when
- * the space holds a property member and the cache is cold. Writing then would
- * add an exact member for a note the space already shows, and that member
- * outlives the property member.
+ * the space holds a property member and no index has EVER been ready, so
+ * there is nothing to say which notes it already shows. Writing then would
+ * add an exact member for a note the space may already show, and that member
+ * outlives the property member. Once an index has been ready this answers
+ * from it, as the tree does, even while the cache is cold.
  */
 function propertiesFor(
   ctx: MembershipContext,
   space: SpaceDefinition | undefined
 ): PropertyIndex | null | "unknown" {
   if (space === undefined || !holdsPropertyMember(space)) return null;
-  return ctx.controller.propertyIndex() ?? "unknown";
+  return ctx.controller.drawnPropertyIndex() ?? "unknown";
 }
 
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
@@ -256,7 +258,7 @@ export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFil
     // Asked only when some space holds a property member, so a vault with
     // none pays no metadata walk for opening a context menu.
     properties: (): PropertyIndex | null =>
-      ctx.defs.get().spaces.some(holdsPropertyMember) ? ctx.controller.propertyIndex() : null,
+      ctx.defs.get().spaces.some(holdsPropertyMember) ? ctx.controller.drawnPropertyIndex() : null,
   };
   decorateMenu(menu, decorateCtx, files, {
     addAll: (fs) => void addAll(ctx, fs),

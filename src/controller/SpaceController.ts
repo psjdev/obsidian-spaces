@@ -125,15 +125,22 @@ export class SpaceController {
   }
 
   /**
-   * The property index, or `null` while the metadata cache is cold.
+   * The property index the tree is drawn from: the ready one when the
+   * snapshot is ready, otherwise the last one that WAS ready, and `null` only
+   * when none ever has been (a true first start).
    *
-   * For a membership question asked outside a recompute. Each call asks the
-   * accessor, which rebuilds on every ask while cold, so a caller that needs
-   * it for several spaces reads it ONCE and passes it down.
+   * Exposed, as `tagIndex()` is, so a membership question asked outside a
+   * recompute answers from the same picture the tree was drawn from rather
+   * than from a second one that may differ. Not the raw snapshot: while the
+   * cache is cold that is `null`, which would make an add path refuse or
+   * misjudge a note the tree is showing. Each call asks the accessor, which
+   * rebuilds on every ask while cold, so a caller that needs it for several
+   * spaces reads it ONCE and passes it down.
    */
-  propertyIndex(): PropertyIndex | null {
+  drawnPropertyIndex(): PropertyIndex | null {
     const snapshot = this.properties();
-    return snapshot.status === "ready" ? snapshot.index : null;
+    if (snapshot.status === "ready") this.lastReadyIndex = snapshot.index;
+    return this.lastReadyIndex;
   }
 
   /**
@@ -364,22 +371,17 @@ export class SpaceController {
     // Asked ONCE per resolve, and only for a space that holds a property
     // member: while the cache is cold the accessor rebuilds on every ask, and
     // a space with no property member must not pay a vault walk for it.
-    let index: PropertyIndex | null = null;
-    if (holdsPropertyMember(space)) {
-      index = this.propertyIndex();
-      // UNAVAILABLE IS NOT EMPTY. Resolving property members against nothing
-      // would blank a property space's rows whenever the cache is cold. Fall
-      // back to the last READY index instead, and resolve EVERYTHING ELSE
-      // fresh against it: exclusions, file, folder and tag members all still
-      // apply, so removing or adding a note while cold does what it says
-      // instead of missing a cache and emptying the space. Nothing is keyed on
-      // the definition for that reason. The property matches themselves may be
-      // stale until the parse event that makes the snapshot ready recomputes
-      // the space. With no ready index yet (a first start) the members
-      // contribute nothing and the space fills then.
-      if (index !== null) this.lastReadyIndex = index;
-      else index = this.lastReadyIndex;
-    }
+    // UNAVAILABLE IS NOT EMPTY. `drawnPropertyIndex` falls back to the last
+    // READY index, because resolving property members against nothing would
+    // blank a property space's rows whenever the cache is cold. EVERYTHING
+    // ELSE resolves fresh against it: exclusions, file, folder and tag members
+    // all still apply, so removing or adding a note while cold does what it
+    // says instead of missing a cache and emptying the space. Nothing is keyed
+    // on the definition for that reason. The property matches themselves may
+    // be stale until the parse event that makes the snapshot ready recomputes
+    // the space. With no ready index yet (a first start) the members
+    // contribute nothing and the space fills then.
+    const index = holdsPropertyMember(space) ? this.drawnPropertyIndex() : null;
     return resolveMembers(space, this.tags, index);
   }
 

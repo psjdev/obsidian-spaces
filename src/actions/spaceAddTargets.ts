@@ -67,7 +67,7 @@ export function spaceAddTargets(
         name: space.name,
         icon: space.icon,
         color: space.color,
-        label: `${space.name} (still reading note properties)`,
+        label: `${space.name} (try again in a moment)`,
         disabled: true,
         addablePaths: [],
       };
