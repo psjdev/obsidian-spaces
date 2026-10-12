@@ -22,12 +22,12 @@
  * computed style: jsdom does not compute the cascade, and anything about a
  * painted result is a Layer 4 `dev:css` question.
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import * as selectors from "../src/explorer/selectors";
 import { CLS, CLS_ELSEWHERE, SEL, UNSTYLED_CLASSES } from "../src/explorer/selectors";
-import { compactLabel } from "../src/ui/compactLabel";
+import { LABEL_ROLES } from "../src/ui/compactLabel";
 import { applyCompactLabels } from "../src/explorer/ExplorerAdapter";
 import { buildChainIndex } from "../src/visibility/compactChains";
 
@@ -473,10 +473,13 @@ describe("compacted row label roles", () => {
   });
 
   /**
-   * Specificity of the selectors this stylesheet writes for rows: classes
-   * only, so (ids, classes + attributes + pseudo-classes, types). `>` and
-   * `,` are not counted. Enough to rank the rules that compete for ONE
-   * property on ONE row; not a general CSS engine.
+   * A SIMPLIFIED specificity: (class count, type count). It counts every
+   * `.class` (including one inside `:not()`) and every leading type name, and
+   * IGNORES ids, attribute selectors, other pseudo-classes and comma lists
+   * (a list is summed, not split). That is exact for every rule it ranks
+   * today, each a single class-and-combinator selector competing for one
+   * property on one row. It is NOT a general CSS specificity implementation: a
+   * future `.x:hover` or `[data-path]` rule would be under-ranked here.
    */
   function specificity(selector: string): [number, number] {
     const classes = (selector.match(/\.[\w-]+/g) ?? []).length;
@@ -522,6 +525,14 @@ describe("compacted row label roles", () => {
       expect(winningOpacity(scaffoldRow(true)).tied).toBe(false);
     });
 
+    it("stands down on a row the user has cut, so Obsidian's cut cue survives", () => {
+      // `is-cut` is Obsidian's class, not ours. A cut compacted row falls
+      // back to the scaffold rule, which is dimmer than Obsidian's own 0.5.
+      const title = scaffoldRow(true);
+      title.classList.add("is-cut");
+      expect(winningOpacity(title).value).toBe("0.45");
+    });
+
     it("does not reach a member folder, which is not scaffold", () => {
       const { title } = compactedRow();
       title.parentElement!.classList.remove(CLS.scaffold);
@@ -551,12 +562,28 @@ describe("compacted row label roles", () => {
    * is not covered, which is why the convention is that they live there.
    */
   describe("every class the code sets is styled or explicitly unstyled", () => {
-    const selectorClasses = (): string[] => [
-      ...Object.values(CLS),
-      ...(Object.values(selectors) as unknown[]).filter((v): v is string => typeof v === "string"),
-    ];
+    /**
+     * Class-shaped strings only: the `spaces-` and `is-` families. A future
+     * string export that is not a class (an attribute name, an id) is not
+     * swept in and reported unstyled.
+     */
+    const isClass = (v: string): boolean => /^(spaces|is)-[a-z0-9-]+$/.test(v);
+    const selectorClasses = (): string[] =>
+      [
+        ...Object.values(CLS),
+        ...(Object.values(selectors) as unknown[]).filter((v): v is string => typeof v === "string"),
+      ].filter(isClass);
 
-    /** The roles the adapter actually draws: `partsFor`'s `tip` filter, observed. */
+    /**
+     * The generated family. Driven by the runtime `LABEL_ROLES`, from which
+     * the `LabelRole` type is derived, so a role cannot exist in the type and
+     * be missing here. `tip` is filtered out the way `partsFor` filters it: it
+     * is never drawn as a span, so `spaces-compact-tip` is NOT a gap.
+     */
+    const roleClasses = (): string[] =>
+      LABEL_ROLES.filter((r) => r !== "tip").map((r) => `spaces-compact-${r}`);
+
+    /** The classes the adapter really draws for the two row shapes. */
     const drawnRoles = (): string[] => {
       const found = new Set<string>();
       for (const row of [compactedRow().title, shortenedRow().title]) {
@@ -567,8 +594,38 @@ describe("compacted row label roles", () => {
       return [...found].sort();
     };
 
-    const codeSetClasses = (): string[] => [...new Set([...selectorClasses(), ...drawnRoles()])];
+    /**
+     * Every `spaces-*` literal in `src/**` (comments stripped first).
+     *
+     * CAN see: a class named as a string, in a `className =`, `cls:`,
+     * `addClass(...)`, `classList.add(...)` or a selector string.
+     * CANNOT see: a class assembled at runtime. The `spaces-compact-${role}`
+     * template is the one such case, and a literal ending in `-` or followed by
+     * `${` is skipped here for that reason; `roleClasses` covers it. Also
+     * skipped on purpose: `--spaces-*` custom properties and `data-spaces-*`
+     * attributes, which the lookbehind rejects because they are not classes.
+     */
+    const sourceClasses = (): string[] => {
+      const out = new Set<string>();
+      const walk = (dir: string): void => {
+        for (const name of readdirSync(dir)) {
+          const full = join(dir, name);
+          if (statSync(full).isDirectory()) walk(full);
+          else if (name.endsWith(".ts")) {
+            const text = readFileSync(full, "utf8")
+              .replace(/\/\*[\s\S]*?\*\//g, "")
+              .replace(/(^|\s)\/\/.*$/gm, "$1");
+            for (const m of text.matchAll(/(?<![\w-])spaces-[a-z0-9]+(?:-[a-z0-9]+)*(?![\w${-])/g)) out.add(m[0]);
+          }
+        }
+      };
+      walk(resolve(process.cwd(), "src"));
+      return [...out].sort();
+    };
 
+    const codeSetClasses = (): string[] => [
+      ...new Set([...selectorClasses(), ...roleClasses(), ...sourceClasses()]),
+    ];
     const mentioned = (cls: string): boolean =>
       rules.some((r) => new RegExp(`\\.${cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(r.selector));
 
@@ -593,19 +650,37 @@ describe("compacted row label roles", () => {
       }
     });
 
-    it("draws every role compactLabel returns except the tip", () => {
+    it("scans source files, and the scan holds what it should", () => {
+      const found = sourceClasses();
+      // A sample from several files; a scan that quietly found nothing would
+      // pass the coverage test below vacuously.
+      for (const known of ["spaces-switcher", "spaces-create-panel", "spaces-color-custom", CLS.scaffold]) {
+        expect(found).toContain(known);
+      }
+      expect(found.length).toBeGreaterThan(50);
+      expect(found.some((c) => c.startsWith("data-") || c.startsWith("--"))).toBe(false);
+    });
+
+    it("styles or allowlists every class found under src, not only selectors.ts", () => {
+      const unstyled = sourceClasses().filter((c) => !mentioned(c) && !(c in UNSTYLED_CLASSES));
+      expect(unstyled).toEqual([]);
+    });
+
+    it("covers every role but the tip, and never reports the tip as a gap", () => {
       // `partsFor` filters `tip` out before any span exists, because
       // `.tree-item-inner` already is the tip. So `spaces-compact-tip` is NOT
-      // a gap in the stylesheet, and must never be reported as one. A role
-      // added to `compactLabel` shows up here as a drawn class and then must
-      // be styled by the test above.
-      const roles = new Set<string>();
-      for (const abbreviate of [false, true]) {
-        for (const p of compactLabel(["A", "B", "C", "D"], { abbreviate })) roles.add(p.role);
-      }
-      expect(roles.has("tip")).toBe(true);
-      const expected = [...roles].filter((r) => r !== "tip").map((r) => `spaces-compact-${r}`).sort();
-      expect(drawnRoles()).toEqual(expected);
+      // a gap in the stylesheet and must never be reported as one.
+      expect(LABEL_ROLES).toContain("tip");
+      const family = roleClasses();
+      expect(family).not.toContain("spaces-compact-tip");
       expect(codeSetClasses()).not.toContain("spaces-compact-tip");
+      for (const cls of family) expect(mentioned(cls), cls).toBe(true);
     });
-  });});
+
+    it("draws only classes from that family", () => {
+      // The adapter and LABEL_ROLES must agree: a rendered role class outside
+      // the family would escape the coverage above.
+      const family = roleClasses();
+      for (const cls of drawnRoles()) expect(family, cls).toContain(cls);
+      expect(drawnRoles().length).toBeGreaterThan(0);
+    });  });});

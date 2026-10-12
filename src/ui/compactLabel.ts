@@ -55,8 +55,13 @@
  * a reader can tell "there was more above this" from a folder actually called
  * `..`, and so the stylesheet can draw it as the marker it is rather than as a
  * name that merely happens to be short.
+ *
+ * LABEL_ROLES is the runtime list, because a type is erased at build time and
+ * a test cannot enumerate it. The type is DERIVED from it, so the two cannot
+ * drift: a role exists in exactly one place.
  */
-export type LabelRole = "lead" | "sep" | "tip" | "gap";
+export const LABEL_ROLES = ["lead", "sep", "tip", "gap"] as const;
+export type LabelRole = (typeof LABEL_ROLES)[number];
 
 export interface LabelPart {
   /** The characters to draw. */

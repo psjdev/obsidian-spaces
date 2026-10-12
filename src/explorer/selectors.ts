@@ -282,13 +282,18 @@ export const CLS_SPACE_DRAGGING = "is-being-dragged";
 
 /**
  * Classes the code sets that `styles.css` deliberately never mentions, each
- * with the reason it needs no rule. EMPTY is the right state: a class the code
+ * with the reason it needs no rule. Keep it short: a class the code
  * sets and no stylesheet rule reaches is, by default, a rule somebody forgot
  * to write (`CLS.compacted` was exactly that, for a whole feature).
  *
- * `tests/stylesCoupling.test.ts` fails on any `CLS`, `CLS_*` or generated
- * `spaces-compact-<role>` class that has no stylesheet rule and no entry here.
+ * `tests/stylesCoupling.test.ts` fails on any class that has no stylesheet rule
+ * and no entry here: every `CLS`/`CLS_*` string in this file, every
+ * `spaces-compact-<role>` for a role in `LABEL_ROLES`, and every `spaces-*`
+ * literal found anywhere under `src/`.
  * Add one only for a class that is a pure marker (a hook for a test or a
  * query), and say so in the reason.
  */
-export const UNSTYLED_CLASSES: Readonly<Record<string, string>> = {};
+export const UNSTYLED_CLASSES: Readonly<Record<string, string>> = {
+  "spaces-color-custom":
+    "A plain block wrapper around the custom color picker (ColorPickerPopover). Every child carries its own rule and nothing queries the wrapper, so it is a grouping hook with nothing to style.",
+};
