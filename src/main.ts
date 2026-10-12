@@ -3257,6 +3257,17 @@ export default class SpacesPlugin extends Plugin {
       // decision taken for this feature is that such a row reorders among the
       // rows it is drawn beside and does nothing else, and that the way out is
       // to stop compacting rather than to guess.
+      //
+      // Fired for a drag whether or not reordering is enabled, because
+      // compaction is a different setting and a user who turned reordering off
+      // did not thereby agree to have chain folders moved. See `carried` in
+      // `DragOrdering.ts`.
+      //
+      // Singular, and it stays singular for a selection of several rows. One
+      // compacted row refuses the whole gesture, so the sentence names the
+      // obstacle rather than counting the selection, and the instruction is
+      // the same either way. A count would be the kind of explanation the copy
+      // rules for this feature exclude.
       onCompactedRowRefused: () => {
         new Notice(
           "Spaces: that folder is part of a compacted chain. " +
