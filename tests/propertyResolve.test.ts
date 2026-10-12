@@ -128,6 +128,20 @@ describe("the preview", () => {
     expect(preview([{ kind: "property", key: "status" }], null).notes).toBe(0);
   });
 
+  it("asks once for several property members when the answer is null", () => {
+    // A null answer must be remembered. `index ??= properties()` re-asks for
+    // every further property member, and while the cache is cold each ask is
+    // a vault walk.
+    const ask = vi.fn((): typeof properties | null => null);
+    const out = buildPreview(vault, compileIgnore([]), tags, ask)([
+      { kind: "property", key: "status" },
+      { kind: "property", key: "status", value: "active" },
+      { kind: "property", key: "other" },
+    ]);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(out.notes).toBe(0);
+  });
+
   it("does not ask for the index when no member is a property member", () => {
     const ask = vi.fn(() => properties);
     buildPreview(vault, compileIgnore([]), tags, ask)([{ kind: "tag", tag: "t" }]);
@@ -241,15 +255,40 @@ describe("SpaceController with a property space", () => {
     expect(visibleNotes(controller)).toEqual(["Work/a.md"]);
   });
 
-  it("does not keep a previous result across an edit to the definition", async () => {
+  it("keeps a property-only space's other matches when a note is removed while cold", async () => {
+    // "Remove from space" on a property-matched row writes an exclusion. That
+    // must hide the one note, not miss a cache and empty the space.
+    const everyActive: PropertySnapshot = {
+      status: "ready",
+      index: createPropertyIndex(
+        [
+          { path: "Work/a.md", frontmatter: { status: "active" } },
+          { path: "Work/b.md", frontmatter: { status: "active" } },
+        ],
+        1
+      ),
+    };
+    const { controller, store, set } = await build(ACTIVE);
+    set(everyActive);
+    await controller.switchTo({ kind: "space", id: "p" });
+    expect(visibleNotes(controller)).toEqual(["Work/a.md", "Work/b.md"]);
+    set(unavailable);
+    await store.mutate((d) => {
+      d.spaces[0].exclude = ["Work/a.md"];
+    });
+    controller.refresh();
+    expect(visibleNotes(controller)).toEqual(["Work/b.md"]);
+  });
+
+  it("applies a note added while cold on top of the kept matches", async () => {
     const { controller, store, set } = await build(ACTIVE);
     await controller.switchTo({ kind: "space", id: "p" });
     set(unavailable);
     await store.mutate((d) => {
-      d.spaces[0].members = [{ kind: "property", key: "status", value: "done" }];
+      d.spaces[0].members.push({ kind: "file", path: "Other.md" });
     });
     controller.refresh();
-    expect(visibleNotes(controller)).toEqual([]);
+    expect(visibleNotes(controller)).toEqual(["Work/a.md", "Other.md"]);
   });
 
   it("picks up a replaced accessor", async () => {

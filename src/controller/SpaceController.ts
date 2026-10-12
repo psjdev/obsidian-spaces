@@ -364,33 +364,30 @@ export class SpaceController {
     // Asked ONCE per resolve, and only for a space that holds a property
     // member: while the cache is cold the accessor rebuilds on every ask, and
     // a space with no property member must not pay a vault walk for it.
-    const holdsProperty = holdsPropertyMember(space);
-    const index = holdsProperty ? this.propertyIndex() : null;
-    const definition = holdsProperty ? JSON.stringify([space.members, space.exclude]) : "";
-    if (holdsProperty && index === null) {
-      // UNAVAILABLE IS NOT EMPTY. Publishing what a null index resolves to
-      // would blank a property space's rows on every cold start. Keep the
-      // previous resolve of THIS definition when there is one; an edited
-      // definition (or a first start) has none, so its property members
-      // contribute nothing until readiness arrives and a recompute runs.
-      const prev = this.lastResolved;
-      if (prev !== null && prev.id === space.id && prev.definition === definition) {
-        return prev.members;
-      }
-      return resolveMembers(space, this.tags, null);
+    let index: PropertyIndex | null = null;
+    if (holdsPropertyMember(space)) {
+      index = this.propertyIndex();
+      // UNAVAILABLE IS NOT EMPTY. Resolving property members against nothing
+      // would blank a property space's rows whenever the cache is cold. Fall
+      // back to the last READY index instead, and resolve EVERYTHING ELSE
+      // fresh against it: exclusions, file, folder and tag members all still
+      // apply, so removing or adding a note while cold does what it says
+      // instead of missing a cache and emptying the space. Nothing is keyed on
+      // the definition for that reason. The property matches themselves may be
+      // stale until the parse event that makes the snapshot ready recomputes
+      // the space. With no ready index yet (a first start) the members
+      // contribute nothing and the space fills then.
+      if (index !== null) this.lastReadyIndex = index;
+      else index = this.lastReadyIndex;
     }
-    const members = resolveMembers(space, this.tags, index);
-    if (holdsProperty) this.lastResolved = { id: space.id, definition, members };
-    return members;
+    return resolveMembers(space, this.tags, index);
   }
 
   /**
-   * The last resolve of a property space made against a READY snapshot, kept
-   * only so an unavailable snapshot does not blank it. One entry, because only
-   * the active space is ever resolved. Never written by a resolve that ran
-   * without an index.
+   * The last READY property index this controller saw, used only while the
+   * snapshot is unavailable. Never replaced by an unavailable answer.
    */
-  private lastResolved: { id: string; definition: string; members: PathMember[] } | null = null;
+  private lastReadyIndex: PropertyIndex | null = null;
 
   private recompute(
     opts: { pruneClosed: boolean },

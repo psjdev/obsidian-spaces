@@ -75,7 +75,10 @@ export function buildPreview(
     let index: PropertyIndex | null | undefined;
     for (const m of members) {
       if (m.kind === "property") {
-        index ??= properties();
+        // `undefined` is the only "not asked yet": a `null` answer must be
+        // remembered too, or each further property member asks again, and
+        // while the cache is cold every ask is a vault walk.
+        if (index === undefined) index = properties();
         if (index === null) continue;
         // A property match is dropped by an exclusion, as a tag match is.
         const matched =

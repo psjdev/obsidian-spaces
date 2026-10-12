@@ -105,14 +105,15 @@ function splitBatch(
   files: readonly TAbstractFile[],
   space: SpaceDefinition | undefined,
   tags: TagIndex,
-  // A function, called only when the space holds a property member: asking
-  // can cost a vault walk, and most spaces hold none.
-  properties: () => PropertyIndex | null
+  // Already read by the caller, which has refused an unknown answer for a
+  // space holding a property member. `null` here therefore only ever means
+  // the space has none.
+  properties: PropertyIndex | null
 ): { added: TAbstractFile[]; already: TAbstractFile[] } {
   // Built once for the whole batch, never once per file: expanding a tag
   // member costs a pass over the vault's notes.
   const resolved = space
-    ? resolvedPaths(space, tags, holdsPropertyMember(space) ? properties() : null)
+    ? resolvedPaths(space, tags, properties)
     : new Set<string>();
   const seen = new Set<string>();
   const added: TAbstractFile[] = [];
@@ -127,6 +128,22 @@ function splitBatch(
   return { added, already };
 }
 
+const STILL_READING = "Spaces: still reading note properties. Try again in a moment.";
+
+/**
+ * The property index for a space about to be written to, or `"unknown"` when
+ * the space holds a property member and the cache is cold. Writing then would
+ * add an exact member for a note the space already shows, and that member
+ * outlives the property member.
+ */
+function propertiesFor(
+  ctx: MembershipContext,
+  space: SpaceDefinition | undefined
+): PropertyIndex | null | "unknown" {
+  if (space === undefined || !holdsPropertyMember(space)) return null;
+  return ctx.controller.propertyIndex() ?? "unknown";
+}
+
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
   const space = ctx.controller.activeSpace();
   if (!space) return;
@@ -134,12 +151,12 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
   // reason as in `addToSpace`: reading it back afterwards cannot tell a path
   // this call added from one that was already there.
   const current = ctx.defs.get().spaces.find((s) => s.id === space.id);
-  const { added, already } = splitBatch(
-    files,
-    current,
-    ctx.controller.tagIndex(),
-    () => ctx.controller.propertyIndex()
-  );
+  const props = propertiesFor(ctx, current);
+  if (props === "unknown") {
+    new Notice(STILL_READING);
+    return;
+  }
+  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex(), props);
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === space.id);
@@ -183,12 +200,12 @@ export async function addToSpace(
   // afterwards cannot tell a path this call added from one that was already
   // there.
   const current = ctx.defs.get().spaces.find((s) => s.id === spaceId);
-  const { added, already } = splitBatch(
-    files,
-    current,
-    ctx.controller.tagIndex(),
-    () => ctx.controller.propertyIndex()
-  );
+  const props = propertiesFor(ctx, current);
+  if (props === "unknown") {
+    new Notice(STILL_READING);
+    return;
+  }
+  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex(), props);
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === spaceId);
