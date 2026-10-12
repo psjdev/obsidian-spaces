@@ -83,7 +83,12 @@ import {
   type ChainTree,
   type Run,
 } from "./visibility/compactChains";
-import { displayParentOf, displayToStored } from "./visibility/compactCoords";
+import {
+  displayParentOf,
+  displayToStored,
+  isCompactedRow,
+  storedToDisplay,
+} from "./visibility/compactCoords";
 import type { CompactLabelOptions } from "./ui/compactLabel";
 import type { VisibilitySnapshot } from "./visibility/VisibilityEngine";
 import {
@@ -3235,6 +3240,29 @@ export default class SpacesPlugin extends Plugin {
       },
       moveInto: (paths, targetFolder, edge, targetPath) =>
         this.moveAndOrder(paths, targetFolder, edge, targetPath),
+      // The three translation questions `DragOrdering` asks, answered from the
+      // one chain index the sort seam and the explorer adapter also read.
+      // Wired unconditionally: with no index every one of them is the
+      // identity, and `compactCoords.ts` records why that is load bearing
+      // rather than defensive.
+      storedPathFor: (path) => displayToStored(this.chainIndexNow, path),
+      displayPathFor: (path) => storedToDisplay(this.chainIndexNow, path),
+      isCompactedRow: (path) => isCompactedRow(this.chainIndexNow, path),
+      // `DragOrdering` refuses the drop on its own -- this hook only voices
+      // it, exactly as `onSelectionOutsideWindow` above voices its decline.
+      //
+      // A compacted row is drawn where its chain's topmost folder was and
+      // carries the chain's deepest folder as its path, so "move it into that
+      // folder" has no single destination the user could have meant. The
+      // decision taken for this feature is that such a row reorders among the
+      // rows it is drawn beside and does nothing else, and that the way out is
+      // to stop compacting rather than to guess.
+      onCompactedRowRefused: () => {
+        new Notice(
+          "Spaces: that folder is part of a compacted chain. " +
+            "Turn off compact folder chains to move it."
+        );
+      },
       // The same rule the renderer reads, evaluated per event, so a space
       // switch changes the answer with no rebind - gating the gesture
       // alongside the rendering is what stops a drag in All writing an order
@@ -3415,6 +3443,15 @@ export default class SpacesPlugin extends Plugin {
    * what a move means. Adding membership behind the user's back, or revealing
    * the file through `RevealedSet`, would both be inventing intent; the reveal
    * would not even survive, since a moved file has no live leaf to back it.
+   *
+   * `targetPath` arrives in STORAGE's spelling, which is the only spelling
+   * that can work here: it is handed straight to `computeDrop` beside
+   * `dragDeps().displayedOrder`, and that list already names a compacted
+   * chain by its topmost folder. A row's own `data-path` would name the
+   * chain's deepest folder, which is not a child of `targetFolder` at all, so
+   * the position would be computed against nothing and silently dropped.
+   * `DragOrdering` does the translation before calling this; see `moveInto`
+   * in `DragOrdering.ts`.
    */
   private async moveAndOrder(
     paths: string[],

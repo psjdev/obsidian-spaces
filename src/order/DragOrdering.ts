@@ -47,6 +47,9 @@ interface StripRect {
 }
 import { computeDrop, intentFor, movesIntoOwnSubtree, type DropEdge } from "./dropIntent";
 
+/** "between", "into" or "none", named so a helper can take one as an argument. */
+type DropIntentKind = ReturnType<typeof intentFor>["kind"];
+
 /**
  * The drag half of ordering. Renders and dispatches; decides nothing —
  * every rule lives in `dropIntent.ts`, where it is tested. A reviewer finding a
@@ -79,6 +82,27 @@ import { computeDrop, intentFor, movesIntoOwnSubtree, type DropEdge } from "./dr
  * `pointerInside` guard keeps a document-wide listener off drags in the editor
  * or the tab bar.
  *
+ * **A drop has three outcomes here, and they are not interchangeable.**
+ *
+ *  - CLAIMED. `preventDefault()` and `stopPropagation()`, then spaces performs
+ *    the move or the write itself. Obsidian's handler must not also run or the
+ *    file moves twice and the second attempt fails on its own collision.
+ *  - DECLINED. The event is left pristine and propagation is left open, so
+ *    Obsidian's own handler completes the gesture. This is the right outcome
+ *    whenever Obsidian would do something the user asked for and we merely
+ *    cannot add a position to it: a drop on the middle of a folder, a move
+ *    into a dragged folder's own subtree, a selection we can only see part of.
+ *    It is a handover, not a no-op.
+ *  - REFUSED. `stopPropagation()` WITHOUT `preventDefault()`, and nothing is
+ *    moved or written by anyone. The distinction from a decline is the whole
+ *    point: a declined gesture still mutates the vault, and for a compacted
+ *    row that mutation is one nobody chose. `preventDefault()` stays off
+ *    because `dropTargetFor`'s contract is that a refusal lights nothing and
+ *    cancels nothing; `stopPropagation()` goes on because a refusal that let
+ *    the event through would not be a refusal at all. A refusal also has to
+ *    call `endNativeDrag`, for the same reason a claim does: Obsidian tears
+ *    its own drag state down in the handler we just cut.
+ *
  * **The insertion line is created once at `bind` and never inserted or removed
  * during a drag** — only moved and shown. Appending it mid-drag is a childList
  * mutation inside the drag target's own subtree, which provokes
@@ -99,8 +123,52 @@ export interface DragOrderingDeps {
    * Move paths into another folder and give them a position there. Must move
    * FIRST and order only on success — ordering a file into a folder it never
    * reached must never happen.
+   *
+   * `paths` are the rows the user grabbed, spelled as the VAULT spells them,
+   * because this renames real files. `targetPath` is the row the position is
+   * measured against, spelled as STORAGE spells it (see `storedPathFor`),
+   * because the only thing done with it is to locate it among the destination
+   * folder's children.
    */
   moveInto(paths: string[], targetFolder: string, edge: DropEdge, targetPath: string): Promise<void>;
+  /**
+   * The path STORAGE spells this row by.
+   *
+   * Identity for every ordinary row, and the whole reason this exists is the
+   * one row for which it is not: a COMPACTED row, which stands for a chain of
+   * single-child folders drawn as a single line. Its `data-path` is the
+   * chain's deepest folder, because that is the folder the row acts as; a
+   * stored order names the chain's TOPMOST folder, because an order lists a
+   * folder's own children and only the topmost one is a child.
+   *
+   * Every path this class hands `computeDrop` goes through here first, because
+   * `displayedOrder` and `storedOrder` are both already in storage's spelling
+   * and a target or a dragged path in the other spelling simply is not in
+   * either list. `indexOf` then answers -1 and the drop declines, or -- worse,
+   * when the target happens to be an ordinary row -- the chain is spliced in
+   * under a path that is not a child of the folder, and the write strips it
+   * back out again after a drop line has already promised the move.
+   *
+   * Optional, and the identity when absent. That is not a lenient default: a
+   * `DragOrdering` with no compaction behind it is the state this whole class
+   * was specified and tested in, and the identity is the correct answer there.
+   */
+  storedPathFor?(path: string): string;
+  /**
+   * The path the ROW for this stored path carries. The inverse of
+   * `storedPathFor`, for the one lookup that goes the other way: finding a
+   * row in the DOM for a folder named by a dependency that answers in
+   * storage's spelling. Identity when absent, for the same reason.
+   */
+  displayPathFor?(path: string): string;
+  /**
+   * Whether this row stands for a whole chain of folders rather than for one.
+   *
+   * Asked of the DRAGGED paths, and it decides whether this gesture may leave
+   * the folder it is drawn in at all. False when absent, which is the right
+   * answer when nothing is compacted.
+   */
+  isCompactedRow?(path: string): boolean;
   enabled(): boolean;
   /**
    * Which indicator to draw, read per frame rather than captured. The setting
@@ -122,6 +190,21 @@ export interface DragOrderingDeps {
    * stands whether or not it is supplied.
    */
   onSelectionOutsideWindow?(): void;
+  /**
+   * Called once per drop REFUSED because the gesture would move a compacted
+   * row out of the folder it is drawn in.
+   *
+   * Same division of labour as `onBlockedDrag` and `onSelectionOutsideWindow`:
+   * the controller refuses, the caller explains, because only the caller can
+   * raise a Notice and only the caller knows what the user should do instead.
+   * The refusal stands whether or not this is supplied.
+   *
+   * Unlike those two, this fires on a refusal the user cannot otherwise see.
+   * A declined drop leaves the gesture with Obsidian, which does something
+   * visible with it; a refused one stops here, so with nothing wired the
+   * gesture ends in silence.
+   */
+  onCompactedRowRefused?(): void;
   /**
    * Told what this drag carries, once, at `dragstart`.
    *
@@ -843,6 +926,16 @@ export class DragOrdering {
         return;
       }
 
+      // Nor for a drop this class is going to REFUSE. A line is a promise
+      // that releasing here puts the row there, and the refusal below puts it
+      // nowhere at all -- which is the same "drop line that lies" the no-op
+      // guard immediately after this one exists to prevent, arriving by a
+      // different route.
+      if (this.refusesCompactedMove(this.dragged, info.parent, intent.kind)) {
+        this.clearIndicator();
+        return;
+      }
+
       // And no line where a drop would change nothing. `computeDrop` already
       // declines these — "the target is itself being dragged" and "the sequence
       // is unchanged" — but consulted only on DROP, so the line promised a move
@@ -907,19 +1000,70 @@ export class DragOrdering {
     targetPath: string,
     edge: DropEdge
   ): boolean {
-    const sameParent = dragged.every(
-      (p) => this.deps.describeRow(p)?.parent === targetFolder
-    );
-    if (!sameParent) return false;
+    if (!this.reordersInPlace(dragged, targetFolder)) return false;
     return (
       computeDrop({
         order: this.deps.storedOrder(targetFolder),
         displayed: this.deps.displayedOrder(targetFolder),
-        dragged,
-        targetPath,
+        dragged: dragged.map((p) => this.toStored(p)),
+        targetPath: this.toStored(targetPath),
         edge,
       }) === null
     );
+  }
+
+  /**
+   * Whether every dragged path already lives in the folder this drop lands in,
+   * so the drop is a reorder rather than a move.
+   *
+   * Asked in DISPLAY space on both sides. `describeRow` answers the folder a
+   * row is drawn inside, and `targetFolder` is another row's answer to the
+   * same question, so the comparison is between two positions on screen --
+   * which is what the user's gesture was made in.
+   */
+  private reordersInPlace(dragged: readonly string[], targetFolder: string): boolean {
+    return dragged.every((p) => this.deps.describeRow(p)?.parent === targetFolder);
+  }
+
+  /** The dependency's answer, or the identity when nothing is compacted. */
+  private toStored(path: string): string {
+    return this.deps.storedPathFor?.(path) ?? path;
+  }
+
+  /** The dependency's answer, or the identity when nothing is compacted. */
+  private toDisplay(path: string): string {
+    return this.deps.displayPathFor?.(path) ?? path;
+  }
+
+  /**
+   * Would this gesture move a row that stands for a whole chain of folders out
+   * of the folder it is drawn in?
+   *
+   * A compacted row is drawn at one level and lives at another, so there is no
+   * single destination "move it into that folder" could mean: the folder the
+   * user is pointing at would receive the chain's deepest folder, which is not
+   * the thing they see or the thing they grabbed. Reordering among the rows it
+   * is drawn beside has one unambiguous meaning and is allowed; everything
+   * else is refused.
+   *
+   * `intent` decides which question to ask, because the two kinds of drop have
+   * different destinations. A "between" lands in the target row's PARENT, so
+   * it is a move unless every dragged row already lives there. An "into" lands
+   * in the target row itself, which is never where a compacted row already is
+   * -- a row cannot be drawn inside itself -- so it is always a move.
+   *
+   * ANY compacted row in the selection refuses the whole drop, matching
+   * `movesIntoOwnSubtree`: a multi-selection is one gesture, and moving the
+   * possible half would leave a partial result the user did not ask for.
+   */
+  private refusesCompactedMove(
+    dragged: readonly string[],
+    targetFolder: string,
+    intent: DropIntentKind
+  ): boolean {
+    if (!dragged.some((p) => this.deps.isCompactedRow?.(p) ?? false)) return false;
+    if (intent !== "between") return true;
+    return !this.reordersInPlace(dragged, targetFolder);
   }
 
   private readonly onDragEnd = (): void =>
@@ -984,7 +1128,21 @@ export class DragOrdering {
           isFolder: info.isFolder,
         });
       }
+      // REFUSED, and checked before every decline below, because a decline
+      // here would hand Obsidian a move we have decided must not happen. See
+      // the three outcomes in this class's header: a refusal stops propagation
+      // so nothing else acts, and leaves `defaultPrevented` false so nothing
+      // is cancelled.
+      if (this.refusesCompactedMove(dragged, info.parent, intent.kind)) {
+        e.stopPropagation();
+        this.endNativeDrag();
+        this.deps.onCompactedRowRefused?.();
+        return;
+      }
+
       // Not our drop: Obsidian's own handler moves the file into the folder.
+      // For a compacted row that folder is the chain's deepest folder, which
+      // is exactly what the row stands for, so the destination is right.
       if (intent.kind !== "between") return;
 
       // An impossible move is not ours to claim. Returning without
@@ -1016,15 +1174,25 @@ export class DragOrdering {
       this.endNativeDrag();
 
       const targetFolder = info.parent;
-      const sameParent = dragged.every(
-        (p) => this.deps.describeRow(p)?.parent === targetFolder
-      );
+      // The POSITION the drop names, in storage's spelling. `moveInto` and
+      // `computeDrop` both use it to place something relative to the target
+      // among a folder's children, and both read lists that are already
+      // spelled that way. A compacted row's `data-path` is its chain's
+      // deepest folder, which is not a child of this folder at all: left
+      // untranslated it matches nothing in either list, and the drop either
+      // declines in silence or splices the chain in under a path the write
+      // then strips back out.
+      //
+      // `dragged` itself is NOT translated for `moveInto`: that one renames
+      // real files, so it needs the paths the vault has, which for every row
+      // that can reach it is what the row already says.
+      const targetStored = this.toStored(row.path);
 
-      if (!sameParent) {
+      if (!this.reordersInPlace(dragged, targetFolder)) {
         // A cross-folder drop is a filesystem move AND a position in the
         // new parent. The move has to land first.
         void this.deps
-          .moveInto(dragged, targetFolder, intent.edge, row.path)
+          .moveInto(dragged, targetFolder, intent.edge, targetStored)
           .catch((err) => this.reportFailure(err));
         return;
       }
@@ -1032,8 +1200,8 @@ export class DragOrdering {
       const next = computeDrop({
         order: this.deps.storedOrder(targetFolder),
         displayed: this.deps.displayedOrder(targetFolder),
-        dragged,
-        targetPath: row.path,
+        dragged: dragged.map((p) => this.toStored(p)),
+        targetPath: targetStored,
         edge: intent.edge,
       });
       // A drop that changes nothing must not touch data.json.
@@ -1042,8 +1210,9 @@ export class DragOrdering {
     });
 
   /**
-   * Ask Obsidian to end its own drag. Called after we claim a drop, because
-   * claiming it means its drop handler — which does this teardown — never runs.
+   * Ask Obsidian to end its own drag. Called on every drop this class claims
+   * or REFUSES, because both stop propagation and Obsidian's drop handler --
+   * which does this teardown -- is therefore the one that never runs.
    */
   private endNativeDrag(): void {
     const el = this.sourceEl;
@@ -1368,12 +1537,23 @@ export class DragOrdering {
    * The vault root is not a folder anyone can see, so an empty parent marks
    * nothing. Re-marking the row that is already marked is a no-op, which
    * matters because this runs on every frame of a held gap.
+   *
+   * `parent` arrives from `describeRow`, which answers in STORAGE's spelling,
+   * and a row's `data-path` is in DISPLAY's. The two differ for exactly one
+   * kind of path -- the topmost folder of a compacted chain -- whose row
+   * carries the chain's deepest folder instead. Querying for it untranslated
+   * finds nothing and the destination silently goes unlit. No production tree
+   * is known to put such a folder in a row's `parent` today, so this is the
+   * same coordinate translation every other path lookup in this file does
+   * rather than a fix for a miss that was measured; it is here so the cue
+   * cannot start lying if one ever does.
    */
   private markDestination(parent: string): void {
     const c = this.container;
     if (!c) return;
-    const strip = parent
-      ? c.querySelector(`${SEL.titleWithPath}[data-path="${CSS.escape(parent)}"]`)
+    const shown = this.toDisplay(parent);
+    const strip = shown
+      ? c.querySelector(`${SEL.titleWithPath}[data-path="${CSS.escape(shown)}"]`)
       : null;
     const next = strip instanceof HTMLElement ? strip : null;
     if (next === this.parentMark) return;

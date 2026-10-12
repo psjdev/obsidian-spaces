@@ -27,7 +27,8 @@
  * `edge` supplied directly — the DOM gesture that produces those three is
  * `dragOrdering.test.ts`'s subject, not this file's.
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { noticeLog } from "./helpers/obsidian-stub";
 import { makePluginForSeam, type SeamHarness } from "./helpers/seamHarness";
 import { computeDrop, type DropEdge } from "../src/order/dropIntent";
 import type { DragOrderingDeps } from "../src/order/DragOrdering";
@@ -261,5 +262,95 @@ describe("a cross-folder drop into a folder that contains a chain", () => {
     withRenames(h);
     await h.plugin["moveAndOrder"](["Other/new.md"], "Parent", "before", "Parent/alpha.md");
     expect(depsOf(h).storedOrder("Parent")).toContain("Parent/Chain");
+  });
+});
+
+/**
+ * The translation the DRAG CONTROLLER asks for, as dependencies.
+ *
+ * `DragOrdering` decides nothing about compaction and knows nothing about a
+ * chain index -- every rule it applies comes from `dropIntent.ts` and every
+ * fact it uses comes from its dependencies. So the three questions it needs
+ * are wired here, and these pin the wiring: a `DragOrdering` built without
+ * them falls back to the identity, which is the correct answer only when
+ * compaction is off. `tests/compactDragGestures.test.ts` holds the other half,
+ * the gestures those answers produce.
+ */
+describe("the drag dependencies carry the translation", () => {
+  it("spells a compacted row the way storage spells it", () => {
+    const h = harness(true);
+    expect(depsOf(h).storedPathFor?.("Parent/Chain/Link")).toBe("Parent/Chain");
+  });
+
+  it("leaves an ordinary path alone", () => {
+    const h = harness(true);
+    expect(depsOf(h).storedPathFor?.("Parent/alpha.md")).toBe("Parent/alpha.md");
+  });
+
+  it("spells a stored chain the way its ROW is spelled", () => {
+    const h = harness(true);
+    expect(depsOf(h).displayPathFor?.("Parent/Chain")).toBe("Parent/Chain/Link");
+  });
+
+  it("leaves an ordinary path alone in that direction too", () => {
+    const h = harness(true);
+    expect(depsOf(h).displayPathFor?.("Parent")).toBe("Parent");
+  });
+
+  it("calls the run's tip a compacted row", () => {
+    const h = harness(true);
+    expect(depsOf(h).isCompactedRow?.("Parent/Chain/Link")).toBe(true);
+  });
+
+  it("does not call the run's head one, because the head has no row", () => {
+    const h = harness(true);
+    expect(depsOf(h).isCompactedRow?.("Parent/Chain")).toBe(false);
+  });
+
+  it("does not call an ordinary folder one", () => {
+    const h = harness(true);
+    expect(depsOf(h).isCompactedRow?.("Parent")).toBe(false);
+  });
+
+  it("answers the identity on every question with compaction off", () => {
+    const h = harness(false);
+    const deps = depsOf(h);
+    expect(deps.storedPathFor?.("Parent/Chain/Link")).toBe("Parent/Chain/Link");
+    expect(deps.displayPathFor?.("Parent/Chain")).toBe("Parent/Chain");
+    expect(deps.isCompactedRow?.("Parent/Chain/Link")).toBe(false);
+  });
+});
+
+/**
+ * The refusal has a voice.
+ *
+ * `DragOrdering` refuses the drop on its own; this hook is the only thing that
+ * tells the user it happened, and a gesture that does nothing and says nothing
+ * reads as a broken plugin. Same division of labour as `onBlockedDrag` and
+ * `onSelectionOutsideWindow`: the controller declines, the plugin explains,
+ * because only the plugin can raise a Notice.
+ */
+describe("refusing to move a compacted row", () => {
+  beforeEach(() => {
+    noticeLog.length = 0;
+  });
+
+  it("tells the user what the folder is and what to turn off", () => {
+    const h = harness(true);
+    depsOf(h).onCompactedRowRefused?.();
+    expect(noticeLog).toHaveLength(1);
+    expect(String(noticeLog[0]?.message)).toBe(
+      "Spaces: that folder is part of a compacted chain. " +
+        "Turn off compact folder chains to move it."
+    );
+  });
+
+  it("keeps the user-facing copy free of em dashes", () => {
+    const h = harness(true);
+    depsOf(h).onCompactedRowRefused?.();
+    // The length check is not decoration: without it `String(undefined)`
+    // satisfies the assertion and the test passes while nothing is said.
+    expect(noticeLog).toHaveLength(1);
+    expect(String(noticeLog[0]?.message)).not.toContain("\u2014");
   });
 });
