@@ -90,7 +90,10 @@ export function memberIdentity(m: MemberEntry): string {
   switch (m.kind) {
     case "file":
     case "folder":
-      return JSON.stringify([m.kind, canonicalPath(m.path)]);
+      // The path as STORED, not case-folded: the loader keeps `Notes/A.md` and
+      // `notes/a.md` as two members, so folding here would give two stored
+      // members one identity. Case folding belongs to the matching layer.
+      return JSON.stringify([m.kind, m.path]);
     case "tag":
       return JSON.stringify(["tag", normalizeTag(m.tag)]);
     case "property":
@@ -319,15 +322,15 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
  * of them first.
  *
  * Recomputed from current content every call, deliberately, rather than
- * remembering the version a document arrived with: removing the last tag
- * member or exclusion returns a document to version 1, so an older install
- * can open it again. That is why the incoming version is never consulted
+ * remembering the version a document arrived with: removing the last member
+ * kind or exclusion that earns a stamp returns a document to the lowest
+ * version that can hold it, so an older install can open it again. That is why the incoming version is never consulted
  * here — considering it would quietly remove that recovery path.
  */
 /*
  * Scope, so the next person to add a SETTING sees this before they need it:
- * this reads `spaces` and nothing else, so only a tag member or an exclusion
- * can raise the stamp. A release that adds a setting and no new member kind
+ * this reads `spaces` and nothing else, so only a tag member, a property member
+ * or an exclusion can raise the stamp. A release that adds a setting and no new member kind
  * still writes version 1, an older install accepts the document, and
  * `validateDefinitions` rebuilds `settings` from its fixed key list and drops
  * the key it does not know. On two devices through Sync that erases the

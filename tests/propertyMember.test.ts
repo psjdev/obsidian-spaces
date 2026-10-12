@@ -110,3 +110,14 @@ describe("memberIdentity", () => {
     );
   });
 });
+
+describe("memberIdentity for paths", () => {
+  it("reflects the stored path, so two casings stay two members", () => {
+    expect(memberIdentity({ kind: "file", path: "Notes/A.md" })).not.toBe(
+      memberIdentity({ kind: "file", path: "notes/a.md" })
+    );
+    expect(memberIdentity({ kind: "file", path: "a" })).not.toBe(
+      memberIdentity({ kind: "folder", path: "a" })
+    );
+  });
+});

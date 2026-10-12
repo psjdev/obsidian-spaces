@@ -433,3 +433,38 @@ describe("exclusions survive path changes", () => {
     expect("exclude" in out.spaces[0]).toBe(false);
   });
 });
+
+describe("repairOnRename de-duplication of property members", () => {
+  const withMembers = (members: SpacesDefinitions["spaces"][number]["members"]): SpacesDefinitions => {
+    const d = defs();
+    d.spaces[0] = { ...d.spaces[0], members };
+    return d;
+  };
+  // A rename that touches nothing, so only de-duplication runs.
+  const run = (members: SpacesDefinitions["spaces"][number]["members"]) =>
+    repairOnRename(withMembers(members), "Nowhere/x.md", "Nowhere/y.md").spaces[0].members;
+
+  it("keeps existence and equality-to-empty apart", () => {
+    expect(run([{ kind: "property", key: "a" }, { kind: "property", key: "a", value: "" }])).toHaveLength(2);
+  });
+
+  it("collapses values equal under normalization, keeping the first spelling", () => {
+    expect(
+      run([
+        { kind: "property", key: "s", value: "Active" },
+        { kind: "property", key: "s", value: " active " },
+      ])
+    ).toEqual([{ kind: "property", key: "s", value: "Active" }]);
+  });
+
+  it("keeps the four members a concatenated key would merge", () => {
+    expect(
+      run([
+        { kind: "property", key: "a=b" },
+        { kind: "property", key: "a", value: "b" },
+        { kind: "property", key: "a=b", value: "c" },
+        { kind: "property", key: "a", value: "b=c" },
+      ])
+    ).toHaveLength(4);
+  });
+});

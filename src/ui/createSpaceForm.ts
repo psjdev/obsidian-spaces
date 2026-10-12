@@ -1,6 +1,6 @@
 import type { CreateSpaceOptions } from "../actions/spaceLifecycle";
 import type { MemberEntry } from "../types";
-import { MAX_SPACE_NAME_LENGTH } from "../definitions/schema";
+import { MAX_SPACE_NAME_LENGTH, memberIdentity } from "../definitions/schema";
 import { normalizeTag, tagMatches } from "../visibility/tagMatch";
 
 /**
@@ -230,9 +230,7 @@ function sameEntry(a: MemberEntry, b: MemberEntry): boolean {
     return a.kind === "tag" && b.kind === "tag" && a.tag === b.tag;
   }
   if (a.kind === "property" || b.kind === "property") {
-    return (
-      a.kind === "property" && b.kind === "property" && a.key === b.key && a.value === b.value
-    );
+    return a.kind === "property" && b.kind === "property" && memberIdentity(a) === memberIdentity(b);
   }
   return a.path === b.path;
 }
