@@ -29,7 +29,7 @@ import {
   createLazyPropertySnapshot,
   createObsidianPropertySnapshot,
 } from "./visibility/ObsidianPropertyIndex";
-import { PropertyRefreshHub } from "./visibility/PropertyRefreshHub";
+import { PropertyRefreshHub, installThenNotify, metadataNotifyRoute } from "./visibility/PropertyRefreshHub";
 import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
@@ -851,6 +851,7 @@ export default class SpacesPlugin extends Plugin {
     // The coalescing window is a live timer, so it must not outlive the
     // plugin. `register` runs this on unload with the rest of the teardown.
     this.register(() => this.vaultChanges.cancel());
+    this.register(() => this.pickerRefreshes.cancel());
     // The body marker comes off and every API subscriber is dropped.
     // Through `register` rather than a line in `onunload` for the same reason
     // the coalescer above uses it — the state is created here, so its release
@@ -1455,14 +1456,39 @@ export default class SpacesPlugin extends Plugin {
       this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
       // Replaced with the tag index and for the same reason, and lazy for the
       // same reason: the walk happens when a property member asks.
-      this.controller.setPropertySnapshot(this.newPropertySnapshot());
+      //
+      // Pickers are told here, AFTER the replacement and BEFORE
+      // `controller.refresh()`: the snapshot is already in place, so a throw
+      // from the refresh must not leave them stale for the burst. `notify`
+      // isolates watcher errors itself.
+      this.replacePropertySnapshotAndNotify();
       this.controller.refresh();
-      // The coalesced tail of a create, delete or rename. Told AFTER the new
-      // snapshot is in place, so a picker that re-reads on this call sees the
-      // replacement and not the picture it is replacing.
-      this.propertyRefresh.notify();
     },
   });
+
+  /**
+   * The picker-only tail for a metadata burst when no flush is otherwise
+   * coming. It rebuilds the snapshot and notifies, and deliberately does not
+   * re-index the vault or re-sort the explorer, which is what the vault flush
+   * above costs and what a space that does not watch metadata is gated out of.
+   * Same timer and window as the vault flush, so a sync or an initial
+   * indexing pass of N files notifies once, not N times.
+   */
+  private readonly pickerRefreshes = createVaultChangeCoalescer({
+    timer: {
+      set: (fn, ms) => window.setTimeout(fn, ms),
+      clear: (handle) => window.clearTimeout(handle),
+      now: () => Date.now(),
+    },
+    flush: () => this.replacePropertySnapshotAndNotify(),
+  });
+
+  private replacePropertySnapshotAndNotify(): void {
+    installThenNotify(
+      () => this.controller.setPropertySnapshot(this.newPropertySnapshot()),
+      () => this.propertyRefresh.notify()
+    );
+  }
 
   /**
    * An open property picker is a metadata consumer in its own right.
@@ -1472,7 +1498,8 @@ export default class SpacesPlugin extends Plugin {
    * choosing one: a picker opened in a files-and-folders space would never
    * refresh, because nothing in the vault watches metadata yet. The panel or
    * modal that opens the picker owns this subscription and must call the
-   * returned function when it closes; `onunload` drops any still held.
+   * returned function when it closes; a `register` callback clears any still
+   * held when the plugin unloads.
    *
    * It fires when the snapshot has been REPLACED, which happens on a metadata
    * change, on the readiness transition (`resolved`), and on the coalesced
@@ -1481,8 +1508,9 @@ export default class SpacesPlugin extends Plugin {
    * frontmatter, and so the raw snapshot, untouched, though they do change
    * filtered member counts.
    *
-   * The vault-event path is coalesced, so a burst of file events notifies
-   * once, after the burst, not once per file.
+   * Both paths are coalesced, so a burst of file or metadata events notifies
+   * once after the burst, and a subscriber need not debounce. A notification
+   * arrives up to the coalescing window after the event.
    */
   subscribePropertyRefresh(onChange: () => void): () => void {
     return this.propertyRefresh.subscribe(onChange);
@@ -1541,10 +1569,21 @@ export default class SpacesPlugin extends Plugin {
     if ((this.controller as SpaceController | undefined) === undefined) return;
     this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
     this.controller.setPropertySnapshot(this.newPropertySnapshot());
-    // Before the space gate below, which is about whether the ACTIVE SPACE
-    // needs a recompute and says nothing about an open picker.
-    this.propertyRefresh.notify();
-    if (!watchesMetadata(this.controller.activeSpace())) return;
+    // Pickers are NOT told here, and that is deliberate. Every route below is
+    // coalesced, and exactly one of them notifies: when the active space
+    // watches metadata the vault flush rebuilds the snapshot and notifies, so
+    // a direct call here would walk the vault twice per event and discard the
+    // first walk; when it does not, a picker-only flush does it, but only
+    // while a picker is open. Do not add a direct `notify()` call here.
+    const route = metadataNotifyRoute(
+      watchesMetadata(this.controller.activeSpace()),
+      this.propertyRefresh.size
+    );
+    if (route === "picker-flush") {
+      void this.pickerRefreshes.submit(async () => undefined);
+      return;
+    }
+    if (route === "none") return;
     // No membership work to run first, only the coalesced tail. Submitting an
     // empty unit of work is how this reuses the existing window and burst
     // ceiling rather than adding a second timer.
