@@ -173,17 +173,16 @@ export function coveringTagIn(
  * Most callers ask "is this path a member" or "which paths did the user
  * pick", and neither question has an answer for a tag. Narrowing here keeps
  * that narrowing in one place instead of a `m.kind !== "tag"` guard at each
- * of the eighteen call sites.
+ * caller.
  */
 export function pathMembers(space: SpaceDefinition): PathMember[] {
-  // POSITIVE, not `kind !== "tag"`. TypeScript does not verify the body of a
-  // user-supplied type predicate, so the exclusive form admits every kind
-  // added later as a `PathMember` with no `path`, silently, and in eighteen
-  // call sites. Listing what a path member IS makes the next kind a compile
-  // error here instead of a TypeError in `renameTouchesDefs`.
-  return space.members.filter(
-    (m): m is PathMember => m.kind === "file" || m.kind === "folder"
-  );
+  // POSITIVE, not `kind !== "tag"`, and with no hand-written predicate: the
+  // compiler infers `m is file | folder` from this body and checks it. With the
+  // declared return type, a future member kind that CARRIES A PATH widens
+  // `PathMember`, so the filtered result stops matching and this stops
+  // compiling. A kind with no path, like `property`, is correctly left out and
+  // is not an error.
+  return space.members.filter((m) => m.kind === "file" || m.kind === "folder");
 }
 
 /**

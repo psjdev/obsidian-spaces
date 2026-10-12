@@ -77,8 +77,9 @@ export function resolveMembers(
       }
       continue;
     }
-    // Every other kind is expanded by a later branch. Falling through here
-    // rather than treating the member as a path is the whole point.
+    // A property member names no path and is not expanded yet (a later task
+    // adds that branch), so it contributes nothing here. Falling through
+    // rather than treating it as a path is the point.
   }
   return out;
 }
