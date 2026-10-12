@@ -38,7 +38,7 @@ describe("schemaVersion on the way out", () => {
   });
 
   it("refuses a document from a future version", () => {
-    const r = validateDefinitions(doc({}, 3));
+    const r = validateDefinitions(doc({}, 4));
     expect(r.ok).toBe(false);
   });
 

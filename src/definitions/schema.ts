@@ -11,6 +11,7 @@ import {
 } from "../types";
 import { normalizeTag } from "../visibility/tagMatch";
 import { canonicalPath } from "../visibility/glob";
+import { normalizeValue } from "../visibility/propertyValues";
 
 export type ValidationResult =
   | { ok: true; value: SpacesDefinitions }
@@ -68,6 +69,37 @@ export function isSafeVaultPath(p: unknown): p is string {
   return !p.split("/").some((seg) => seg === ".." || seg === ".");
 }
 
+/**
+ * A member's identity, as structure rather than as a concatenated string.
+ *
+ * `"y:" + key + "=" + value` cannot encode this: "has the key `a=b`" and "key
+ * `a` equals `b`" produce the same string, so the loader discards one of two
+ * different members and the space quietly holds different notes. JSON of a
+ * tuple with an explicit operation has no such collision, because the encoder
+ * escapes the separator.
+ *
+ * Property members are keyed by this where members are de-duplicated (the
+ * loader below and `pathRepair`). File, folder and tag members keep the keys
+ * those two places already use; this function's file, folder and tag cases
+ * are for the picker, member list and contents dialog to adopt.
+ *
+ * OPAQUE. It holds arbitrary vault text, so it is never interpolated into a
+ * CSS selector or markup; rows carry it in a dataset value or a Map.
+ */
+export function memberIdentity(m: MemberEntry): string {
+  switch (m.kind) {
+    case "file":
+    case "folder":
+      return JSON.stringify([m.kind, canonicalPath(m.path)]);
+    case "tag":
+      return JSON.stringify(["tag", normalizeTag(m.tag)]);
+    case "property":
+      return m.value === undefined
+        ? JSON.stringify(["property", m.key, "exists"])
+        : JSON.stringify(["property", m.key, "equals", normalizeValue(m.value)]);
+  }
+}
+
 function validateMembers(raw: unknown): MemberEntry[] | null {
   if (!Array.isArray(raw)) return null;
   const seen = new Set<string>();
@@ -94,6 +126,20 @@ function validateMembers(raw: unknown): MemberEntry[] | null {
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ kind: "tag", tag: normalized });
+      continue;
+    }
+    if (kind === "property") {
+      const { key, value } = m as Record<string, unknown>;
+      if (typeof key !== "string" || key.trim().length === 0) return null;
+      if (value !== undefined && typeof value !== "string") return null;
+      // Stored exactly as spelled. Keys match exactly, so repairing one here
+      // produces a member that matches a different property or nothing.
+      const member: MemberEntry =
+        value === undefined ? { kind: "property", key } : { kind: "property", key, value };
+      const id = memberIdentity(member);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(member);
       continue;
     }
     // An unrecognised kind is still fatal, which rejects the whole document
@@ -262,6 +308,7 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
 /**
  * The version to stamp on a document about to be written.
  *
+ * Version 3 added property members; a document earns it by holding one.
  * Version 2 added tag members and per-space exclusions. A build that only
  * understands version 1 rejects the whole document rather than dropping what
  * it does not recognise, which is the safe behaviour, but it is also a
@@ -293,6 +340,8 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
  * to remember to gate each new key.
  */
 export function schemaVersionFor(spaces: readonly SpaceDefinition[]): number {
+  const usesV3 = spaces.some((s) => s.members.some((m) => m.kind === "property"));
+  if (usesV3) return 3;
   const usesV2 = spaces.some(
     (s) => s.members.some((m) => m.kind === "tag") || (s.exclude?.length ?? 0) > 0
   );

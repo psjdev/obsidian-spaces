@@ -286,11 +286,11 @@ export type SwitchOutcome =
  * The highest document version this build understands.
  *
  * NOT what every write stamps. See `schemaVersionFor`: a document is marked 2
- * only once it uses something a version 1 build cannot represent, so someone
- * who never adds a tag member or an exclusion keeps a document an older
- * install can still open.
+ * or 3 only once it uses something an older build cannot represent, so someone
+ * who never adds a tag member, an exclusion or a property member keeps a
+ * document an older install can still open.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
   // Literal 1, not `SCHEMA_VERSION`. An empty document holds no spaces, so

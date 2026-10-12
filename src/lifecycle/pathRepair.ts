@@ -6,6 +6,7 @@ import type {
   SpacesDefinitions,
 } from "../types";
 import { canonicalPath } from "../visibility/glob";
+import { memberIdentity } from "../definitions/schema";
 
 
 function rewritePrefix(path: string, oldBase: string, newBase: string): string {
@@ -20,18 +21,11 @@ function dedupe(members: MemberEntry[]): MemberEntry[] {
   const seen = new Set<string>();
   const out: MemberEntry[] = [];
   for (const m of members) {
-    // A property member's identity is structural: absent `value` means "has
-    // this property" and `""` means "equals the empty string", so they must not
-    // share a key. Case is deliberately not folded here; that is the schema
-    // loader's job. Task 2's canonical `memberIdentity` replaces this local key.
     const key =
       m.kind === "tag"
         ? "t:" + m.tag
         : m.kind === "property"
-          ? "q:" +
-            (m.value === undefined
-              ? JSON.stringify([m.key])
-              : JSON.stringify([m.key, m.value]))
+          ? memberIdentity(m)
           : "p:" + m.path;
     if (seen.has(key)) continue;
     seen.add(key);

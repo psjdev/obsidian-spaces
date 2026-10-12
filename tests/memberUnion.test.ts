@@ -64,7 +64,7 @@ describe("tag members in the schema", () => {
   });
 
   it("rejects an unknown member kind", () => {
-    const r = validateDefinitions(doc([{ kind: "property", key: "x" }]));
+    const r = validateDefinitions(doc([{ kind: "bogus", key: "x" }]));
     expect(r.ok).toBe(false);
   });
 });
