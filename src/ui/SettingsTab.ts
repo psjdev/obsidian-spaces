@@ -284,6 +284,24 @@ export class SpacesSettingTab extends PluginSettingTab {
         control: { type: "toggle", key: "showPinnedFolder" },
       },
       {
+        name: "Compact folder chains",
+        desc:
+          "Shows a chain of folders that leads to a single folder as one row. " +
+          "Affects spaces that gather notes from across your vault.",
+        control: { type: "toggle", key: "compactFolderChains" },
+      },
+      {
+        name: "Shorten long compacted paths",
+        // States the dependency rather than gating on it, following
+        // `showPinnedFolder` above. A greyed row invites the question "why
+        // can I not change this"; a sentence answers it.
+        desc:
+          "When Compact folder chains is on, a compacted row whose path is too " +
+          "wide for the file explorer drops leading folders until it fits, with " +
+          "two dots in their place. Hover the row to see the whole path.",
+        control: { type: "toggle", key: "abbreviateCompactedPaths" },
+      },
+      {
         // Led by "All" rather than "Pin All …": sentence case is linted,
         // and mid-sentence the view's own label is indistinguishable from
         // the quantifier — "Pin all …" would read as pinning every icon.

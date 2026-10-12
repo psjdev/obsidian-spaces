@@ -65,6 +65,7 @@ import { LayoutCoordinator } from "./layout/LayoutCoordinator";
 import { detectNativeWorkspaces, effectiveRestoreLayouts } from "./layout/nativeWorkspaces";
 import {
   displayedPaths,
+  isPatched as isExplorerSortPatched,
   itemsForPaths,
   nativeSortedItems,
   patch as patchExplorerSort,
@@ -76,6 +77,20 @@ import {
   type SortSeamStatus,
 } from "./layout/nativeExplorerSort";
 import { filterVisibleItems } from "./visibility/visibleItems";
+import {
+  buildChainIndex,
+  sameChainIndex,
+  type ChainIndex,
+  type ChainTree,
+  type Run,
+} from "./visibility/compactChains";
+import {
+  displayParentOf,
+  displayToStored,
+  isCompactedRow,
+  storedToDisplay,
+} from "./visibility/compactCoords";
+import type { CompactLabelPolicy } from "./ui/compactLabel";
 import type { VisibilitySnapshot } from "./visibility/VisibilityEngine";
 import {
   elsewhereOf,
@@ -130,10 +145,21 @@ interface ResortSignature {
   order: OrderMap | undefined;
   /** The snapshot's own visible set, or null for *All*, where nothing filters. */
   visible: Set<string> | null;
+  /**
+   * `chainIndexNow`, by identity. Compaction changes what the seam RETURNS
+   * without moving visibility, so toggling the setting, or a folder turning
+   * from scaffold to member, moves none of the other three fields.
+   * `rebuildChainIndex` keeps the previous object while the runs are
+   * unchanged (`sameChainIndex`) and replaces it when they change, so
+   * identity moves exactly when the runs do.
+   */
+  chainIndex: ChainIndex | null;
 }
 
-function sameResortSignature(a: ResortSignature, b: ResortSignature): boolean {
+/** Exported only so `tests/resortMemoChainIndex.test.ts` can state the key in its own terms. */
+export function sameResortSignature(a: ResortSignature, b: ResortSignature): boolean {
   if (a.selection !== b.selection || a.order !== b.order) return false;
+  if (a.chainIndex !== b.chainIndex) return false;
   if (a.visible === b.visible) return true;
   if (!a.visible || !b.visible) return false;
   // Membership, not a serialisation: this runs on every commit, and sorting
@@ -1211,6 +1237,22 @@ export default class SpacesPlugin extends Plugin {
       // visitor rows still greyed and italicised, against a tree where those
       // words mean nothing: rows dimmed for a reason the user cannot see.
       //
+      // The chain index is the adapter's OTHER input, and the guard inside
+      // `applyAdapterSnapshot` does not cover it. Left live it describes runs
+      // in a tree that is now the whole vault — the same mismatch the dimming
+      // would be, so it is cleared in the same place and for the same reason.
+      //
+      // Cleared BEFORE the adapter is applied, matching `onSnapshotApplied`,
+      // which states that order and relies on it. The adapter is now a reader
+      // of this index (handed over in `applyAdapterSnapshot`), so the two
+      // places must not disagree about it. Not a paint bug today: a null
+      // snapshot makes the adapter clear and return without reading the index.
+      //
+      // Clearing here is only half of it: `onSnapshotApplied` keeps
+      // arriving while paused (every `file-open`, every coalesced vault
+      // flush) and would rebuild it, so `rebuildChainIndex` holds the paused
+      // state itself, exactly as `applyAdapterSnapshot` does.
+      this.chainIndexNow = null;
       // Clearing here is only half of it: `applyAdapterSnapshot` holds the
       // paused state, so the next recompute cannot paint them back. See its
       // comment for why the guard lives there and not at this call site.
@@ -1230,8 +1272,17 @@ export default class SpacesPlugin extends Plugin {
       //
       // Optional on the controller for the same reason `start()`'s repaint
       // steps are: the resume can be reached before `start()` has built one.
-      this.applyAdapterSnapshot(this.controller?.currentSnapshot() ?? null);
+      // Index, then re-sort, then adapter — the same three lines in the same
+      // order as `onSnapshotApplied`, for the reasons written out there.
+      // Needed explicitly here because resume does NOT go through
+      // `onSnapshotApplied` — without it the index would stay null until some
+      // unrelated recompute happened along, and compaction would silently not
+      // come back with the filtering it was paused beside. Note that
+      // `ensureOrderingPatched()` above is what makes the index's seam gate
+      // answer true again on this path.
+      this.rebuildChainIndex(this.controller?.currentSnapshot() ?? null);
       this.applyFilterAndOrdering();
+      this.applyAdapterSnapshot(this.controller?.currentSnapshot() ?? null);
     }
     // The marker describes what the tree IS, so it must not claim a filtered
     // tree while the filter is off.
@@ -1925,7 +1976,10 @@ export default class SpacesPlugin extends Plugin {
   // Typed explicitly rather than as `TransformItems`: the third, optional
   // `view` parameter is not part of the seam's contract - `patch()` only ever
   // calls a `transform` with two arguments - it is how the per-view closure in
-  // `ensureOrderingPatched` tells `hoistedRootItems` which pane is asking. A
+  // `ensureOrderingPatched` tells this method which pane is asking. Three
+  // things need to know: `hoistedRootItems` reads that pane's live tree items,
+  // and both halves of compaction resolve a run's tip through
+  // `compactedTipItem`, which answers nothing at all for a null view. A
   // plain `TransformItems` annotation would still be assignable to `patch()`'s
   // parameter, but would stop that closure passing `view` at all.
   private readonly filterAndOrderFolder: (
@@ -1933,6 +1987,52 @@ export default class SpacesPlugin extends Plugin {
     items: FolderItemLike[],
     view?: object | null
   ) => FolderItemLike[] = (folderPath, items, view) => {
+    this.admittedThisCall.clear();
+    // A COMPACTED RUN'S HIDDEN FOLDERS ANSWER WITH NOTHING. Before any other
+    // work, because every other branch here ends in rows, and a row from one
+    // of these folders is the C2 defect.
+    //
+    // Obsidian's `sort()` walks every folder in `view.fileItems`, calls this
+    // for each, and then lets `vChildren.addChild` REASSIGN each returned
+    // child's `parent` to the folder it just sorted. A run's head and
+    // intermediates have no row — the tip is drawn in the head's place, at the
+    // head's level — but they are still real folders holding the next segment,
+    // so answering honestly makes one of them adopt the tip after the folder
+    // the tip is actually drawn under has already adopted it. Measured in a
+    // real Obsidian: the row for `Nested/Chain/L1/L2/L3` drawn at depth 1
+    // under `Nested`, with `parent` reading `Nested/Chain/L1/L2`. Rendering
+    // survives that; keyboard navigation, which walks `parent`, does not. A
+    // top-level run escaped only because the vault root happens to be sorted
+    // last, so its adoption was the one that stuck.
+    //
+    // `[]` and not the filtered rows: the seam's `isAllowed` rejects anything
+    // that is not a subset of its input, and a rejection makes `patch` return
+    // the RAW items — the whole vault inside the space. An empty array is a
+    // subset of every input, so this exit is the one that cannot be refused.
+    //
+    // Nothing is lost by returning early here. These folders have no row, so
+    // nothing expands them and nothing asks them to be drawn; the only caller
+    // is the whole-tree walk above. Skipping `observeSortOrder()` for them
+    // costs nothing either, because that same walk reaches every other folder
+    // in the vault in the same pass and each one records it.
+    //
+    // The vault root cannot reach this: the visibility engine's ancestor
+    // closure stops before `""` (VisibilityEngine.ts, `while (d !== "")`), so
+    // the root is never scaffold and so never part of a run. Nor can a folder
+    // space's root: its own member is `exact-member`, and `runFrom` extends
+    // only through scaffold.
+    //
+    // GATED ON THE SAME TIP LOOKUP THE SUBSTITUTION USES, through the shared
+    // `compactedTipItem`, because "is this folder hidden?" is not a question
+    // about the index alone. `substituteCompacted` fails open when THIS pane
+    // cannot resolve the run's tip: the head keeps its own row and the chain
+    // renders honestly, nested. Blanking on the index alone disagreed with
+    // that in the one direction that loses rows — the head survived, because
+    // the substitution declined, and then answered `[]` here, so it drew as a
+    // folder with nothing in it and the whole chain's contents left the pane.
+    // Two definitions of "live" is the bug; one lookup is the fix.
+    const hiddenRun = this.chainIndexNow?.hiddenSegments.get(folderPath);
+    if (hiddenRun && this.compactedTipItem(hiddenRun, view ?? null)) return [];
     // Folder spaces. The vault root is answered with the
     // ROOT FOLDER's children, so the root itself never renders and its contents
     // sit at depth 0. Everything at or under the root is served by its own
@@ -1945,12 +2045,18 @@ export default class SpacesPlugin extends Plugin {
     const root = this.activeSpaceRoot();
     if (root !== null && isVaultRoot(folderPath)) {
       // Resolved ONCE here, before the hoist can hand
-      // the seam an out-of-input item — the only case `isAllowed`
-      // (nativeExplorerSort.ts) ever actually calls `livePermits` for (every
-      // other folder's `out` is an identity subset of `items`, so the
-      // permission check there always short-circuits unreached). This is
+      // the seam an out-of-input item. This used to be the only case
+      // `isAllowed` (nativeExplorerSort.ts) ever called `livePermits` for,
+      // because every other folder's `out` was an identity subset of `items`
+      // and the permission check short-circuited unreached. Compaction
+      // falsified that: `substituteCompacted` can return a run's tip for ANY
+      // folder, so `isAllowed` consults `livePermits` for ordinary folders
+      // too, and the field this sets is read there as well — see
+      // `permitsForThisCall`'s own comment for why a value left behind by an
+      // earlier call is still harmless. This is
       // the one call site for the whole sort-seam invocation this call is
-      // part of: the recursive `filterAndOrderFolder(root, hoisted)` call below
+      // part of: the recursive `filterAndOrderFolder(root, hoisted, view)`
+      // call below
       // reaches this branch again only if `root` were ALSO the vault root,
       // which `activeSpaceRoot()` never returns (a space root may not be the
       // vault root), so it does not re-resolve. `livePermits` reads this
@@ -1971,7 +2077,14 @@ export default class SpacesPlugin extends Plugin {
       // Substituted, then filtered and ordered like any other folder's items.
       // Returning here would skip both — `globalIgnore` would stop applying and
       // the saved order for this level would be ignored.
-      if (hoisted !== null) return this.filterAndOrderFolder(root, hoisted);
+      // `view` is passed ON, not dropped. `substituteCompacted` resolves a
+      // run's tip through `itemsForPaths(view, …)`, so a recursion that
+      // forgot the pane would hand it null, resolve nothing, and leave a
+      // folder space's hoisted root the one level in the space that never
+      // compacts. The extra argument reaches nothing else: this branch
+      // re-enters only if `root` were also the vault root, which
+      // `activeSpaceRoot()` never returns (see the comment above).
+      if (hoisted !== null) return this.filterAndOrderFolder(root, hoisted, view);
     }
 
     // Picking a sort sets `view.sortOrder` then calls `sort()`, which
@@ -1998,14 +2111,14 @@ export default class SpacesPlugin extends Plugin {
     const visible = filterVisibleItems(items, this.controller.currentSnapshot());
 
     const map = this.orderMapFor();
-    if (!map) return visible;
+    if (!map) return this.substituteCompacted(visible, view ?? null);
     // Obsidian's root folder path is "/"; storage uses "".
     // Own-property lookup: a folder legitimately named `constructor` or
     // `hasOwnProperty` would otherwise resolve up the prototype chain and hand
     // back a function.
     const key = folderPath === "/" ? "" : folderPath;
     const order = Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
-    if (!order) return visible;
+    if (!order) return this.substituteCompacted(visible, view ?? null);
 
     const byPath = new Map<string, FolderItemLike>();
     const live: string[] = [];
@@ -2014,12 +2127,90 @@ export default class SpacesPlugin extends Plugin {
       // An item we cannot key cannot be ordered safely. Leave the folder
       // natively sorted rather than partially ordered — a predictable no-op
       // beats a tree that is subtly missing something — but still FILTERED.
-      if (typeof p !== "string" || byPath.has(p)) return visible;
+      if (typeof p !== "string" || byPath.has(p)) {
+        return this.substituteCompacted(visible, view ?? null);
+      }
       byPath.set(p, item);
       live.push(p);
     }
-    return applyOrder(order, live).map((p) => byPath.get(p) as FolderItemLike);
+    return this.substituteCompacted(
+      applyOrder(order, live).map((p) => byPath.get(p) as FolderItemLike),
+      view ?? null
+    );
   };
+
+  /**
+   * Swap each compacted run's head for its tip, in place.
+   *
+   * IN PLACE and LAST, after filtering and ordering. A stored order is keyed by
+   * the real child path, so substituting first would leave `applyOrder`
+   * searching for a path that is no longer live; it would be skipped as
+   * unlisted and the user's arrangement would silently fall back to native
+   * sort. Substituting in place also means a run keeps the position its FIRST
+   * segment had, which is where the reader expects it and is why this feature
+   * needs no comparator of its own.
+   *
+   * Each tip is recorded as admitted for this call. The tip is an out-of-input
+   * item, and `isAllowed` rejects those unless `livePermits` says otherwise -
+   * and a rejection makes `patch` return the RAW items, which renders the
+   * folder unfiltered and puts the whole vault inside the space.
+   */
+  private substituteCompacted(
+    out: FolderItemLike[],
+    view: object | null
+  ): FolderItemLike[] {
+    const ix = this.chainIndexNow;
+    if (!ix || ix.runByHead.size === 0) return out;
+    let swapped = false;
+    const next = out.map((item) => {
+      const p = item.file?.path;
+      if (typeof p !== "string") return item;
+      const run = ix.runByHead.get(p);
+      if (!run) return item;
+      const tipItem = this.compactedTipItem(run, view);
+      // A tip the view cannot resolve is left uncompacted rather than dropped.
+      // Fail-open to the honest tree is what this transform does everywhere.
+      if (!tipItem) return item;
+      this.admittedThisCall.add(run.tip);
+      swapped = true;
+      return tipItem;
+    });
+    return swapped ? next : out;
+  }
+
+  /**
+   * This pane's tree item for a run's tip, or undefined when the pane has
+   * none.
+   *
+   * ONE definition of "this run is live in this pane", read by both halves of
+   * compaction: `substituteCompacted` swaps the head for the tip only if this
+   * answers, and `filterAndOrderFolder` blanks the run's hidden folders only
+   * if this answers. They used to decide separately — the substitution on the
+   * lookup, the blanking on the index alone — and the disagreement cost rows:
+   * the head survived uncompacted, then answered its own sort with `[]` and
+   * drew as an empty folder with the whole chain gone from under it.
+   *
+   * A LOOKUP, never a construction: the items are live tree nodes carrying
+   * their own DOM, and a fabricated one renders as a row with no behaviour.
+   * `itemsForPaths` returns nothing for a pane that has no item and nothing
+   * for a null view, which is the same answer and wants the same fail-open.
+   */
+  private compactedTipItem(run: Run, view: object | null): FolderItemLike | undefined {
+    const [tipItem] = itemsForPaths(view, [run.tip]);
+    return tipItem;
+  }
+
+  /**
+   * Tips this transform call substituted, for the seam's subset guard.
+   *
+   * Cleared at the top of every transform and read by `livePermits` straight
+   * afterwards, because `isAllowed` runs on the array the transform just
+   * returned. Not keyed by folder path: the hoist branch re-enters the
+   * transform for a DIFFERENT folder than the one `isAllowed` will check,
+   * so a folder-keyed record would miss. Per call is the same discipline
+   * `permitsForThisCall` documents.
+   */
+  private admittedThisCall = new Set<string>();
 
   /**
    * The active space's USABLE root (`rootOf`), or null when it is curated,
@@ -2127,20 +2318,43 @@ export default class SpacesPlugin extends Plugin {
     // apply from any path is also a failsafe against a stuck mask —
     // the mask must never outlive the switch that set it.
     this.setSwitchMask(false);
-    this.applyAdapterSnapshot(snap);
-    // These two lines are NOT order-coupled. `filterAndOrderFolder` reads
-    // `controller.currentSnapshot()`, which the controller assigns before it
-    // calls this callback at all. Reading `this.adapter.currentSnapshot()`
-    // instead WOULD couple them: `adapter.apply(snap)` would have to land
-    // first or the re-sort would filter against the outgoing snapshot, making
-    // a domain decision depend on the DOM layer's working copy.
+    // THREE LINES IN THIS ORDER, and two of the three orderings are
+    // load-bearing.
+    //
+    // The index comes FIRST because the sort seam reads it — a re-sort that
+    // ran before it was rebuilt would substitute the previous snapshot's runs
+    // — and because the re-sort memo keys on it.
+    //
+    // The re-sort comes before the ADAPTER because whether it actually
+    // happened is half the answer to "may these rows be labelled". Every way
+    // the seam can be dead BEFORE the attempt is settled inside
+    // `rebuildChainIndex` — no snapshot, the setting, the pause, and each
+    // pane the gate finds unpatched — and the one that is only knowable AFTER
+    // it, `requestResort` refusing, is settled by `applyFilterAndOrdering`,
+    // which drops the index and the adapter's copy together. Labelling first
+    // would stamp the joined path onto a tree nothing re-sorted.
+    //
+    // ONE STATE IS SETTLED BY NEITHER, because it is not a property of the
+    // seam: an override DISPLACED after `patch` succeeded, where every
+    // question up here answers "live" and the pane renders the honest nested
+    // tree because our transform is off the stack. `applyCompactLabels`
+    // measures that one off the drawn tree — see `drawnWhereTheHeadWas`,
+    // which is also what makes `isPatched`'s deliberate looseness safe.
+    //
+    // (The re-sort is NOT coupled to the adapter the other way round:
+    // `filterAndOrderFolder` reads `controller.currentSnapshot()`,
+    // which the controller assigns before it calls this callback at all.
+    // Reading `this.adapter.currentSnapshot()` instead WOULD couple them, by
+    // making a domain decision depend on the DOM layer's working copy.)
     //
     // This is the ONLY place a re-sort may hang off. `onOutcome` — and so
     // `bindExplorer` — runs BEFORE `runtime.setSelection`, so re-sorting there
     // read the OUTGOING space's order; and with `restoreLayouts` off the
     // outcome is "skipped", `bindExplorer` never runs, and nothing sorts at
     // all. `host.apply` runs after the selection commits, on every path.
+    this.rebuildChainIndex(snap);
     this.applyFilterAndOrdering();
+    this.applyAdapterSnapshot(snap);
     // The header repaints on the same signal, and for the same
     // reason — this is the one place every switch converges AFTER
     // `runtime.setSelection` commits. Hanging it off the four
@@ -2182,6 +2396,166 @@ export default class SpacesPlugin extends Plugin {
   }
 
   /**
+   * Every compacted run in the active space, or null when compaction is off.
+   *
+   * Built ONCE per snapshot, not per sort-seam call, because its consumers
+   * read it on different schedules: the seam substitutes heads and blanks
+   * hidden segments during a sort, `ExplorerAdapter` labels during a
+   * MutationObserver pass that runs at a different time, and the drag
+   * translation reads it whenever a pointer moves. A per-call record would be
+   * empty by the time any of the others looked.
+   *
+   * ADMISSION IS NOT ONE OF THEM. The seam's permits predicate admits a
+   * substituted tip from `admittedThisCall`, which this object never feeds —
+   * see `buildChainIndex`'s own note on why the two lifetimes differ.
+   *
+   * Rebuilt rather than patched: the runs are a function of the snapshot, and
+   * a snapshot is already the thing that changes when membership or visibility
+   * does.
+   *
+   * NULL IS A REAL ANSWER, and not only when the setting is off. It also means
+   * "nothing is going to re-sort this tree", which `seamIsPatchedEverywhere`
+   * decides before the index is built and `applyFilterAndOrdering` decides
+   * again after the re-sort is attempted. Both write null here, and the
+   * adapter labels nothing from a null index, so the chain falls back to the
+   * honest nested tree rather than being labelled as something it is not
+   * drawn as.
+   */
+  private chainIndexNow: ChainIndex | null = null;
+
+  /**
+   * EVERY main-window explorer pane that is not DEFERRED is running our sort
+   * override.
+   *
+   * The deferred exclusion is `explorerViews()`'s, not this method's: a
+   * collapsed sidebar at startup has none of the seam's methods yet, so
+   * probing it would report "unknown" for a build that is perfectly capable.
+   * It is enough here because a deferred leaf's `containerEl` holds no
+   * `.nav-files-container`, so `bindExplorer` binds nothing from it and the
+   * adapter has no row in it to label -- the pane this gate would be
+   * protecting does not exist yet. It becomes an ordinary pane, and an
+   * ordinary input to this gate, on the `layout-change` that materialises it.
+   *
+   * THE GATE THE INDEX HANGS OFF, and the reason it exists: compaction is two
+   * mechanisms that have to agree. The sort seam substitutes a run's TIP for
+   * its HEAD, so the chain draws as one row; `ExplorerAdapter` writes the
+   * joined label onto whatever row that substitution produced. Only the first
+   * needs a patch. So whenever the patch is not on, the adapter labels a tree
+   * nothing re-sorted: the chain is still drawn NESTED and the joined path is
+   * stamped onto the head's row anyway, which reads as `Design/Decisions/2026`
+   * on a folder that is visibly `Design` with `Decisions` underneath it. Worse
+   * than doing nothing, so the index is null and nothing is labelled instead —
+   * the honest nested tree, which is what every other failure in this
+   * transform falls open to.
+   *
+   * EVERY pane, not one, and not `sortProbe`. `sortProbe` takes the BEST
+   * answer across the panes deliberately (one odd view must not spend the
+   * one-shot Notice and turn filtering off everywhere), so it answers "ok" for
+   * a split explorer with one pane patched and one not — which is the same bug
+   * seen from the unpatched pane, since the adapter labels every bound
+   * container from the one index. `isPatched` is the module's own record that
+   * `patch` SUCCEEDED on a view -- not that the override is still in that
+   * view's call chain, which `unpatch` itself contemplates it may not be: it
+   * restores by `delete` only when `getSortedFolderItems === entry.override`
+   * still holds (`nativeExplorerSort.ts`), and warns instead when it does
+   * not. It is the right question anyway: "absent from the build", "`patch`
+   * declined because another plugin holds the property" and "the patch step
+   * threw before it got there" all answer the same way without this method
+   * having to tell them apart, and a plugin that WRAPS our override and calls
+   * through is still live -- a stricter identity test would silently turn
+   * compaction off for that user.
+   *
+   * THAT LOOSENESS IS ONLY SAFE BECAUSE OF THE LABEL PASS, and the two are
+   * one decision. A plugin that REPLACES the property rather than wrapping it
+   * leaves this gate answering "live" over a tree nothing of ours sorted.
+   * `applyCompactLabels` catches it where it matters, by asking the DOM
+   * whether the chain actually compacted rather than taking this record's
+   * word for it (`drawnWhereTheHeadWas`). Loosen or tighten one of the two
+   * and the other has to move with it;
+   * `tests/compactSeamGate.test.ts` drives the pair end to end.
+   *
+   * NOT `sortedViews`, although on this gate's domain the two cannot differ.
+   * They are equal BY CONSTRUCTION, and three places keep them so:
+   * `installed.set` happens only inside `patch`, whose one caller pushes to
+   * `sortedViews` on the same `if`; `installed.delete` happens
+   * unconditionally at the top of `unpatch`, whose only two callers
+   * (`ensureOrderingPatched`'s release loop and `teardownOrdering`) drop the
+   * same view from `sortedViews`; and a view neither has seen is absent from
+   * both. So this is not a behavioural choice but a question of WHO IS ASKED:
+   * `isPatched` asks the module that owns the fact, rather than this file's
+   * bookkeeping about it. A future reader who simplifies one of those three
+   * invariant-keepers has been warned here.
+   *
+   * THROWING IS ANSWERED WITH FALSE. `bindExplorer` already guards step 5, so
+   * `ensureOrderingPatched` throwing is a state the plugin carries on from
+   * with nothing patched — and whatever made it throw is still there when
+   * `rebuildChainIndex` reaches this on the very next apply. Letting it
+   * propagate here would take that apply down — the switch mask, the re-sort,
+   * the header, the strip — over a question whose safe answer is already "do
+   * not compact".
+   */
+  private seamIsPatchedEverywhere(): boolean {
+    try {
+      const views = this.explorerViews();
+      if (views.length === 0) return false;
+      for (const view of views) {
+        if (!isExplorerSortPatched(view)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private rebuildChainIndex(snap: VisibilitySnapshot | null): void {
+    // Paused means the tree is the whole vault, so there are no scaffold runs
+    // to describe. Guarded HERE rather than at `setFilteringPaused`'s call
+    // site alone, for the reason `applyAdapterSnapshot` gives for its own
+    // copy of this check: `onSnapshotApplied` reaches this on every
+    // `file-open` and every coalesced vault flush, and `SpaceController`
+    // knows nothing about the pause, so it keeps handing over a live snapshot.
+    if (snap === null || this.filteringPaused || !this.defs.get().settings.compactFolderChains) {
+      this.chainIndexNow = null;
+      return;
+    }
+    // LAST of the guards above, and deliberately below the pause: this one
+    // walks the workspace's leaves, and a pause must not pay for a lookup it
+    // cannot use — the same discipline `ensureOrderingPatched` keeps, where
+    // `tests/productCommands.test.ts` pins its own placement by counting leaf
+    // lookups. THIS line is pinned the same way, by its own test
+    // ("asks the workspace nothing at all while filtering is paused",
+    // `tests/compactSeamGate.test.ts`): paused, the count is zero; unpaused,
+    // it is one.
+    if (!this.seamIsPatchedEverywhere()) {
+      this.chainIndexNow = null;
+      return;
+    }
+    const visible = snap.visiblePaths();
+    const isFolder = (p: string): boolean =>
+      this.app.vault.getAbstractFileByPath(p) instanceof TFolder;
+    const tree: ChainTree = {
+      visibleChildrenOf: (folderPath) => {
+        const f = this.app.vault.getAbstractFileByPath(folderPath);
+        if (!(f instanceof TFolder)) return [];
+        return f.children.map((c) => c.path).filter((p) => visible.has(p));
+      },
+      isFolder,
+      // Scaffold is the reason, not merely "a folder that is visible": a
+      // folder the user added as a member reports `exact-member` and must keep
+      // its own row.
+      isScaffold: (p) => isFolder(p) && snap.decisionFor(p).reason === "scaffold",
+      parentOf: (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
+      nameOf: (p) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
+    };
+    const folders = [...visible].filter(isFolder);
+    // Keep the previous object when the runs are unchanged: the re-sort memo
+    // compares the index by identity, and `onSnapshotApplied` fires on every
+    // `file-open`, so a fresh object each time would re-sort on every one.
+    const next = buildChainIndex(folders, tree);
+    if (!sameChainIndex(this.chainIndexNow, next)) this.chainIndexNow = next;
+  }
+
+  /**
    * Extracted out of `onSnapshotApplied` so this line has a name a test can
    * call directly: dropping the second argument back to a bare
    * `this.adapter.apply(snap)` otherwise passes the whole suite, because
@@ -2204,7 +2578,34 @@ export default class SpacesPlugin extends Plugin {
     // itself: a new caller must not be able to reintroduce the bug by
     // forgetting a check. Resume clears the flag before re-seeding through
     // this method, so the classes come back with one ordinary call.
+    //
+    // The index is handed over first, so the pass `apply` runs reads this
+    // snapshot's runs and not the previous one's. It is the SAME object the
+    // sort seam reads: the adapter never builds its own, so the labels and the
+    // substitution cannot disagree about what is compacted.
+    this.adapter.setChainIndex(this.chainIndexNow, this.compactLabelOptions());
     this.adapter.apply(this.filteringPaused ? null : snap, this.elsewhereFirstPath());
+  }
+
+  /**
+   * The label setting, read fresh and shaped for the adapter.
+   *
+   * Read HERE rather than held, for the same reason `elsewhereFirstPath` is:
+   * the setting changes without this method being re-created, and the
+   * definitions subscriber reaches this through `controller.refresh()` on
+   * every write. It does not move the chain index — shortening changes how a
+   * run READS, not which folders form one — so `rebuildChainIndex` keeps the
+   * previous object, the re-sort memo correctly declines to re-sort, and the
+   * adapter's own pass redraws the labels on its own.
+   *
+   * A POLICY, not a decision. Which rows actually shorten is settled in
+   * `ExplorerAdapter`, which can measure them against the pane; this says only
+   * whether it is allowed to.
+   */
+  private compactLabelOptions(): CompactLabelPolicy {
+    return {
+      abbreviateWhenOverflowing: this.defs.get().settings.abbreviateCompactedPaths,
+    };
   }
 
   /**
@@ -2261,8 +2662,16 @@ export default class SpacesPlugin extends Plugin {
    * this reads that. Caching WITHIN one call is the optimisation; caching
    * ACROSS calls is the bug above.
    */
-  private readonly livePermits: Permits = (folderPath, itemPath) =>
-    this.permitsForThisCall?.(folderPath, itemPath) ?? false;
+  private readonly livePermits: Permits = (folderPath, itemPath) => {
+    // Two independent reasons an out-of-input item may be returned: a folder
+    // space hoisting its root's children, and a compacted run substituting
+    // its tip. Each is decided from its own state, so neither can CORRUPT the
+    // other's computation — which is all separation buys here. It is a
+    // disjunction, so either half alone admits; separation is not a second
+    // gate, and neither half can veto the other.
+    if (this.permitsForThisCall?.(folderPath, itemPath) ?? false) return true;
+    return typeof itemPath === "string" && this.admittedThisCall.has(itemPath);
+  };
 
   /**
    * This call's resolved permits, or `null` when none applies — set exactly
@@ -2274,11 +2683,38 @@ export default class SpacesPlugin extends Plugin {
    * Deliberately NOT cleared after the call. Clearing on entry to
    * `filterAndOrderFolder` would wipe it during the hoist branch's own
    * recursive call, and `isAllowed` reads it AFTER `transform` returns, so the
-   * value must outlive the function that set it. A leftover is harmless only
-   * because of an invariant across the seam: outside the hoist branch every
-   * folder's `out` is an identity subset of `items`, so `isAllowed`
-   * short-circuits and never consults the predicate. If that changes, this
-   * field needs an explicit lifetime.
+   * value must outlive the function that set it.
+   *
+   * WHY A LEFTOVER IS STILL HARMLESS, restated for compaction. This used to
+   * rest on "outside the hoist branch every folder's `out` is an identity
+   * subset of `items`, so `isAllowed` short-circuits and never consults the
+   * predicate". That is no longer true: `substituteCompacted` can return a
+   * run's tip for ANY folder, so `isAllowed` now does consult `livePermits`
+   * for ordinary folders, and `livePermits` reads this field first — possibly
+   * a value left behind by an earlier call for a space that is no longer
+   * active.
+   *
+   * TWO OF THE THREE CASES are closed by a fact about `makePermits`: it
+   * answers false for every folder but the vault root (`folderSpace.ts:113`,
+   * `if (!isVaultRoot(folderPath)) return false`). So a stale predicate cannot
+   * admit anything at the ordinary folders compaction newly brings here, and
+   * at the vault root of an ACTIVE folder space the hoist branch has already
+   * overwritten this field earlier in the same call.
+   *
+   * THE THIRD CASE IS NOT CLOSED BY IT, and the first draft of this note
+   * claimed it was. Switch from a folder space to a CURATED one and sort the
+   * vault root: `activeSpaceRoot()` is null, the hoist branch is skipped,
+   * this field still holds the previous space's `makePermits(oldRoot, …)`,
+   * and `isVaultRoot` is true, so the stale predicate IS consulted and CAN
+   * answer true -- for any path whose parent was the old root, or that was in
+   * the old elsewhere set.
+   *
+   * It is still harmless, for a reason that covers all three: admitting an
+   * extra path only stops `isAllowed` REJECTING. It cannot put a row in `out`,
+   * and `out` is built from filtered items, resolved tips, and -- in the hoist
+   * case -- `hoistedRootItems`, every one of them a real item of this pane.
+   * Admission widens, it never fabricates. That is the sentence to weigh against before
+   * giving this field a real lifetime, not the `folderSpace.ts:113` one.
    */
   private permitsForThisCall: Permits | null = null;
 
@@ -2415,10 +2851,12 @@ export default class SpacesPlugin extends Plugin {
       // captured, because this loop only runs for a view's FIRST patch and
       // the view persists across every later space switch.
       //
-      // The transform closure below binds THIS view:
-      // `hoistedRootItems` reads live tree items off whichever pane asked,
-      // and with two panes open the shared `this.filterAndOrderFolder`
-      // reference would have no way to tell them apart on its own.
+      // The transform closure below binds THIS view: `hoistedRootItems` and
+      // `compactedTipItem` both read live tree items off whichever pane
+      // asked, and with two panes open the shared `this.filterAndOrderFolder`
+      // reference would have no way to tell them apart on its own. A pane
+      // bound wrongly hands pane 1 pane 0's item objects; a pane not bound at
+      // all resolves no tip, so that pane simply does not compact.
       if (
         patchExplorerSort(
           view,
@@ -2464,26 +2902,100 @@ export default class SpacesPlugin extends Plugin {
    * of the transform — `filterVisibleItems` asks `decisionFor(p).visible`, and
    * `buildVisibilitySnapshot` answers that with `visible.has(p)` and nothing
    * else); the resolved order map by identity (`DefinitionStore.mutate` clones
-   * on every write, so it over-invalidates, never under); and the selection,
-   * so two spaces showing the same rows are told apart. Outside the key are
-   * only Obsidian's own triggers — a vault mutation re-sorts that folder
-   * anyway, a native sort-mode pick calls `sort()` itself — plus a freshly
-   * patched view, which `ensureOrderingPatched` invalidates explicitly. If
-   * `requestResort` fails the memo is dropped, so the next event retries
-   * rather than leaving the previous filter on screen.
+   * on every write, so it over-invalidates, never under); the selection, so
+   * two spaces showing the same rows are told apart; and the chain index
+   * (`chainIndexNow`) by identity, because compaction changes what the seam
+   * RETURNS without changing visibility, so flipping `compactFolderChains`
+   * moves none of the other three and the tree would keep its old shape.
+   * That is only affordable because `rebuildChainIndex` reuses the previous
+   * index object while the runs are unchanged; a fresh object per snapshot
+   * would defeat the memo on every `file-open`.
+   *
+   * Outside the key are only Obsidian's own triggers — a vault mutation
+   * re-sorts that folder anyway, a native sort-mode pick calls `sort()`
+   * itself — plus a freshly patched view, which `ensureOrderingPatched`
+   * invalidates explicitly. If `requestResort` fails the memo is dropped, so
+   * the next event retries rather than leaving the previous filter on screen.
+   *
+   * A FAILED RE-SORT COSTS THREE MORE THINGS this method owns and its name
+   * does not say: it drops the chain index, drops the ADAPTER's copy of it,
+   * and re-sorts every pane a second time. See the comments on those lines.
+   * The index is a promise that the substitution happened, this is the one
+   * place that finds out it did not, and the adapter's copy is what would
+   * otherwise go on drawing the promise.
    */
   private applyFilterAndOrdering(): void {
     if (this.sortedViews.length === 0) return;
     const signature = this.currentResortSignature();
     if (this.lastResort && sameResortSignature(this.lastResort, signature)) return;
+    const hadIndex = this.chainIndexNow !== null;
     let every = true;
     for (const view of this.sortedViews) {
       if (!requestResort(view)) every = false;
     }
     this.lastResort = every ? signature : null;
+    // THE ONE WAY THE INDEX CAN OUTLIVE ITS SORT THAT IS NOT KNOWABLE BEFORE
+    // THE ATTEMPT. `seamIsPatchedEverywhere` answers the others up front
+    // (`tests/compactSeamGate.test.ts` enumerates them); here the patch is on
+    // and `sort()` still refused,
+    // so the tree keeps whatever it was last rendered as and the substitution
+    // this index describes did not happen. The adapter must not label it: the
+    // joined path on a row the chain is still nested under is the one outcome
+    // worse than not compacting. Dropped here, at the one place the verdict
+    // exists, rather than at each of this method's four call sites.
+    //
+    // THE ADAPTER'S COPY GOES WITH IT, and that is not a nicety. The adapter's
+    // copy is what DRAWS — it labels on its own MutationObserver schedule,
+    // from the index it was last handed. Two of this method's four call sites
+    // (`recordSortOverride`, `restoreSavedOrdering`) never re-seed it, so a
+    // drop that touched only this field left the seam no longer substituting
+    // while the adapter went on stamping the joined path. That is the exact
+    // outcome the paragraph above says this line exists to prevent, reached
+    // from the other side.
+    //
+    // `lastResort` is already null above, so the next event retries; a retry
+    // that succeeds rebuilds the index from the snapshot in the ordinary way.
+    if (!every) {
+      this.chainIndexNow = null;
+      this.adapter.setChainIndex(null, this.compactLabelOptions());
+      // Panes that DID sort rendered the substitution before the refusal was
+      // known: the index is live for the whole loop above, so a pane earlier
+      // in it has already drawn the tip folder's bare name at the head's
+      // position. Nulling the index does not move that back on its own, and
+      // nothing else will — the next apply rebuilds a live index, that pane
+      // re-sorts compacted, the other refuses again, and the row stays
+      // unlabelled at a position it never earned. A second pass with the
+      // index gone renders those panes honestly. No recursion:
+      // `requestResort` reaches the seam, which now reads a null index.
+      //
+      // WHAT IT COSTS, said plainly. A pane whose `sort()` throws
+      // PERMANENTLY now throws twice per apply instead of once, and every
+      // apply renders the surviving panes compacted and then immediately
+      // honest — a visible flash, not merely double work. It is still the
+      // right trade: the flash happens only in a state that is already
+      // broken, and the alternative is a tree that is permanently wrong, with
+      // the tip folder's bare name sitting at the head's position forever.
+      // Re-sorting only the panes that returned true would avoid the second
+      // throw, at the cost of the loop above having to remember which those
+      // were; not worth it for a path that has already failed.
+      //
+      // Guarded on `hadIndex` so a refusal with compaction off — the ordinary
+      // case — costs nothing.
+      if (hadIndex) for (const view of this.sortedViews) requestResort(view);
+      // AND TAKE OFF WHAT IS ALREADY DRAWN. Dropping both copies of the
+      // index stops the adapter labelling anything NEW; it removes nothing an
+      // earlier, successful round put on screen. Usually the re-sort above mutates the
+      // tree and the observer's next frame restores the rows on its own — but
+      // when EVERY pane throws, nothing mutates, no pass is scheduled, and a
+      // stale joined path sits in the user's explorer until the next
+      // `file-open` or pane resize. One synchronous pass with a null index
+      // closes that, on a path that has already failed and so has nothing
+      // left to save.
+      this.adapter.applyNow();
+    }
   }
 
-  /** See `applyFilterAndOrdering` for why these three fields and no others. */
+  /** See `applyFilterAndOrdering` for why these four fields and no others. */
   private currentResortSignature(): ResortSignature {
     const selection = this.runtime.getSelection();
     const snapshot = this.controller.currentSnapshot();
@@ -2491,6 +3003,7 @@ export default class SpacesPlugin extends Plugin {
       selection: selection.kind === "all" ? "all" : `space:${selection.id}`,
       order: this.orderMapFor(),
       visible: snapshot ? snapshot.visiblePaths() : null,
+      chainIndex: this.chainIndexNow,
     };
   }
 
@@ -2858,15 +3371,48 @@ export default class SpacesPlugin extends Plugin {
       describeRow: (path) => {
         const f = this.app.vault.getAbstractFileByPath(path);
         if (!f) return null;
-        // Obsidian's root folder path is "/"; storage uses "".
-        const parent = f.parent?.path ?? "";
-        return { parent: parent === "/" ? "" : parent, isFolder: f instanceof TFolder };
+        // DISPLAY space, not vault space. A compacted row carries its run's
+        // TIP as its path, but it is drawn where the run's HEAD was, so the
+        // folder it sits inside is the head's parent. Answering the tip's
+        // real parent names a folder with no row at all, and `sameParent`
+        // then compares the user's gesture against something they cannot see.
+        //
+        // With no chain index this is `vaultParentOf(path)` and nothing else
+        // -- see `compactCoords.ts` on why identity there is load bearing.
+        //
+        // `?? ""` is unreachable: `f` resolved above, so the lookup for
+        // `path` cannot answer null, and that lookup is the fallback every
+        // branch of `displayParentOf` ends at. It is here because the shared
+        // signature is nullable for callers whose path may not resolve.
+        const parent = displayParentOf(this.chainIndexNow, path, (p) => this.vaultParentOf(p));
+        return { parent: parent ?? "", isFolder: f instanceof TFolder };
       },
+      /**
+       * The folder's children as they are on screen, SPELLED THE WAY STORAGE
+       * SPELLS THEM.
+       *
+       * `displayedPaths` reads through the patched seam, which is the right
+       * source -- "displayed" has to mean what is on screen -- but it hands
+       * back a compacted chain as its TIP, because that is the row. A stored
+       * order holds the HEAD, because an order lists a folder's own children
+       * and the head is the child.
+       *
+       * `computeDrop` merges this list with `storedOrder`'s, so handing it two
+       * spellings of the same chain loses both: the head falls out of the
+       * baseline for not being displayed, and `writeOrderFor`'s
+       * `compact(order, live)` then strikes the tip for not being a child of
+       * this folder. A drag elsewhere in that folder -- one that never went
+       * near the chain -- is enough to delete the arrangement from
+       * `data.json`, and nothing on screen says so. Mapping
+       * here, at the single point where the two lists meet, is what keeps the
+       * merge in one coordinate system.
+       */
       displayedOrder: (folderPath) => {
         const view = this.explorerView();
         const folder = this.folderFor(folderPath);
         if (!view || !folder) return [];
-        return displayedPaths(view, folder) ?? [];
+        const shown = displayedPaths(view, folder) ?? [];
+        return shown.map((p) => displayToStored(this.chainIndexNow, p));
       },
       storedOrder: (folderPath) => {
         const map = this.orderMapFor();
@@ -2908,6 +3454,40 @@ export default class SpacesPlugin extends Plugin {
       },
       moveInto: (paths, targetFolder, edge, targetPath) =>
         this.moveAndOrder(paths, targetFolder, edge, targetPath),
+      // The three translation questions `DragOrdering` asks, answered from the
+      // one chain index the sort seam and the explorer adapter also read.
+      // Wired unconditionally: with no index every one of them is the
+      // identity, and `compactCoords.ts` records why that is load bearing
+      // rather than defensive.
+      storedPathFor: (path) => displayToStored(this.chainIndexNow, path),
+      displayPathFor: (path) => storedToDisplay(this.chainIndexNow, path),
+      isCompactedRow: (path) => isCompactedRow(this.chainIndexNow, path),
+      // `DragOrdering` refuses the drop on its own -- this hook only voices
+      // it, exactly as `onSelectionOutsideWindow` above voices its decline.
+      //
+      // A compacted row is drawn where its chain's topmost folder was and
+      // carries the chain's deepest folder as its path, so "move it into that
+      // folder" has no single destination the user could have meant. The
+      // decision taken for this feature is that such a row reorders among the
+      // rows it is drawn beside and does nothing else, and that the way out is
+      // to stop compacting rather than to guess.
+      //
+      // Fired for a drag whether or not reordering is enabled, because
+      // compaction is a different setting and a user who turned reordering off
+      // did not thereby agree to have chain folders moved. See `carried` in
+      // `DragOrdering.ts`.
+      //
+      // Singular, and it stays singular for a selection of several rows. One
+      // compacted row refuses the whole gesture, so the sentence names the
+      // obstacle rather than counting the selection, and the instruction is
+      // the same either way. A count would be the kind of explanation the copy
+      // rules for this feature exclude.
+      onCompactedRowRefused: () => {
+        new Notice(
+          "Spaces: that folder is part of a compacted chain. " +
+            "Turn off compact folder chains to move it."
+        );
+      },
       // The same rule the renderer reads, evaluated per event, so a space
       // switch changes the answer with no rebind - gating the gesture
       // alongside the rendering is what stops a drag in All writing an order
@@ -3014,6 +3594,24 @@ export default class SpacesPlugin extends Plugin {
     };
   }
 
+  /**
+   * The folder a path lives in, in STORAGE's spelling, or null when the path
+   * is not in the vault.
+   *
+   * Obsidian's root folder has path `"/"`; every order map, membership list
+   * and stored path in this plugin spells the root `""`. Named rather than
+   * inlined so `describeRow` and the lookup it hands `displayParentOf` are the
+   * same answer -- a translation layer that resolved the head through a
+   * second, differently normalised lookup would answer `"/"` for a top-level
+   * chain and match nothing in storage.
+   */
+  private vaultParentOf(path: string): string | null {
+    const f = this.app.vault.getAbstractFileByPath(path);
+    if (!f) return null;
+    const parent = f.parent?.path ?? "";
+    return parent === "/" ? "" : parent;
+  }
+
   /** "" is the vault root, which Obsidian addresses as "/". */
   private folderFor(folderPath: string): unknown {
     return this.app.vault.getAbstractFileByPath(folderPath === "" ? "/" : folderPath);
@@ -3070,6 +3668,15 @@ export default class SpacesPlugin extends Plugin {
    * what a move means. Adding membership behind the user's back, or revealing
    * the file through `RevealedSet`, would both be inventing intent; the reveal
    * would not even survive, since a moved file has no live leaf to back it.
+   *
+   * `targetPath` arrives in STORAGE's spelling, which is the only spelling
+   * that can work here: it is handed straight to `computeDrop` beside
+   * `dragDeps().displayedOrder`, and that list already names a compacted
+   * chain by its topmost folder. A row's own `data-path` would name the
+   * chain's deepest folder, which is not a child of `targetFolder` at all, so
+   * the position would be computed against nothing and silently dropped.
+   * `DragOrdering` does the translation before calling this; see `moveInto`
+   * in `DragOrdering.ts`.
    */
   private async moveAndOrder(
     paths: string[],
@@ -3114,12 +3721,17 @@ export default class SpacesPlugin extends Plugin {
     }
     if (moved.length === 0) return;
 
-    const view = this.explorerView();
-    const folder = this.folderFor(targetFolder);
-    const displayed = view && folder ? displayedPaths(view, folder) ?? [] : [];
+    // BOTH lists out of `dragDeps`, which is the point rather than a tidy-up.
+    // This is the second place a displayed list and a stored one are merged,
+    // and it used to build its own `displayed` from `displayedPaths` while
+    // taking `order` from `dragDeps` -- so a drop into a destination folder
+    // that contains a compacted chain lost that chain's saved position,
+    // exactly as the drag path did (DS-4). One source for the pair is what
+    // makes the two halves share a coordinate system by construction.
+    const deps = this.dragDeps();
     const next = computeDrop({
-      order: this.dragDeps().storedOrder(targetFolder),
-      displayed,
+      order: deps.storedOrder(targetFolder),
+      displayed: deps.displayedOrder(targetFolder),
       dragged: moved,
       targetPath,
       edge,
@@ -3290,10 +3902,6 @@ export default class SpacesPlugin extends Plugin {
       this.dragOrdering?.unbind();
       this.dragOrdering = null;
     });
-    // Before adapter.unbind(): a throw there would otherwise strand the sort
-    // override and leave the tree custom-ordered after a disable.
-    // The ORDER is still load-bearing: guarding each step means a failure
-    // cannot reorder them, only skip one.
     this.unloadStep("restoring the new-file location", () => {
       this.restoreNewFileParent?.();
       this.restoreNewFileParent = null;
@@ -3302,6 +3910,19 @@ export default class SpacesPlugin extends Plugin {
       this.restoreNativeCreate?.();
       this.restoreNativeCreate = null;
     });
+    // THESE TWO ARE SAFE IN EITHER ORDER, and it is worth saying so here
+    // because the pair looks like it must be ordered. `teardownOrdering()`
+    // reaches `unpatch`, which forces a `sort()` that re-renders the whole
+    // unfiltered vault — pushing compacted rows straight out of the explorer's
+    // render window, where no query can find them, moments before the adapter
+    // sweeps. What carries that is not the order: it is `ExplorerAdapter`'s
+    // RECORD of the rows it drew a prefix on, which holds a detached row when
+    // nothing else can. `LabelPassOptions.drawn` is where that argument is
+    // written out in full.
+    //
+    // Nor can a throw make the order matter: every step here runs through
+    // `unloadStep`, which catches and logs, so a failure in either one cannot
+    // skip the other — only itself.
     this.unloadStep("unpatching the sort seam", () => this.teardownOrdering());
     this.unloadStep("unbinding the explorer adapter", () => this.adapter.unbind());
     this.unloadStep("destroying the switcher", () => this.switcher?.destroy());

@@ -396,6 +396,40 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // non-boolean collapse to the same answer. Strict for the same reason:
         // `showPinnedFolder: 1` must not read as true.
         showPinnedFolder: st.showPinnedFolder === true,
+        // Defaults to FALSE like the keys above, so absent and non-boolean
+        // collapse to the same answer. Strict for the same reason:
+        // `compactFolderChains: 1` must not read as true.
+        compactFolderChains: st.compactFolderChains === true,
+        // `!== false`, and this is the ONE key on this list that is looser
+        // than its neighbours on purpose.
+        //
+        // Every other boolean on this list answers "unrecognised means OFF",
+        // whatever it does about an absent key: four above default ON when the
+        // key is missing (`revealVisitors`, `allowReordering`,
+        // `allowReorderingAll`, `showSpaceHeader`) and still read a present
+        // non-boolean as false. This one inverts that second half: absent AND
+        // unrecognised both mean ON, and only a literal `false` -- the value
+        // the toggle itself writes -- turns it off.
+        //
+        // Why it differs: without it, compaction is actively broken on a deep
+        // vault. The joined label overflows a narrow pane, `text-overflow:
+        // ellipsis` truncates from the right, and the TIP is the first thing
+        // lost -- the one segment that says which folder the row is. The
+        // opt-in a user already made by enabling `compactFolderChains` should
+        // not also require opting into it working. A strict check here would
+        // leave a document holding any unrecognised value on the broken label,
+        // which is the failure this setting exists to remove.
+        abbreviateCompactedPaths: st.abbreviateCompactedPaths !== false,
+        // `compactPathThreshold` was read here in an earlier draft of this
+        // feature and is read nowhere now. No RELEASE ever carried it, so no
+        // stored document can hold one; what follows is why removing a read
+        // would have been safe even if one did:
+        // shortening triggers on a measured overflow instead of on a folder
+        // count. Removing it is a READ-SIDE change and nothing else. Every
+        // settings key is listed by name in this object, so a document still
+        // carrying the old one is simply not asked for it -- it is not
+        // migrated, nothing is written back on load, and no stored value this
+        // build does not understand can cost someone their spaces.
         // Defaults to FALSE for the same reason as the two above, and because
         // it changes how every existing install looks. Nothing here touches a
         // space's stored color: this key governs drawing alone.

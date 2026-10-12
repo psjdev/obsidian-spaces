@@ -10,8 +10,9 @@
  * The version-consistency check is the load-bearing one: `manifest.json`,
  * `package.json` and `versions.json` all carry the version, and this repo has
  * already had them disagree once (a 1.0.0 tag reverted by hand, and a
- * `package-lock.json` left stale at 0.1.0). `version-bump.mjs` exists to keep
- * them in step; this proves it worked.
+ * `package-lock.json` left stale at 0.1.0). Nothing keeps the four in step
+ * automatically -- a release edits them by hand -- so this is the check that
+ * the hand was steady.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -116,8 +117,8 @@ describe("versions.json", () => {
 
 describe("package.json", () => {
   it("carries the same version as the manifest", () => {
-    // `version-bump.mjs` runs off `npm version`, which writes package.json
-    // first; a mismatch means the hook did not run.
+    // A release bumps these by hand, so a mismatch means one file was edited
+    // and another forgotten.
     expect(pkg.version).toBe(manifest.version);
   });
 });

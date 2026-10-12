@@ -24,10 +24,10 @@ import { TFile, TFolder } from "obsidian";
 import { noticeLog } from "./helpers/obsidian-stub";
 import SpacesPlugin from "../src/main";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
-import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildVisibilitySnapshot } from "../src/visibility/VisibilityEngine";
 import { compileIgnore } from "../src/visibility/glob";
 import { buildFakeVault } from "./helpers/fakeVault";
+import { folderItem, makeBarePlugin } from "./helpers/seamHarness";
 import type { SpaceController } from "../src/controller/SpaceController";
 import type { FolderItemLike, TransformItems } from "../src/layout/nativeExplorerSort";
 import type { VisibilitySnapshot } from "../src/visibility/VisibilityEngine";
@@ -52,40 +52,17 @@ const vault = buildFakeVault({
   "Recipes.md": "file",
 });
 
-/** One entry in the shape Obsidian hands to `getSortedFolderItems`. */
-function item(path: string): FolderItemLike {
-  return { file: { path } };
-}
+/**
+ * One entry in the shape Obsidian hands to `getSortedFolderItems`, and the
+ * plugin-with-four-collaborators both this suite and `compactSubstitution`
+ * build on. Both live in `tests/helpers/seamHarness.ts` now; they are aliased
+ * here under the names this file has always used.
+ */
+const item = folderItem;
+const makePlugin = makeBarePlugin;
 
 function pathsOf(items: FolderItemLike[]): (string | undefined)[] {
   return items.map((i) => i.file?.path);
-}
-
-/**
- * A plugin instance with the four collaborators the transform reads, and
- * nothing else. `onload()` is never called: the field initialisers are the
- * only construction work, and `adapter = new ExplorerAdapter()` is the only
- * one that builds anything.
- *
- * `sortedView` stays null, so `observeSortOrder()` sees a null sort order,
- * `sortGestureFrom` returns "none", and the transform's first statement is a
- * no-op — no timer is armed and nothing needs tearing down.
- */
-function makePlugin(): SpacesPlugin {
-  const plugin = new SpacesPlugin(
-    {} as ConstructorParameters<typeof SpacesPlugin>[0],
-    {} as ConstructorParameters<typeof SpacesPlugin>[1]
-  );
-  plugin["defs"] = new DefinitionStore({
-    read: async () => undefined,
-    write: async () => undefined,
-  });
-  const runtimeBacking = new Map<string, unknown>();
-  plugin["runtime"] = new RuntimeStateStore({
-    get: (k) => runtimeBacking.get(k),
-    set: (k, v) => void runtimeBacking.set(k, v),
-  });
-  return plugin;
 }
 
 /**
@@ -783,6 +760,27 @@ describe("SpacesPlugin.onSnapshotApplied — the controller's apply callback", (
     expect(reportSpy).toHaveBeenCalledTimes(1);
 
     plugin["adapter"].unbind();
+  });
+
+  it("hands the adapter the plugin's own chain index, not one of its own", () => {
+    // `rebuildChainIndex` is stubbed to a sentinel: with the setting off the
+    // real one yields null, and null on both sides would pass even with the
+    // handover deleted. Identity proves there is ONE producer.
+    const plugin = makeFolderSpacePlugin("Projects/Work");
+    const fakeBody = document.createElement("div");
+    (plugin as unknown as { app: unknown }).app = {
+      ...folderSpaceApp,
+      workspace: { ...folderSpaceApp.workspace, containerEl: { ownerDocument: { body: fakeBody } } },
+    };
+    const sentinel = { runByHead: new Map(), runByTip: new Map() };
+    vi.spyOn(plugin as unknown as { rebuildChainIndex: () => void }, "rebuildChainIndex")
+      .mockImplementation(() => {
+        (plugin as unknown as { chainIndexNow: unknown }).chainIndexNow = sentinel;
+      });
+
+    plugin["onSnapshotApplied"](passthrough);
+
+    expect(plugin["adapter"]["chainIndex"]).toBe(sentinel);
   });
 });
 

@@ -4,7 +4,17 @@
  */
 export const SEL = {
   container: ".nav-files-container",
-  /** Carries data-path. NOT the element we mutate. */
+  /**
+   * Carries data-path. We never replace its children — Obsidian built them —
+   * but we DO insert exactly one element of our own into it: the compact
+   * prefix (`CLS_COMPACT_PREFIX`), placed before `rowText`. That element is
+   * identified by its own class and removed again by the same pass, so the
+   * row returns to Obsidian's own children by identity rather than by being
+   * rewritten to look the same.
+   *
+   * Nothing else about this element is written: not its text, not its other
+   * children, not its order.
+   */
   titleWithPath: "[data-path]",
   /** The row container: parentElement of a title. This is what we class. */
   rowWrapper: ".tree-item",
@@ -83,6 +93,34 @@ export const SEL = {
    */
   navHeader: ".nav-header",
   treeRow: ".tree-item-self",
+  /**
+   * The TEXT element inside a row. UNTOUCHABLE: this plugin never writes it —
+   * not its text, not its children, not replaced. It is READ ONLY as an
+   * anchor, to insert the compact prefix before.
+   *
+   * Measured against 1.13.7: the `[data-path]` element is `.tree-item-self`,
+   * and its children are the collapse chevron (`.tree-item-icon`) and this.
+   * Writing the label onto the `[data-path]` row therefore DESTROYS the
+   * chevron and this element, and a row rebuilt that way does not come back
+   * when the label is removed — it is left as a bare text node until Obsidian
+   * itself re-renders.
+   *
+   * WHY IT IS UNTOUCHABLE, measured in a live vault: Obsidian makes this
+   * element contenteditable for inline rename and SEEDS THE EDITOR FROM ITS
+   * TEXT. A compact chain's joined label written here offered
+   * `Clients/Meetings` for a folder whose real name is `Meetings`; accepting
+   * it resolved against the parent and failed with
+   * `ENOENT ... -> ...\Clients\Clients\Meetings`. Editing only the tail failed
+   * the same way, so a compacted folder could not be renamed at all unless
+   * the user deleted the `Clients/` prefix by hand, with nothing to say why.
+   * Its text already IS the folder's real name, which is exactly the label's
+   * tip, so there is nothing to gain by writing it and a rename to lose.
+   *
+   * Resolved from the row, never assumed: a row that does not have one is
+   * left exactly as Obsidian drew it — no prefix and no class — rather than
+   * labelled on the row instead.
+   */
+  rowText: ".tree-item-inner",
 } as const;
 
 /**
@@ -99,7 +137,35 @@ export const SEL = {
 export const CLS = {
   scaffold: "spaces-scaffold",
   visitor: "spaces-visitor",
+  // Deliberately NOT in `ALL_OWNED_CLASSES`: the per-row class loop would
+  // strip it each pass, and `applyCompactLabels` owns it alongside the prefix
+  // element it belongs to.
+  compacted: "spaces-compacted",
 } as const;
+
+/**
+ * Everything a compacted row reads EXCEPT its tip, drawn into one element of
+ * our own inserted before `SEL.rowText` inside the `[data-path]` row. The row
+ * then reads `Clients/` + `Meetings` while `.tree-item-inner` still holds only
+ * `Meetings` — see that selector's note for the rename this protects.
+ *
+ * THREE ROLES can be inside it, not two. A row drawn whole holds `lead` and
+ * `sep` spans; a row that was SHORTENED holds a `gap` span first, so the
+ * element reads `../Design/` and the row reads `../Design/Decisions`. Anything
+ * auditing what we put in here has to expect all three.
+ *
+ * Not in `CLS` above for the same reason as `CLS_DROP_LINE`: those are row
+ * classes the adapter applies and clears per row, and this one identifies an
+ * ELEMENT we created, so we can find it again and remove it. Removing it, with
+ * `CLS.compacted`, is the whole of restoration: no text is rewritten, so
+ * nothing can be restored wrongly.
+ *
+ * The TIP is not drawn at all. `compactLabel` still returns it — it describes
+ * the whole label, and the per-part roles are the seam for presentation
+ * variants — but Obsidian has already drawn the tip, in the element we must
+ * not write.
+ */
+export const CLS_COMPACT_PREFIX = "spaces-compact-prefix";
 
 /**
  * Marks the first row of the elsewhere group, so CSS can draw a boundary
@@ -213,3 +279,21 @@ export const CLS_SPACE_DROP_LINE = "spaces-space-drop-line";
 
 /** On the space icon being dragged, mirroring Obsidian's own row state. */
 export const CLS_SPACE_DRAGGING = "is-being-dragged";
+
+/**
+ * Classes the code sets that `styles.css` deliberately never mentions, each
+ * with the reason it needs no rule. Keep it short: a class the code
+ * sets and no stylesheet rule reaches is, by default, a rule somebody forgot
+ * to write (`CLS.compacted` was exactly that, for a whole feature).
+ *
+ * `tests/stylesCoupling.test.ts` fails on any class that has no stylesheet rule
+ * and no entry here: every `CLS`/`CLS_*` string in this file, every
+ * `spaces-compact-<role>` for a role in `LABEL_ROLES`, and every `spaces-*`
+ * literal found anywhere under `src/`.
+ * Add one only for a class that is a pure marker (a hook for a test or a
+ * query), and say so in the reason.
+ */
+export const UNSTYLED_CLASSES: Readonly<Record<string, string>> = {
+  "spaces-color-custom":
+    "A plain block wrapper around the custom color picker (ColorPickerPopover). Every child carries its own rule and nothing queries the wrapper, so it is a grouping hook with nothing to style.",
+};

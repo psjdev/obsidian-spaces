@@ -131,6 +131,38 @@ interface SpacesSettings {
    */
   showPinnedFolder: boolean;
   /**
+   * Whether a run of folders that only leads onward draws as one row.
+   *
+   * A display preference, not a property of a space: someone who finds deep
+   * chains noisy finds them noisy everywhere, so nothing is stored per space
+   * and `schemaVersionFor` is untouched.
+   */
+  compactFolderChains: boolean;
+  /**
+   * Whether a compacted run whose joined path does not FIT the pane draws as
+   * `..` plus the last two folders instead.
+   *
+   * ON by default. So are `showSpaceHeader` and `autoAssignColor` on the same
+   * page, but each of those defaults on for the sake of its OWN feature; this
+   * one defaults on for the sake of a different setting, which is broken
+   * without it. Without it compaction is actively BROKEN on a deep vault:
+   * measured at a 246px pane, the joined label of a seven folder run overflows
+   * and `text-overflow: ellipsis` truncates from the right, leaving the tip's
+   * element at a client width of zero. The one segment that identifies the row
+   * is the first thing lost, which is worse than not compacting. Someone who
+   * turned `compactFolderChains` on has already opted in; they should not have
+   * to opt in a second time to it working.
+   *
+   * A row that fits is drawn whole whatever its folder count, because the
+   * question is whether the pane has room and not how many folders there are.
+   * `ExplorerAdapter` measures each row and decides.
+   *
+   * Only meaningful while `compactFolderChains` is on, and kept separate for
+   * the same reason as `showPinnedFolder`: it answers a different question,
+   * how a compacted row READS rather than whether rows compact at all.
+   */
+  abbreviateCompactedPaths: boolean;
+  /**
    * Whether *All* sits pinned to the LEFT of the switcher strip, outside
    * the scrolling rail, the way the `+` control is pinned to the right. *All*
    * is already the first entry; pinning it means the other icons scroll past it
@@ -289,6 +321,16 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     // OFF, unlike `showSpaceHeader`: this annotates a detail only some care
     // about, and adding chrome to an existing install unasked reads as a bug.
     showPinnedFolder: false,
+    // Off by default. This changes how every curated space draws, and an
+    // update must not rearrange an explorer the user was reading.
+    compactFolderChains: false,
+    // ON, and the only Appearance default that is about another SETTING
+    // working rather than about this one's own feature. A deep run's joined
+    // label overflows a narrow pane and the ellipsis eats the TIP, so
+    // compaction without this is compaction that hides the one segment naming
+    // the row. It costs an existing install nothing either way: nothing
+    // changes for anyone until they turn `compactFolderChains` on themselves.
+    abbreviateCompactedPaths: true,
     // OFF by default: this rearranges a strip every existing install already
     // reads fluently, and doing that unasked on an update reads as a bug.
     pinAllSpace: false,
