@@ -2711,8 +2711,9 @@ export default class SpacesPlugin extends Plugin {
    *
    * It is still harmless, for a reason that covers all three: admitting an
    * extra path only stops `isAllowed` REJECTING. It cannot put a row in `out`,
-   * and `out` is built from filtered items plus resolved tips. Admission
-   * widens, it never fabricates. That is the sentence to weigh against before
+   * and `out` is built from filtered items, resolved tips, and -- in the hoist
+   * case -- `hoistedRootItems`, every one of them a real item of this pane.
+   * Admission widens, it never fabricates. That is the sentence to weigh against before
    * giving this field a real lifetime, not the `folderSpace.ts:113` one.
    */
   private permitsForThisCall: Permits | null = null;

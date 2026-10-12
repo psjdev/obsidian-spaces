@@ -870,7 +870,9 @@ describe("applyCompactLabels only labels a tip drawn where the head was", () => 
    * The tooltip a labelled row here must carry: the TIP'S VAULT PATH, which
    * for this nested run is not the run's segments joined (`Work/Clients/
    * Meetings`, with `Top/` missing). Asserted alongside `labelled()` below so
-   * these four say which row got a label AND that the label told the truth.
+   * three of these four say which row got a label AND that the label told the
+   * truth; the fourth says the tooltip is absent, which is the same claim from
+   * the other side.
    */
   const TOOLTIP = TIP;
 

@@ -205,17 +205,17 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Space strip position | Bottom | Where the strip of space icons sits in the file explorer. Left and right show it as a vertical ribbon |
 | Active space style | Shaded | How the strip marks the space you are in. Shaded shades it the way your theme shades a selected row, Boxed adds an outline in the space's color, Bolded draws the icon at a heavier weight and no shading |
 | Assign a color to new spaces | On | New spaces take the next palette color. Off, they start neutral and you pick |
-| Drag indicator | Box | How the file pane shows where a dragged item will land. Box opens a gap between the rows and fills it. Line draws a thin rule at the boundary and moves nothing |
+| Drag indicator | Box | How the file pane shows where a dragged row will land. Box opens a gap between the rows and fills it. Line draws a thin rule at the boundary and moves nothing |
 | Use theme colors for space icons | Off | Draws every space icon in your theme's icon color. Your saved colors are kept and come back when you turn it off |
 | Show notes you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
-| Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A file you added explicitly is still shown |
+| Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A note you added explicitly is still shown |
 | Allow reordering a space's notes and folders | On | Whether dragging rows rearranges them inside a space |
 | Allow reordering outside spaces | On | The same, for **All** |
 | Restore tabs when switching spaces | Off | Whether each space restores its own tabs. On, switching also rearranges your panes; off changes nothing about which rows are visible |
-| Compact folder chains | Off | Draws a chain of folders that leads to a single folder as one row named for the whole path (see below) |
+| Compact folder chains | Off | Draws a chain of folders that leads to a single folder as one row named for the folders it replaces (see below) |
 | Shorten long compacted paths | On | Draws a compacted path that is too wide for the file explorer as two dots and the last two folder names |
 
-A space that gathers notes from across your vault shows the folders they live in, so one note several folders deep costs several rows. Turn on **Compact folder chains** under Settings → Appearance, and a chain of folders that leads to a single folder draws as one row named for the whole path, such as `Work/Clients/Northwind`. Folders you added to the space yourself always keep their own row.
+A space that gathers notes from across your vault shows the folders they live in, so one note several folders deep costs several rows. Turn on **Compact folder chains** under Settings → Appearance, and a chain of folders that leads to a single folder draws as one row named for the folders it replaces, such as `Work/Clients/Northwind`. Folders you added to the space yourself always keep their own row.
 
 The compacted row is the deepest folder with a longer label, so collapsing it, its context menu and dropping onto it all act on that folder. The setting is vault-wide.
 
