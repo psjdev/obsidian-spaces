@@ -274,3 +274,16 @@ export const CLS_SPACE_DROP_LINE = "spaces-space-drop-line";
 
 /** On the space icon being dragged, mirroring Obsidian's own row state. */
 export const CLS_SPACE_DRAGGING = "is-being-dragged";
+
+/**
+ * Classes the code sets that `styles.css` deliberately never mentions, each
+ * with the reason it needs no rule. EMPTY is the right state: a class the code
+ * sets and no stylesheet rule reaches is, by default, a rule somebody forgot
+ * to write (`CLS.compacted` was exactly that, for a whole feature).
+ *
+ * `tests/stylesCoupling.test.ts` fails on any `CLS`, `CLS_*` or generated
+ * `spaces-compact-<role>` class that has no stylesheet rule and no entry here.
+ * Add one only for a class that is a pure marker (a hook for a test or a
+ * query), and say so in the reason.
+ */
+export const UNSTYLED_CLASSES: Readonly<Record<string, string>> = {};

@@ -23,6 +23,34 @@
 .spaces-scaffold > .tree-item-self { opacity: 0.45; }
 .spaces-visitor > .tree-item-self { opacity: 0.62; font-style: italic; }
 
+/* A compacted row carries more ink than a plain scaffold row: 0.75 where the
+   scaffold rule above says 0.45. A compacted row is ALSO a scaffold row, so
+   its parts' own opacities multiply with this one, and measured in a running
+   Obsidian (default dark theme, text #b3b3b3 on #282828) the lead and
+   separators landed at 0.45 x 0.6 = 0.27, which is 1.9:1 -- text a reader has
+   to READ. At 0.75 the tip reads 4.6:1, the lead 2.6:1 (what a plain scaffold
+   folder reads at today) and the `..` gap 2.0:1. The part opacities below are
+   left alone.
+
+   What it costs: the row is still dimmer than a member (4.6 against 7.0), so
+   the scaffold signal survives, but it is no longer as faint as the scaffold
+   rows around it. It is the one scaffold row that earns that, because it is
+   what a reader clicks to reach their notes and it carries a whole path
+   rather than one name. Full opacity was considered and refused: it makes a
+   compacted row indistinguishable from a member folder.
+
+   The class has a second job. A real folder cannot contain `/`, but one named
+   with a lookalike such as U+2044 (fraction slash) can imitate a compacted
+   row. A row drawn at a different weight from a plain scaffold row is not
+   mistakable for a folder that merely looks like a path.
+
+   `.spaces-compacted.spaces-scaffold` rather than `.spaces-compacted` alone:
+   `.spaces-scaffold > .tree-item-self` has the same specificity as
+   `.spaces-compacted > .tree-item-self`, and then source order would decide.
+   The extra class outranks it. A compacted row is always scaffold, since a
+   run is a chain of scaffold folders, so this is accurate and not a hedge. */
+.spaces-compacted.spaces-scaffold > .tree-item-self { opacity: 0.75; }
+
 /* A compacted row reads as one path. The folders it only passed through step
    back so the folder the row actually IS stays legible at a glance. Targeting
    the roles rather than the whole row is what lets a presentation variant be
@@ -40,6 +68,22 @@
    already addressable, so this is a style change and nothing else. */
 .spaces-compact-gap {
   opacity: 0.45;
+}
+
+/* Isolate each role span from the text around it. A right-to-left folder name
+   beside a `/` reorders visually without isolation, and the row then reads as
+   a path the vault does not contain. The separator is OUR text, not a path
+   separator the vault supplied, so isolating it loses no information: it
+   exists to join the names, and each name should be read as itself.
+
+   The prefix element is left alone. It is a child of `.tree-item-self`, which
+   Obsidian lays out as a flex row, so it is a flex item and its inline
+   content is already its own bidi paragraph; the spans inside are what mix
+   directions, and they are isolated here. */
+.spaces-compact-lead,
+.spaces-compact-sep,
+.spaces-compact-gap {
+  unicode-bidi: isolate;
 }
 
 /* The prefix element, which is what the measurement measures.

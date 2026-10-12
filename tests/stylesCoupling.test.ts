@@ -25,7 +25,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { CLS_ELSEWHERE, SEL } from "../src/explorer/selectors";
+import * as selectors from "../src/explorer/selectors";
+import { CLS, CLS_ELSEWHERE, SEL, UNSTYLED_CLASSES } from "../src/explorer/selectors";
+import { compactLabel } from "../src/ui/compactLabel";
 import { applyCompactLabels } from "../src/explorer/ExplorerAdapter";
 import { buildChainIndex } from "../src/visibility/compactChains";
 
@@ -469,4 +471,141 @@ describe("compacted row label roles", () => {
     tip.className = "spaces-compact-tip";
     expect(rules.filter((r) => tip.matches(r.selector))).toHaveLength(0);
   });
-});
+
+  /**
+   * Specificity of the selectors this stylesheet writes for rows: classes
+   * only, so (ids, classes + attributes + pseudo-classes, types). `>` and
+   * `,` are not counted. Enough to rank the rules that compete for ONE
+   * property on ONE row; not a general CSS engine.
+   */
+  function specificity(selector: string): [number, number] {
+    const classes = (selector.match(/\.[\w-]+/g) ?? []).length;
+    const types = (selector.match(/(^|[\s>+~])[a-z][\w-]*/gi) ?? []).length;
+    return [classes, types];
+  }
+
+  /**
+   * The value a row's `opacity` resolves to, ranked the way the cascade does:
+   * specificity first, source order breaking a tie. `getComputedStyle` is not
+   * used because jsdom does not rank rules by specificity.
+   */
+  function winningOpacity(el: HTMLElement): { value: string; tied: boolean } {
+    const hits = rules
+      .map((r, order) => ({ r, order, spec: specificity(r.selector) }))
+      .filter((h) => el.matches(h.r.selector) && h.r.style.getPropertyValue("opacity") !== "");
+    hits.sort((a, b) => a.spec[0] - b.spec[0] || a.spec[1] - b.spec[1] || a.order - b.order);
+    const top = hits[hits.length - 1];
+    const next = hits[hits.length - 2];
+    const tied = !!next && next.spec[0] === top.spec[0] && next.spec[1] === top.spec[1];
+    return { value: top.r.style.getPropertyValue("opacity"), tied };
+  }
+
+  describe("a compacted row carries more ink than a plain scaffold row", () => {
+    const scaffoldRow = (compacted: boolean): HTMLElement => {
+      const { title } = compactedRow();
+      title.parentElement!.classList.add(CLS.scaffold);
+      if (!compacted) title.parentElement!.classList.remove(CLS.compacted);
+      return title;
+    };
+
+    it("a plain scaffold row stays at 0.45", () => {
+      expect(winningOpacity(scaffoldRow(false)).value).toBe("0.45");
+    });
+
+    it("a compacted scaffold row is at 0.75", () => {
+      expect(winningOpacity(scaffoldRow(true)).value).toBe("0.75");
+    });
+
+    it("wins by specificity, so source order cannot decide it", () => {
+      // A tie would be settled by whichever rule is written last, which is
+      // exactly what this guards against.
+      expect(winningOpacity(scaffoldRow(true)).tied).toBe(false);
+    });
+
+    it("does not reach a member folder, which is not scaffold", () => {
+      const { title } = compactedRow();
+      title.parentElement!.classList.remove(CLS.scaffold);
+      expect(rules.some((r) => title.matches(r.selector) && r.style.getPropertyValue("opacity") !== "")).toBe(false);
+    });
+  });
+
+  describe("the role spans are bidi-isolated", () => {
+    it("lead, separator and gap each carry unicode-bidi: isolate", () => {
+      for (const role of ["lead", "sep", "gap"]) {
+        const span = document.createElement("span");
+        span.className = `spaces-compact-${role}`;
+        const values = rules.filter((r) => span.matches(r.selector)).map((r) => r.style.getPropertyValue("unicode-bidi"));
+        expect(values, role).toContain("isolate");
+      }
+    });
+  });
+
+  /**
+   * A class the code sets that the stylesheet never mentions is a FAILURE,
+   * not a gap nobody notices: `CLS.compacted` was set, cleared and pinned by
+   * tests for a whole feature while no rule reached it.
+   *
+   * The list comes from `selectors.ts` itself, so a class added there is
+   * covered the day it is added: every string export (all the `CLS_*`
+   * constants) and every member of `CLS`. A class defined outside that file
+   * is not covered, which is why the convention is that they live there.
+   */
+  describe("every class the code sets is styled or explicitly unstyled", () => {
+    const selectorClasses = (): string[] => [
+      ...Object.values(CLS),
+      ...(Object.values(selectors) as unknown[]).filter((v): v is string => typeof v === "string"),
+    ];
+
+    /** The roles the adapter actually draws: `partsFor`'s `tip` filter, observed. */
+    const drawnRoles = (): string[] => {
+      const found = new Set<string>();
+      for (const row of [compactedRow().title, shortenedRow().title]) {
+        row.querySelectorAll(`.${selectors.CLS_COMPACT_PREFIX} > span`).forEach((span) => {
+          for (const c of Array.from(span.classList)) found.add(c);
+        });
+      }
+      return [...found].sort();
+    };
+
+    const codeSetClasses = (): string[] => [...new Set([...selectorClasses(), ...drawnRoles()])];
+
+    const mentioned = (cls: string): boolean =>
+      rules.some((r) => new RegExp(`\\.${cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(r.selector));
+
+    it("sources the list from selectors.ts, and it holds what it should", () => {
+      const all = codeSetClasses();
+      for (const known of [CLS.scaffold, CLS.compacted, CLS_ELSEWHERE, selectors.CLS_COMPACT_PREFIX, selectors.CLS_DROP_LINE]) {
+        expect(all).toContain(known);
+      }
+    });
+
+    it("has a rule for every one of them", () => {
+      const unstyled = codeSetClasses().filter((c) => !mentioned(c) && !(c in UNSTYLED_CLASSES));
+      expect(unstyled).toEqual([]);
+    });
+
+    it("keeps the allowlist honest: a reason each, a real class each, and still unstyled", () => {
+      const real = new Set(codeSetClasses());
+      for (const [cls, reason] of Object.entries(UNSTYLED_CLASSES)) {
+        expect(reason.trim(), cls).not.toBe("");
+        expect(real.has(cls), `${cls} is not a class the code sets`).toBe(true);
+        expect(mentioned(cls), `${cls} has a rule now, so drop it from the allowlist`).toBe(false);
+      }
+    });
+
+    it("draws every role compactLabel returns except the tip", () => {
+      // `partsFor` filters `tip` out before any span exists, because
+      // `.tree-item-inner` already is the tip. So `spaces-compact-tip` is NOT
+      // a gap in the stylesheet, and must never be reported as one. A role
+      // added to `compactLabel` shows up here as a drawn class and then must
+      // be styled by the test above.
+      const roles = new Set<string>();
+      for (const abbreviate of [false, true]) {
+        for (const p of compactLabel(["A", "B", "C", "D"], { abbreviate })) roles.add(p.role);
+      }
+      expect(roles.has("tip")).toBe(true);
+      const expected = [...roles].filter((r) => r !== "tip").map((r) => `spaces-compact-${r}`).sort();
+      expect(drawnRoles()).toEqual(expected);
+      expect(codeSetClasses()).not.toContain("spaces-compact-tip");
+    });
+  });});
