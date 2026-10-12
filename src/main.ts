@@ -81,6 +81,7 @@ import {
   sameChainIndex,
   type ChainIndex,
   type ChainTree,
+  type Run,
 } from "./visibility/compactChains";
 import type { CompactLabelOptions } from "./ui/compactLabel";
 import type { VisibilitySnapshot } from "./visibility/VisibilityEngine";
@@ -2008,7 +2009,18 @@ export default class SpacesPlugin extends Plugin {
     // the root is never scaffold and so never part of a run. Nor can a folder
     // space's root: its own member is `exact-member`, and `runFrom` extends
     // only through scaffold.
-    if (this.chainIndexNow?.hiddenSegments.has(folderPath)) return [];
+    //
+    // GATED ON THE SAME TIP LOOKUP THE SUBSTITUTION USES, through the shared
+    // `compactedTipItem`, because "is this folder hidden?" is not a question
+    // about the index alone. `substituteCompacted` fails open when THIS pane
+    // cannot resolve the run's tip: the head keeps its own row and the chain
+    // renders honestly, nested. Blanking on the index alone disagreed with
+    // that in the one direction that loses rows — the head survived, because
+    // the substitution declined, and then answered `[]` here, so it drew as a
+    // folder with nothing in it and the whole chain's contents left the pane.
+    // Two definitions of "live" is the bug; one lookup is the fix.
+    const hiddenRun = this.chainIndexNow?.hiddenSegments.get(folderPath);
+    if (hiddenRun && this.compactedTipItem(hiddenRun, view ?? null)) return [];
     // Folder spaces. The vault root is answered with the
     // ROOT FOLDER's children, so the root itself never renders and its contents
     // sit at depth 0. Everything at or under the root is served by its own
@@ -2143,7 +2155,7 @@ export default class SpacesPlugin extends Plugin {
       if (typeof p !== "string") return item;
       const run = ix.runByHead.get(p);
       if (!run) return item;
-      const [tipItem] = itemsForPaths(view, [run.tip]);
+      const tipItem = this.compactedTipItem(run, view);
       // A tip the view cannot resolve is left uncompacted rather than dropped.
       // Fail-open to the honest tree is what this transform does everywhere.
       if (!tipItem) return item;
@@ -2152,6 +2164,28 @@ export default class SpacesPlugin extends Plugin {
       return tipItem;
     });
     return swapped ? next : out;
+  }
+
+  /**
+   * This pane's tree item for a run's tip, or undefined when the pane has
+   * none.
+   *
+   * ONE definition of "this run is live in this pane", read by both halves of
+   * compaction: `substituteCompacted` swaps the head for the tip only if this
+   * answers, and `filterAndOrderFolder` blanks the run's hidden folders only
+   * if this answers. They used to decide separately — the substitution on the
+   * lookup, the blanking on the index alone — and the disagreement cost rows:
+   * the head survived uncompacted, then answered its own sort with `[]` and
+   * drew as an empty folder with the whole chain gone from under it.
+   *
+   * A LOOKUP, never a construction: the items are live tree nodes carrying
+   * their own DOM, and a fabricated one renders as a row with no behaviour.
+   * `itemsForPaths` returns nothing for a pane that has no item and nothing
+   * for a null view, which is the same answer and wants the same fail-open.
+   */
+  private compactedTipItem(run: Run, view: object | null): FolderItemLike | undefined {
+    const [tipItem] = itemsForPaths(view, [run.tip]);
+    return tipItem;
   }
 
   /**

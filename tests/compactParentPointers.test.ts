@@ -125,6 +125,57 @@ describe("a run's hidden segments answer the sort with nothing", () => {
 });
 
 /**
+ * The two halves of compaction must agree about what is LIVE.
+ *
+ * `substituteCompacted` fails open when the pane cannot resolve a run's tip:
+ * the head keeps its own row and the chain renders honestly, nested. The
+ * blanking must use the SAME test, or the two disagree in the one direction
+ * that loses rows — the head survives, because substitution declined, while
+ * the head's own sort answers `[]` because the index still calls it hidden.
+ * The head then draws as a folder with nothing in it, and the whole chain's
+ * contents are gone from the pane.
+ *
+ * `unknownToView` is how that state is reached: the vault has the tip, the
+ * snapshot has the tip, and this pane holds no tree item for it.
+ */
+describe("blanking and substitution agree about what a live run is", () => {
+  const UNRESOLVED = { ...NESTED, compactFolderChains: true, unknownToView: [TIP] };
+
+  it("leaves the head rendering its real children when the tip does not resolve", () => {
+    const h = makePluginForSeam(UNRESOLVED);
+    expect(
+      h
+        .filterAndOrderFolder("Nested/Chain", [folderItem("Nested/Chain/L1")])
+        .map((i) => i.file?.path)
+    ).toEqual(["Nested/Chain/L1"]);
+    expect(
+      h
+        .filterAndOrderFolder("Nested/Chain/L1", [folderItem("Nested/Chain/L1/L2")])
+        .map((i) => i.file?.path)
+    ).toEqual(["Nested/Chain/L1/L2"]);
+  });
+
+  it("leaves the head itself in place, uncompacted", () => {
+    const h = makePluginForSeam(UNRESOLVED);
+    // The substitution's own fail-open, asserted here so the test above is
+    // read against the row that actually renders.
+    const out = h.filterAndOrderFolder("Nested", [
+      folderItem("Nested/Chain"),
+      folderItem("Nested/note.md"),
+    ]);
+    expect(out.map((i) => i.file?.path)).toEqual(["Nested/Chain", "Nested/note.md"]);
+  });
+
+  it("parents each folder of the unresolved run to the folder above it", () => {
+    const h = makePluginForSeam(UNRESOLVED);
+    h.sortWholeTree();
+    expect(h.parentPointerOf("Nested/Chain")).toBe("Nested");
+    expect(h.parentPointerOf("Nested/Chain/L1")).toBe("Nested/Chain");
+    expect(h.parentPointerOf("Nested/Chain/L1/L2")).toBe("Nested/Chain/L1");
+  });
+});
+
+/**
  * The top-level case, which the probe measured as ALREADY correct — the vault
  * root is sorted after the run's own folders, so its adoption of the tip is
  * the last one to run. It is here as a regression guard, not as a red test:

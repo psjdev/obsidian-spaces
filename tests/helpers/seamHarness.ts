@@ -64,6 +64,17 @@ export interface SeamHarnessOptions {
   order?: Record<string, string[]>;
   /** Pass `null` for All, where the controller has no snapshot. Defaults to a built one. */
   snapshot?: null;
+  /**
+   * Paths the VAULT has but this pane holds no tree item for.
+   *
+   * Obsidian normally keeps an item for every path whether or not it is
+   * rendered (measured), so this is a deliberately abnormal pane. It exists
+   * because the seam has a fail-open branch for exactly that state —
+   * `substituteCompacted` leaves a run uncompacted when the view cannot
+   * resolve its tip — and a branch no fixture can reach is a branch nothing
+   * holds to anything.
+   */
+  unknownToView?: string[];
 }
 
 /**
@@ -91,13 +102,16 @@ export interface SeamHarness {
    * once for the run's own unrendered intermediate, which is where it is not —
    * and the later write wins.
    *
-   * Folders are visited in `fileItems` insertion order with the VAULT ROOT
-   * LAST. The ordering is not arbitrary: the C2 probe measured a real
-   * Obsidian 1.13.7 reporting the correct `(root)` parent for a TOP-LEVEL run
-   * and the wrong intermediate for a NESTED one, and a root sorted after the
-   * run's own folders is the only visit order that produces both. A harness
-   * that sorted the root first would make the top-level case look broken too,
-   * and would stop telling the two apart.
+   * Folders are visited in the order the FIXTURE declares them (the key order
+   * of `tree`), with the VAULT ROOT moved LAST. The root's position is not
+   * arbitrary: the C2 probe measured a real Obsidian 1.13.7 reporting the
+   * correct `(root)` parent for a TOP-LEVEL run and the wrong intermediate for
+   * a NESTED one, and a root sorted after the run's own folders is the only
+   * visit order that produces both. A harness that sorted the root first would
+   * make the top-level case look broken too, and would stop telling the two
+   * apart. Nothing is claimed about the order of the rest: every fixture here
+   * declares parents before children, which is enough to reach a run's
+   * intermediate after the folder its row is drawn under.
    */
   sortWholeTree(): void;
   /**
@@ -130,7 +144,11 @@ export interface SeamHarness {
   view: { sort(): void };
 }
 
-/** Every folder in the tree, vault root last. See `sortWholeTree` for why. */
+/**
+ * Every folder the fixture declares, in its own key order, with the vault root
+ * moved last. See `sortWholeTree` for why the root's place matters and the
+ * rest's does not.
+ */
 function folderVisitOrder(tree: Record<string, string[]>): string[] {
   const folders = Object.keys(tree);
   return [...folders.filter((p) => p !== ""), ...folders.filter((p) => p === "")];
@@ -265,7 +283,9 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
   // same object — which is what makes the seam's identity-based subset rule
   // mean anything here: the head is in-input, the tip is not.
   const fileItems: Record<string, SeamItem> = Object.fromEntries(
-    [...nodes.keys()].map((p) => [p, folderItem(p) as SeamItem])
+    [...nodes.keys()]
+      .filter((p) => !(opts.unknownToView ?? []).includes(p))
+      .map((p) => [p, folderItem(p) as SeamItem])
   );
   const rootNode = nodes.get("");
   // Enough of an explorer view for `probe()` to answer "ok", so

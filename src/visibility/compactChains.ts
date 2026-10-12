@@ -116,10 +116,13 @@ function hiddenSegmentsOf(run: Run, tree: ChainTree): string[] {
   let current = run.tip;
   for (let i = run.segments.length - 1; i > 0; i--) {
     const parent = tree.parentOf(current);
-    // A tree that ran out of parents before the head is a tree that has moved
-    // under us. Stop rather than invent a path: a short list blanks fewer
-    // folders, which is the honest-tree direction this transform falls to
-    // everywhere.
+    // `parentOf` is nullable for a top-level path, and the compiler needs the
+    // narrowing. It cannot fire for a run `runFrom` built: that walk descended
+    // exactly these links, so the tip sits `segments.length - 1` levels below
+    // the head and the climb stops AT the head, never above it. Breaking
+    // rather than pushing a fabricated path is the conservative answer if a
+    // future `ChainTree` ever makes it reachable — a short list blanks fewer
+    // folders, which is the honest-tree direction.
     if (parent === null) break;
     out.push(parent);
     current = parent;
