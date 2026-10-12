@@ -4,8 +4,10 @@
  * THE EXPERIMENT SEAM. The rule for WHICH folders compact is settled and lives
  * in `visibility/compactChains.ts`. How the result reads is not, and is
  * expected to change after being looked at in a real vault. Keeping it here
- * means a variant is this file, its test and a style rule, with nothing in the
- * sort seam or the adapter moving.
+ * means a variant that only changes which parts are produced and what role
+ * each one has is this file, its test and a style rule, with nothing in the
+ * sort seam moving. A variant that needs a new INPUT is a wider change, and
+ * abbreviation below is the worked example of one.
  *
  * PARTS, NOT A STRING, and that is the whole point. Two of the presentations
  * worth trying -- muted separators, and the leading folders dimmed with the
@@ -28,7 +30,14 @@
  * at a 246px pane: `Research/2026/Q4/Projects/Atlas/Design/Decisions` rendered
  * with the tip's element squeezed to a client width of ZERO. Collapsing
  * everything above the tip's immediate parent to `..` is a change of parts and
- * a change of roles, and nothing outside this file and its stylesheet moved.
+ * a change of roles, which is all this module itself had to do.
+ *
+ * IT WAS NOT A ONE FILE CHANGE, and nothing here should be read as claiming
+ * it was. Abbreviation also added a setting (`types.ts`, `schema.ts`,
+ * `SettingsTab.ts`, `README.md`), a `gap` style rule, and -- the largest part
+ * -- the measure, redraw and tooltip pass in `ExplorerAdapter`. What the seam
+ * actually bought is the paragraph above: the SHAPE of a shortened label was
+ * decided here and nowhere else.
  *
  * WHICH ROWS abbreviate is not decided here and never was decided well. It
  * was a count of folders, and a count of folders answers the wrong question:

@@ -54,7 +54,9 @@
 /* A compacted row reads as one path. The folders it only passed through step
    back so the folder the row actually IS stays legible at a glance. Targeting
    the roles rather than the whole row is what lets a presentation variant be
-   a style change: `compactLabel` draws each part as its own span. */
+   a style change: `compactLabel` returns a part per piece with a role, and
+   `applyCompactLabels` draws each one as its own span classed
+   `spaces-compact-<role>`. */
 .spaces-compact-lead,
 .spaces-compact-sep {
   opacity: 0.6;

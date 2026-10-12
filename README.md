@@ -212,10 +212,10 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Allow reordering a space's notes and folders | On | Whether dragging rows rearranges them inside a space |
 | Allow reordering outside spaces | On | The same, for **All** |
 | Restore tabs when switching spaces | Off | Whether each space restores its own tabs. On, switching also rearranges your panes; off changes nothing about which rows are visible |
-| Compact folder chains | Off | Draws a run of folders that leads to a single folder as one row named for the whole path (see below) |
+| Compact folder chains | Off | Draws a chain of folders that leads to a single folder as one row named for the whole path (see below) |
 | Shorten long compacted paths | On | Draws a compacted path that is too wide for the file explorer as two dots and the last two folder names, so the folder's own name is not cut off at the edge of a narrow pane |
 
-A space that gathers notes from across your vault shows the folders they live in, so one note several folders deep costs several rows. Turn on **Compact folder chains** under Settings → Appearance, and a run of folders that leads to a single folder draws as one row named for the whole path, such as `Work/Clients/Northwind`. Folders you added to the space yourself always keep their own row.
+A space that gathers notes from across your vault shows the folders they live in, so one note several folders deep costs several rows. Turn on **Compact folder chains** under Settings → Appearance, and a chain of folders that leads to a single folder draws as one row named for the whole path, such as `Work/Clients/Northwind`. Folders you added to the space yourself always keep their own row.
 
 The compacted row is the deepest folder with a longer label, so collapsing it, its context menu and dropping onto it all act on that folder. The setting is vault-wide.
 

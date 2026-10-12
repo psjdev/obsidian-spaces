@@ -569,6 +569,66 @@ describe("applyCompactLabels, shortened", () => {
     expect(r.title.getAttribute("aria-label")).toBe(FULL);
   });
 
+  /**
+   * THE TOOLTIP IS THE TIP'S VAULT PATH, and only a NESTED run can tell that
+   * from the run's segments joined with `/`.
+   *
+   * `run.segments` starts at the HEAD'S NAME, not at the vault root, so for a
+   * run whose head sits under `Nested` the joined segments read
+   * `Chain/L1/L2/L3` and leave out the one folder a reader of `../L2/L3` has
+   * no way to recover. Measured in `deep-vault` on Obsidian 1.13.7, which is
+   * where the row below comes from. Every other assertion in this suite uses a
+   * top-level run, where the two strings are identical and neither can fail
+   * for the other's reason.
+   */
+  describe("a nested run's tooltip", () => {
+    const NESTED_CHAIN = [
+      "Nested",
+      "Nested/Chain",
+      "Nested/Chain/L1",
+      "Nested/Chain/L1/L2",
+      "Nested/Chain/L1/L2/L3",
+    ];
+    const NESTED_TIP = "Nested/Chain/L1/L2/L3";
+    /** `Nested` has a second visible child, so the run HEAD is `Nested/Chain`. */
+    const NESTED_TREE = {
+      visibleChildrenOf: (p: string) => {
+        if (p === "Nested") return ["Nested/Chain", "Nested/note.md"];
+        const i = NESTED_CHAIN.indexOf(p);
+        if (i >= 1 && i < NESTED_CHAIN.length - 1) return [NESTED_CHAIN[i + 1]];
+        if (p === NESTED_TIP) return [`${NESTED_TIP}/why.md`];
+        return [];
+      },
+      isFolder: (p: string) => NESTED_CHAIN.includes(p),
+      isScaffold: (p: string) => NESTED_CHAIN.includes(p),
+      parentOf: (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
+      nameOf: (p: string) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
+    };
+    const NESTED_INDEX = buildChainIndex(NESTED_CHAIN, NESTED_TREE);
+
+    const nestedRow = (): ReturnType<typeof row> =>
+      row(document.createElement("div"), NESTED_TIP, "L3");
+
+    it("is the tip's vault path, which the label itself never claimed", () => {
+      const r = nestedRow();
+      label([r.title], NESTED_INDEX, ABBREV);
+      // What the row reads: the head's own name is already gone from it.
+      expect(r.title.textContent).toBe("../L2/L3");
+      expect(r.title.getAttribute("aria-label")).toBe(NESTED_TIP);
+      // The string this must NOT be: `Nested/` is missing from it.
+      expect(r.title.getAttribute("aria-label")).not.toBe("Chain/L1/L2/L3");
+    });
+
+    it("is still absent on a nested run drawn in full", () => {
+      // The gate, asked where the two candidate strings differ: a row that
+      // hid nothing gets no tooltip whichever string would have been written.
+      const r = nestedRow();
+      label([r.title], NESTED_INDEX, ABBREV, () => false);
+      expect(r.title.textContent).toBe("Chain/L1/L2/L3");
+      expect(r.title.hasAttribute("aria-label")).toBe(false);
+    });
+  });
+
   it("sets no aria-label when the label was NOT shortened", () => {
     const r = deepRow();
     label([r.title], DEEP, PLAIN);
@@ -806,7 +866,13 @@ describe("applyCompactLabels only labels a tip drawn where the head was", () => 
    * `Other`.
    */
   const NESTED = buildChainIndex(FOLDERS, NESTED_TREE);
-  const FULL = "Work/Clients/Meetings";
+  /**
+   * The tooltip a labelled row here must carry: the TIP'S VAULT PATH, which
+   * for this nested run is not the run's segments joined (`Work/Clients/
+   * Meetings`, with `Top/` missing). Asserted alongside `labelled()` below so
+   * these four say which row got a label AND that the label told the truth.
+   */
+  const TOOLTIP = TIP;
 
   /** The `.tree-item-children` subtree Obsidian draws a row's children into. */
   function childrenOf(r: ReturnType<typeof row>): HTMLElement {
@@ -827,7 +893,7 @@ describe("applyCompactLabels only labels a tip drawn where the head was", () => 
     const tip = row(childrenOf(top), TIP, "Meetings");
     label([top.title, tip.title], NESTED, ABBREV);
     expect(labelled(tip.title)).toBe(true);
-    expect(tip.title.getAttribute("aria-label")).toBe(FULL);
+    expect(tip.title.getAttribute("aria-label")).toBe(TOOLTIP);
   });
 
   it("leaves a tip drawn under its own run's hidden segment alone", () => {
@@ -859,7 +925,7 @@ describe("applyCompactLabels only labels a tip drawn where the head was", () => 
     const tip = row(childrenOf(other), TIP, "Meetings");
     label([other.title, tip.title], NESTED, ABBREV);
     expect(labelled(tip.title)).toBe(true);
-    expect(tip.title.getAttribute("aria-label")).toBe(FULL);
+    expect(tip.title.getAttribute("aria-label")).toBe(TOOLTIP);
   });
 
   it("labels a tip at the top level, with no ancestor row at all", () => {
@@ -870,6 +936,6 @@ describe("applyCompactLabels only labels a tip drawn where the head was", () => 
     const tip = row(host, TIP, "Meetings");
     label([tip.title], NESTED, ABBREV);
     expect(labelled(tip.title)).toBe(true);
-    expect(tip.title.getAttribute("aria-label")).toBe(FULL);
+    expect(tip.title.getAttribute("aria-label")).toBe(TOOLTIP);
   });
 });

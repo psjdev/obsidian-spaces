@@ -647,10 +647,12 @@ export class ExplorerAdapter {
  * `Clients/Clients/Meetings` -- a compacted folder could not be renamed at all.
  * `SEL.rowText` documents that in full.
  *
- * Instead ONE element of our own (`CLS_COMPACT_PREFIX`) carries the lead and
- * the separator, inserted as a sibling immediately before the text element.
- * The row reads `Clients/` + `Meetings` exactly as it did, and the inner still
- * holds only `Meetings`.
+ * Instead ONE element of our own (`CLS_COMPACT_PREFIX`) carries every part but
+ * the tip -- the leads and separators, and the `..` gap when the label was
+ * shortened -- inserted as a sibling immediately before the text element. The
+ * row reads `Clients/` + `Meetings` exactly as it did, or `../Design/` +
+ * `Decisions` when it was shortened, and the inner still holds only the
+ * folder's own name.
  *
  * FAILS OPEN PER ROW. A row with no text element is skipped entirely -- no
  * prefix, and not even classed. There is nothing to anchor the prefix to, and
@@ -663,10 +665,11 @@ export class ExplorerAdapter {
  * rebuild that resembles them.
  *
  * THE TOOLTIP. A row whose label was SHORTENED no longer shows the folders it
- * passed through, so the full joined path goes on the row as `aria-label`,
+ * passed through, so the TIP'S VAULT PATH goes on the row as `aria-label`,
  * which Obsidian renders as its own tooltip on hover (verified in the running
- * app -- see `ARIA_LABEL`). It is set only while the label is abbreviated: a
- * row drawing its whole path has nothing a tooltip could add, and a stale one
+ * app -- see `ARIA_LABEL`, and `drawRow` for why the vault path and not the
+ * run's segments). It is set only while the label is abbreviated: a row
+ * drawing its whole path has nothing a tooltip could add, and a stale one
  * would claim a shortening that is no longer happening.
  *
  * Taken off only on a row this pass PUT ONE ON, never blanket-removed and
@@ -896,11 +899,14 @@ function drawRow(
   // both what is drawn and whether anything was left out. A later variant that
   // elides differently gets the tooltip without touching this line.
   if (isAbbreviated(label)) {
-    // The whole label, which is what the row would have read. Joined from the
-    // run's own segments rather than from `run.tip`: a run that starts below
-    // the vault root has a tip path with ancestors the label never claimed,
-    // and the tooltip must say what was hidden, not more.
-    title.setAttribute(ARIA_LABEL, run.segments.join("/"));
+    // THE TIP'S VAULT PATH, not the run's segments joined. A reader hovering
+    // `../L2/L3` is asking where that folder IS, and the vault path is the
+    // unambiguous answer; the joined segments start at the head's NAME, so a
+    // run under `Nested` reads `Chain/L1/L2/L3` and leaves the reader to work
+    // out what sits above it. The extra ancestors cost one hover's worth of
+    // text and remove that step, and for a top-level run the two are character
+    // for character the same string.
+    title.setAttribute(ARIA_LABEL, run.tip);
     ourTooltips.add(title);
   } else if (ourTooltips.has(title)) {
     title.removeAttribute(ARIA_LABEL);

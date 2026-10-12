@@ -1976,7 +1976,10 @@ export default class SpacesPlugin extends Plugin {
   // Typed explicitly rather than as `TransformItems`: the third, optional
   // `view` parameter is not part of the seam's contract - `patch()` only ever
   // calls a `transform` with two arguments - it is how the per-view closure in
-  // `ensureOrderingPatched` tells `hoistedRootItems` which pane is asking. A
+  // `ensureOrderingPatched` tells this method which pane is asking. Three
+  // things need to know: `hoistedRootItems` reads that pane's live tree items,
+  // and both halves of compaction resolve a run's tip through
+  // `compactedTipItem`, which answers nothing at all for a null view. A
   // plain `TransformItems` annotation would still be assignable to `patch()`'s
   // parameter, but would stop that closure passing `view` at all.
   private readonly filterAndOrderFolder: (
@@ -2395,11 +2398,16 @@ export default class SpacesPlugin extends Plugin {
   /**
    * Every compacted run in the active space, or null when compaction is off.
    *
-   * Built ONCE per snapshot, not per sort-seam call, because three consumers
-   * read it on two different schedules: the seam substitutes and admits during
-   * a sort, and `ExplorerAdapter` labels during a MutationObserver pass that
-   * runs at a different time. A per-call record would be empty by the time the
-   * adapter looked.
+   * Built ONCE per snapshot, not per sort-seam call, because its consumers
+   * read it on different schedules: the seam substitutes heads and blanks
+   * hidden segments during a sort, `ExplorerAdapter` labels during a
+   * MutationObserver pass that runs at a different time, and the drag
+   * translation reads it whenever a pointer moves. A per-call record would be
+   * empty by the time any of the others looked.
+   *
+   * ADMISSION IS NOT ONE OF THEM. The seam's permits predicate admits a
+   * substituted tip from `admittedThisCall`, which this object never feeds —
+   * see `buildChainIndex`'s own note on why the two lifetimes differ.
    *
    * Rebuilt rather than patched: the runs are a function of the snapshot, and
    * a snapshot is already the thing that changes when membership or visibility
@@ -2686,14 +2694,26 @@ export default class SpacesPlugin extends Plugin {
    * a value left behind by an earlier call for a space that is no longer
    * active.
    *
-   * It is harmless because of a different fact, which now carries the weight:
-   * `makePermits` answers false for every folder but the vault root
-   * (`folderSpace.ts:113`, `if (!isVaultRoot(folderPath)) return false`). A
-   * stale predicate therefore cannot admit anything at the folders compaction
-   * newly brings here, and at the vault root of an ACTIVE folder space the
-   * hoist branch has already overwritten this field in the same call. That
-   * line is load-bearing: weaken it and this field needs an explicit lifetime
-   * after all.
+   * TWO OF THE THREE CASES are closed by a fact about `makePermits`: it
+   * answers false for every folder but the vault root (`folderSpace.ts:113`,
+   * `if (!isVaultRoot(folderPath)) return false`). So a stale predicate cannot
+   * admit anything at the ordinary folders compaction newly brings here, and
+   * at the vault root of an ACTIVE folder space the hoist branch has already
+   * overwritten this field earlier in the same call.
+   *
+   * THE THIRD CASE IS NOT CLOSED BY IT, and the first draft of this note
+   * claimed it was. Switch from a folder space to a CURATED one and sort the
+   * vault root: `activeSpaceRoot()` is null, the hoist branch is skipped,
+   * this field still holds the previous space's `makePermits(oldRoot, …)`,
+   * and `isVaultRoot` is true, so the stale predicate IS consulted and CAN
+   * answer true -- for any path whose parent was the old root, or that was in
+   * the old elsewhere set.
+   *
+   * It is still harmless, for a reason that covers all three: admitting an
+   * extra path only stops `isAllowed` REJECTING. It cannot put a row in `out`,
+   * and `out` is built from filtered items plus resolved tips. Admission
+   * widens, it never fabricates. That is the sentence to weigh against before
+   * giving this field a real lifetime, not the `folderSpace.ts:113` one.
    */
   private permitsForThisCall: Permits | null = null;
 
@@ -2830,10 +2850,12 @@ export default class SpacesPlugin extends Plugin {
       // captured, because this loop only runs for a view's FIRST patch and
       // the view persists across every later space switch.
       //
-      // The transform closure below binds THIS view:
-      // `hoistedRootItems` reads live tree items off whichever pane asked,
-      // and with two panes open the shared `this.filterAndOrderFolder`
-      // reference would have no way to tell them apart on its own.
+      // The transform closure below binds THIS view: `hoistedRootItems` and
+      // `compactedTipItem` both read live tree items off whichever pane
+      // asked, and with two panes open the shared `this.filterAndOrderFolder`
+      // reference would have no way to tell them apart on its own. A pane
+      // bound wrongly hands pane 1 pane 0's item objects; a pane not bound at
+      // all resolves no tip, so that pane simply does not compact.
       if (
         patchExplorerSort(
           view,

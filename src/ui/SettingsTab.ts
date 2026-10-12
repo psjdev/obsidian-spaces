@@ -286,7 +286,7 @@ export class SpacesSettingTab extends PluginSettingTab {
       {
         name: "Compact folder chains",
         desc:
-          "Shows a run of folders that leads to a single folder as one row. " +
+          "Shows a chain of folders that leads to a single folder as one row. " +
           "Affects spaces that gather notes from across your vault.",
         control: { type: "toggle", key: "compactFolderChains" },
       },

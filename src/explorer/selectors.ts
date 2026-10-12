@@ -144,10 +144,15 @@ export const CLS = {
 } as const;
 
 /**
- * The compacted row's LEAD and SEPARATOR, drawn into one element of our own
- * inserted before `SEL.rowText` inside the `[data-path]` row. The row then
- * reads `Clients/` + `Meetings` while `.tree-item-inner` still holds only
+ * Everything a compacted row reads EXCEPT its tip, drawn into one element of
+ * our own inserted before `SEL.rowText` inside the `[data-path]` row. The row
+ * then reads `Clients/` + `Meetings` while `.tree-item-inner` still holds only
  * `Meetings` — see that selector's note for the rename this protects.
+ *
+ * THREE ROLES can be inside it, not two. A row drawn whole holds `lead` and
+ * `sep` spans; a row that was SHORTENED holds a `gap` span first, so the
+ * element reads `../Design/` and the row reads `../Design/Decisions`. Anything
+ * auditing what we put in here has to expect all three.
  *
  * Not in `CLS` above for the same reason as `CLS_DROP_LINE`: those are row
  * classes the adapter applies and clears per row, and this one identifies an

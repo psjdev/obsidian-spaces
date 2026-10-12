@@ -141,8 +141,10 @@ interface SpacesSettings {
    * Whether a compacted run whose joined path does not FIT the pane draws as
    * `..` plus the last two folders instead.
    *
-   * ON by default, unlike every other boolean on this page, and the asymmetry
-   * is the point. Without it compaction is actively BROKEN on a deep vault:
+   * ON by default. So are `showSpaceHeader` and `autoAssignColor` on the same
+   * page, but each of those defaults on for the sake of its OWN feature; this
+   * one defaults on for the sake of a different setting, which is broken
+   * without it. Without it compaction is actively BROKEN on a deep vault:
    * measured at a 246px pane, the joined label of a seven folder run overflows
    * and `text-overflow: ellipsis` truncates from the right, leaving the tip's
    * element at a client width of zero. The one segment that identifies the row
@@ -321,11 +323,12 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     // Off by default. This changes how every curated space draws, and an
     // update must not rearrange an explorer the user was reading.
     compactFolderChains: false,
-    // ON, and the one Appearance boolean whose default is not about leaving an
-    // existing install alone. A deep run's joined label overflows a narrow
-    // pane and the ellipsis eats the TIP, so compaction without this is
-    // compaction that hides the one segment naming the row. Nothing changes
-    // for anyone until they turn `compactFolderChains` on themselves.
+    // ON, and the only Appearance default that is about another SETTING
+    // working rather than about this one's own feature. A deep run's joined
+    // label overflows a narrow pane and the ellipsis eats the TIP, so
+    // compaction without this is compaction that hides the one segment naming
+    // the row. It costs an existing install nothing either way: nothing
+    // changes for anyone until they turn `compactFolderChains` on themselves.
     abbreviateCompactedPaths: true,
     // OFF by default: this rearranges a strip every existing install already
     // reads fluently, and doing that unasked on an update reads as a bug.

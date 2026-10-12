@@ -2,8 +2,10 @@
  * The setting that shortens a compacted path, mirroring
  * `tests/compactSetting.test.ts` for the toggle it sits beside.
  *
- * `abbreviateCompactedPaths` DEFAULTS TRUE, unlike every other boolean on the
- * Appearance page, and that asymmetry is the thing these tests pin. Without
+ * `abbreviateCompactedPaths` DEFAULTS TRUE, and reads an UNRECOGNISED value as
+ * true as well, which no other boolean in the schema does -- `showSpaceHeader`
+ * and `autoAssignColor` also default true, but both read a present non-boolean
+ * as false. That `!== false` shape is the thing these tests pin. Without
  * it, compaction is actively broken on a deep vault: measured at a 246px pane,
  * `Research/2026/Q4/Projects/Atlas/Design/Decisions` overflows and the
  * ellipsis eats the tip, so the one segment identifying the row is the first

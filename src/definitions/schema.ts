@@ -403,11 +403,13 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // `!== false`, and this is the ONE key on this list that is looser
         // than its neighbours on purpose.
         //
-        // Every boolean above answers "absent or unrecognised means OFF",
-        // because turning something on uninvited rearranges an explorer
-        // someone was reading. This one defaults ON, so the question inverts:
-        // absent or unrecognised must mean ON, and only a literal `false` --
-        // the value the toggle itself writes -- turns it off.
+        // Every other boolean on this list answers "unrecognised means OFF",
+        // whatever it does about an absent key: four above default ON when the
+        // key is missing (`revealVisitors`, `allowReordering`,
+        // `allowReorderingAll`, `showSpaceHeader`) and still read a present
+        // non-boolean as false. This one inverts that second half: absent AND
+        // unrecognised both mean ON, and only a literal `false` -- the value
+        // the toggle itself writes -- turns it off.
         //
         // Why it differs: without it, compaction is actively broken on a deep
         // vault. The joined label overflows a narrow pane, `text-overflow:

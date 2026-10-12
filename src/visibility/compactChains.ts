@@ -133,13 +133,20 @@ function hiddenSegmentsOf(run: Run, tree: ChainTree): string[] {
 /**
  * Every run in the space, by head, by tip, and by hidden segment.
  *
- * Built ONCE per visibility snapshot and read by four consumers: the sort
- * seam substitutes by head and blanks by hidden segment, the seam's permits
- * predicate admits by tip, and the explorer adapter labels by tip. One
- * producer and a shared answer is what keeps those four from disagreeing about
- * what is compacted — and blanking is the consumer that most needs the
- * agreement, because a folder blanked by a run nothing else believes in would
- * lose its rows outright.
+ * Built ONCE per visibility snapshot and read by four consumers: the sort seam
+ * substitutes by head and blanks by hidden segment, the explorer adapter
+ * labels by tip, the drag translation maps between display and vault space by
+ * both, and the re-sort memo keys on this object's identity. One producer and
+ * a shared answer is what keeps those four from disagreeing about what is
+ * compacted — and blanking is the consumer that most needs the agreement,
+ * because a folder blanked by a run nothing else believes in would lose its
+ * rows outright.
+ *
+ * NOT a consumer, though it is the obvious next guess: the seam's permits
+ * predicate. It admits an out-of-input tip from `admittedThisCall`, a flat
+ * per-call `Set` the substitution writes as it goes, and never reads this
+ * object at all. Worth keeping straight, because this index deliberately
+ * survives across sort calls and that record deliberately does not.
  */
 export function buildChainIndex(folders: readonly string[], tree: ChainTree): ChainIndex {
   const runByHead = new Map<string, Run>();

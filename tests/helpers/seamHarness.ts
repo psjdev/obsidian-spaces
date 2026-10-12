@@ -32,9 +32,10 @@ export function folderItem(path: string): FolderItemLike {
  * only construction work, and `adapter = new ExplorerAdapter()` is the only
  * one that builds anything.
  *
- * `sortedView` stays null, so `observeSortOrder()` sees a null sort order,
- * `sortGestureFrom` returns "none", and the transform's first statement is a
- * no-op — no timer is armed and nothing needs tearing down.
+ * `sortedView` stays null, so when the transform reaches `observeSortOrder()`
+ * — which is after the hidden-segment and hoist branches, not at the top — it
+ * sees a null sort order, `sortGestureFrom` returns "none", and that step does
+ * nothing: no timer is armed and nothing needs tearing down.
  */
 export function makeBarePlugin(): SpacesPlugin {
   const plugin = new SpacesPlugin(
@@ -74,6 +75,12 @@ export interface SeamHarnessOptions {
    * `substituteCompacted` leaves a run uncompacted when the view cannot
    * resolve its tip — and a branch no fixture can reach is a branch nothing
    * holds to anything.
+   *
+   * WHAT IT CAN MODEL is the seam side: a path the index knows about that this
+   * pane answers nothing for, which is what `compactParentPointers.test.ts`
+   * drives. WHAT IT CANNOT MODEL is that path with a RENDERED ROW, because the
+   * explorer's rows ARE those items' elements — no item, no row — so a probe
+   * combining the two measures a fixture artifact and not Obsidian.
    */
   unknownToView?: string[];
   /**
