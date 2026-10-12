@@ -2,6 +2,7 @@ import { includedPaths } from "../visibility/includedPaths";
 import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
 import type { VaultIndex } from "../visibility/VaultIndex";
 import type { MemberEntry } from "../types";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 
 /** The slice of the tag index this needs. `TagIndex` satisfies it structurally. */
 export interface PreviewTags {
@@ -26,8 +27,8 @@ export interface Preview {
  * The panel used to answer this itself, with a case-sensitive prefix scan that
  * consulted no ignore patterns and pruned no empty folders, so the number
  * under the picker could promise notes the space would never contain. This
- * expands tag members into the notes carrying them and de-duplicates on the
- * folded path, both as `resolveMembers` does,
+ * expands tag and property members into the notes they match and
+ * de-duplicates on the folded path, both as `resolveMembers` does,
  * and hands the result to `includedPaths`, which is the same expansion,
  * ignore and pruning a recompute runs.
  *
@@ -40,6 +41,10 @@ export interface Preview {
  * and a note carried by two members is in the set once, so the count agrees
  * with the rows.
  *
+ * A property member contributes nothing while `properties()` answers `null`
+ * (the metadata cache is cold). That is "not known yet", not "matches
+ * nothing", so a count taken then can be low and a later preview corrects it.
+ *
  * Curried: `main.ts` binds the vault, the compiled ignore and the tag index,
  * and the panel calls a function of its members alone.
  */
@@ -47,6 +52,10 @@ export function buildPreview(
   vault: VaultIndex,
   ignore: IgnoreMatcher,
   tags: PreviewTags,
+  // A function, called at most ONCE per preview and only when the members
+  // hold a property member: while the cache is cold each ask rebuilds, and a
+  // selection with no property member must not pay for it.
+  properties: () => PropertyIndex | null,
   excluded: ReadonlySet<string> = new Set()
 ): (members: readonly MemberEntry[]) => Preview {
   return (members) => {
@@ -62,7 +71,23 @@ export function buildPreview(
       seen.add(key);
       seeds.push(path);
     };
+    // Resolved on the first property member, then reused for the rest.
+    let index: PropertyIndex | null | undefined;
     for (const m of members) {
+      if (m.kind === "property") {
+        index ??= properties();
+        if (index === null) continue;
+        // A property match is dropped by an exclusion, as a tag match is.
+        const matched =
+          m.value === undefined
+            ? index.pathsWithKey(m.key)
+            : index.pathsMatching(m.key, m.value);
+        for (const p of matched) {
+          const key = canonicalPath(p);
+          if (!excluded.has(key)) add(p, key);
+        }
+        continue;
+      }
       if (m.kind === "tag") {
         // A tag match is dropped by an exclusion; a hand-picked path is not,
         // the same precedence `resolveMembers` gives them.
@@ -72,7 +97,6 @@ export function buildPreview(
         }
         continue;
       }
-      // A property member names no path, so it contributes no seed here.
       if (m.kind === "file" || m.kind === "folder") add(m.path, canonicalPath(m.path));
     }
     const { included } = includedPaths(vault, seeds, ignore, excluded);

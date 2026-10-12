@@ -42,7 +42,8 @@ async function mount(): Promise<HTMLElement> {
       apply: vi.fn(),
       livePaths: () => new Set<string>(),
     },
-    createMapTagIndex(new Map())
+    createMapTagIndex(new Map()),
+    () => ({ status: "unavailable" })
   );
   const switcher = new SwitcherView(
     defs,

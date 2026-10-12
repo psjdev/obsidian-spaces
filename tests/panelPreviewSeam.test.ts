@@ -18,7 +18,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["Projects/a.md", "file"],
       ["Projects/b.md", "file"],
     ]);
-    const p = buildPreview(vault, compileIgnore([]), tagIndex({}));
+    const p = buildPreview(vault, compileIgnore([]), tagIndex({}), () => null);
     expect(p([{ kind: "folder", path: "Projects" }]).notes).toBe(2);
   });
 
@@ -28,7 +28,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["Projects/a.md", "file"],
       ["Projects/secret.md", "file"],
     ]);
-    const p = buildPreview(vault, compileIgnore(["**/secret.md"]), tagIndex({}));
+    const p = buildPreview(vault, compileIgnore(["**/secret.md"]), tagIndex({}), () => null);
     expect(p([{ kind: "folder", path: "Projects" }]).notes).toBe(1);
   });
 
@@ -39,7 +39,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["docs", "folder"],
       ["docs/b.md", "file"],
     ]);
-    const p = buildPreview(vault, compileIgnore([]), tagIndex({}));
+    const p = buildPreview(vault, compileIgnore([]), tagIndex({}), () => null);
     expect(p([{ kind: "folder", path: "Docs" }]).notes).toBe(1);
   });
 
@@ -48,7 +48,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["Projects", "folder"],
       ["Projects/a.md", "file"],
     ]);
-    const p = buildPreview(vault, compileIgnore([]), tagIndex({ work: ["Projects/a.md"] }));
+    const p = buildPreview(vault, compileIgnore([]), tagIndex({ work: ["Projects/a.md"] }), () => null);
     const members: MemberEntry[] = [
       { kind: "folder", path: "Projects" },
       { kind: "tag", tag: "work" },
@@ -61,7 +61,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["Archive", "folder"],
       ["Archive/a.md", "file"],
     ]);
-    const p = buildPreview(vault, compileIgnore(["Archive/**"]), tagIndex({}));
+    const p = buildPreview(vault, compileIgnore(["Archive/**"]), tagIndex({}), () => null);
     expect(p([{ kind: "folder", path: "Archive" }]).notes).toBe(0);
   });
 
@@ -74,7 +74,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["Top.md", "file"],
     ]);
     const ignore = compileIgnore(["**/c.md"]);
-    const p = buildPreview(vault, ignore, tagIndex({}));
+    const p = buildPreview(vault, ignore, tagIndex({}), () => null);
     const got = p([{ kind: "folder", path: "Projects" }, { kind: "file", path: "Top.md" }]);
     const want = includedPaths(vault, ["Projects", "Top.md"], ignore, new Set()).included;
     expect([...got.paths].sort()).toEqual([...want].sort());
@@ -90,7 +90,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["docs", "folder"],
       ["docs/a.md", "file"],
     ]);
-    const p = buildPreview(vault, compileIgnore([]), tagIndex({ t: ["docs/a.md"] }));
+    const p = buildPreview(vault, compileIgnore([]), tagIndex({ t: ["docs/a.md"] }), () => null);
     expect(
       p([
         { kind: "file", path: "Docs/a.md" },
@@ -112,7 +112,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
       ["docs", "folder"],
       ["docs/b.md", "file"],
     ]);
-    const p = buildPreview(vault, compileIgnore([]), tagIndex({}));
+    const p = buildPreview(vault, compileIgnore([]), tagIndex({}), () => null);
     expect(
       p([
         { kind: "folder", path: "Docs" },

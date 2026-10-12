@@ -3,10 +3,11 @@ import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceController } from "../controller/SpaceController";
 import type { MemberEntry, SpaceDefinition } from "../types";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { TagIndex } from "../visibility/TagIndex";
 import { decorate as decorateMenu } from "./membershipMenu";
 import { removeMembers } from "./definitionWrites";
-import { heldBy, pathMembers, resolvedPaths } from "../definitions/membership";
+import { heldBy, holdsPropertyMember, pathMembers, resolvedPaths } from "../definitions/membership";
 
 interface MembershipContext {
   defs: DefinitionStore;
@@ -103,11 +104,16 @@ export function addOutcomeMessage(
 function splitBatch(
   files: readonly TAbstractFile[],
   space: SpaceDefinition | undefined,
-  tags: TagIndex
+  tags: TagIndex,
+  // A function, called only when the space holds a property member: asking
+  // can cost a vault walk, and most spaces hold none.
+  properties: () => PropertyIndex | null
 ): { added: TAbstractFile[]; already: TAbstractFile[] } {
   // Built once for the whole batch, never once per file: expanding a tag
   // member costs a pass over the vault's notes.
-  const resolved = space ? resolvedPaths(space, tags) : new Set<string>();
+  const resolved = space
+    ? resolvedPaths(space, tags, holdsPropertyMember(space) ? properties() : null)
+    : new Set<string>();
   const seen = new Set<string>();
   const added: TAbstractFile[] = [];
   const already: TAbstractFile[] = [];
@@ -128,7 +134,12 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
   // reason as in `addToSpace`: reading it back afterwards cannot tell a path
   // this call added from one that was already there.
   const current = ctx.defs.get().spaces.find((s) => s.id === space.id);
-  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex());
+  const { added, already } = splitBatch(
+    files,
+    current,
+    ctx.controller.tagIndex(),
+    () => ctx.controller.propertyIndex()
+  );
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === space.id);
@@ -172,7 +183,12 @@ export async function addToSpace(
   // afterwards cannot tell a path this call added from one that was already
   // there.
   const current = ctx.defs.get().spaces.find((s) => s.id === spaceId);
-  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex());
+  const { added, already } = splitBatch(
+    files,
+    current,
+    ctx.controller.tagIndex(),
+    () => ctx.controller.propertyIndex()
+  );
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === spaceId);
@@ -220,6 +236,10 @@ export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFil
     // `createLazyTagIndex`, so a vault whose spaces hold no tag member pays
     // nothing for opening a context menu.
     tags: (): TagIndex => ctx.controller.tagIndex(),
+    // Asked only when some space holds a property member, so a vault with
+    // none pays no metadata walk for opening a context menu.
+    properties: (): PropertyIndex | null =>
+      ctx.defs.get().spaces.some(holdsPropertyMember) ? ctx.controller.propertyIndex() : null,
   };
   decorateMenu(menu, decorateCtx, files, {
     addAll: (fs) => void addAll(ctx, fs),

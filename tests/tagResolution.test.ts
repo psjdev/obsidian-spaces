@@ -31,7 +31,7 @@ function space(members: MemberEntry[], exclude?: string[]): SpaceDefinition {
 function visible(s: SpaceDefinition): Set<string> {
   return buildVisibilitySnapshot(
     vault,
-    { ...s, members: [...resolveMembers(s, tags)] },
+    { ...s, members: [...resolveMembers(s, tags, null)] },
     new Set<string>(),
     compileIgnore([]),
     new Set((s.exclude ?? []).map(canonicalPath))
@@ -90,7 +90,8 @@ describe("resolveMembers", () => {
         { kind: "tag", tag: "project" },
         { kind: "file", path: "Work/a.md" },
       ]),
-      tags
+      tags,
+      null
     );
     expect(out.filter((m) => m.path === "Work/a.md")).toHaveLength(1);
   });
@@ -105,7 +106,8 @@ describe("resolveMembers", () => {
         { kind: "tag", tag: "project" },
         { kind: "file", path: "work/a.md" },
       ]),
-      tags
+      tags,
+      null
     );
     expect(out.filter((m) => canonicalPath(m.path) === canonicalPath("Work/a.md"))).toHaveLength(1);
   });
@@ -124,13 +126,14 @@ describe("resolveMembers", () => {
         { kind: "tag", tag: "project" },
         { kind: "tag", tag: "person" },
       ]),
-      counting
+      counting,
+      null
     );
     expect(calls).toBe(2);
   });
 
   it("passes a space with no tag members through unchanged", () => {
     const s = space([{ kind: "folder", path: "Work" }]);
-    expect(resolveMembers(s, tags)).toEqual([{ kind: "folder", path: "Work" }]);
+    expect(resolveMembers(s, tags, null)).toEqual([{ kind: "folder", path: "Work" }]);
   });
 });

@@ -17,6 +17,7 @@
 import type { SpaceDefinition } from "../types";
 import { heldBy, resolvedPaths } from "../definitions/membership";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { isFolderSpace } from "../visibility/folderSpace";
 
 interface SpaceAddTarget {
@@ -44,13 +45,17 @@ interface SpaceAddTarget {
 export function spaceAddTargets(
   spaces: readonly SpaceDefinition[],
   paths: readonly string[],
-  tags: TagIndex
+  tags: TagIndex,
+  // Read once by the caller and shared by every space here, never asked per
+  // space: while the cache is cold each ask rebuilds. `null` means not ready,
+  // and a property member then holds nothing.
+  properties: PropertyIndex | null
 ): SpaceAddTarget[] {
   // Folder spaces are not targets: adding a path from elsewhere would mean
   // moving the file, and a space operation must never mutate the vault. A
   // control that cannot be honoured is worse than an absent one.
   return spaces.filter((s) => !isFolderSpace(s)).map((space) => {
-    const resolved = resolvedPaths(space, tags);
+    const resolved = resolvedPaths(space, tags, properties);
     const addablePaths: string[] = [];
     let sharedFolder: string | null = null;
     for (const path of paths) {

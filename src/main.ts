@@ -25,6 +25,11 @@ import { nativeKnownTags } from "./ui/nativeTagCounts";
 import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
 import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
+import {
+  createLazyPropertySnapshot,
+  createObsidianPropertySnapshot,
+} from "./visibility/ObsidianPropertyIndex";
+import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
 import { repairOnRename, repairRenameIn } from "./lifecycle/pathRepair";
@@ -286,6 +291,11 @@ export default class SpacesPlugin extends Plugin {
    * later misses it. See the registration for the measurement.
    */
   private metadataResolved = false;
+  /**
+   * Stamps each property snapshot so one can be told from the one it replaced.
+   * Only ever incremented, and only by `newPropertySnapshot`.
+   */
+  private propertyGeneration = 0;
 
   /**
    * Takes `fileManager.getNewFileParent` back off. Null until `start()`
@@ -675,6 +685,7 @@ export default class SpacesPlugin extends Plugin {
         metadataReady: () => this.metadataResolved,
       },
       createLazyTagIndex(() => createObsidianTagIndex(this.app)),
+      this.newPropertySnapshot(),
       {
         transition: (from, to) =>
           this.runMaskedTransition(from, to),
@@ -1435,9 +1446,21 @@ export default class SpacesPlugin extends Plugin {
       // because it can only happen AFTER the line above, it is never older
       // than the vault index it is read against.
       this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
+      // Replaced with the tag index and for the same reason, and lazy for the
+      // same reason: the walk happens when a property member asks.
+      this.controller.setPropertySnapshot(this.newPropertySnapshot());
       this.controller.refresh();
     },
   });
+
+  /**
+   * A fresh LAZY property snapshot: nothing walks the vault until a property
+   * member asks, and a ready answer is kept until the next replacement.
+   */
+  private newPropertySnapshot(): () => PropertySnapshot {
+    const generation = ++this.propertyGeneration;
+    return createLazyPropertySnapshot(() => createObsidianPropertySnapshot(this.app, generation));
+  }
 
   private async onVaultChange(fn: () => Promise<unknown>): Promise<void> {
     await this.vaultChanges.submit(fn);
@@ -1482,6 +1505,7 @@ export default class SpacesPlugin extends Plugin {
     // reads `metadataResolved`, which the listener has already set.
     if ((this.controller as SpaceController | undefined) === undefined) return;
     this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
+    this.controller.setPropertySnapshot(this.newPropertySnapshot());
     if (!watchesMetadata(this.controller.activeSpace())) return;
     // No membership work to run first, only the coalesced tail. Submitting an
     // empty unit of work is how this reuses the existing window and burst
@@ -1822,6 +1846,8 @@ export default class SpacesPlugin extends Plugin {
       // for a while would otherwise count against the vault as it was when it
       // opened.
       tagIndex: () => this.controller.tagIndex(),
+      // The property snapshot, reached rather than built, as `tagIndex` is.
+      properties: () => this.controller.propertySnapshot(),
       // What the space would hold, from the engine rather than from the panel.
       // Rebuilt per call so the vault, the ignore rules and the tag index are
       // all read fresh; the panel can stay open across any of them changing.
@@ -1831,7 +1857,9 @@ export default class SpacesPlugin extends Plugin {
           compileIgnore(this.defs.get().settings.globalIgnore),
           // Reached per lookup, so a selection with no tag member never asks
           // the controller for the index at all.
-          { pathsMatching: (tag) => this.controller.tagIndex().pathsMatching(tag) }
+          { pathsMatching: (tag) => this.controller.tagIndex().pathsMatching(tag) },
+          // Called at most once per preview, and only for a property member.
+          () => this.controller.propertyIndex()
         )(members),
       // The engine's own index, for resolving a stored member to a live path.
       vaultIndex: () => this.controller.vaultIndex(),

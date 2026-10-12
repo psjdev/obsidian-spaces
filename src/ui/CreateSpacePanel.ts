@@ -50,6 +50,7 @@ import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { PropertySnapshot } from "../visibility/PropertyIndex";
 import type { MemberEntry } from "../types";
 
 import {
@@ -138,6 +139,13 @@ export interface CreateSpacePanelDeps {
    * twice, once for this panel and once for the engine that already has one.
    */
   tagIndex: () => TagIndex;
+  /**
+   * The property snapshot, reached rather than built, for the reason
+   * `tagIndex` is. A function because a snapshot is replaced when a note's
+   * metadata changes. The panel does not read it yet; it is here so the
+   * preview and the picker take their property data from the same place.
+   */
+  properties: () => PropertySnapshot;
   /**
    * What the space would contain if created now, answered by the engine
    * rather than by this panel.

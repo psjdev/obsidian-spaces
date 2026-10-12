@@ -81,7 +81,8 @@ async function build(
     createLazyTagIndex(() => {
       builds++;
       return tagIndexOf(tags);
-    })
+    }),
+    () => ({ status: "unavailable" })
   );
   return {
     controller,
@@ -206,7 +207,8 @@ describe("a host that reports no readiness at all", () => {
       runtime,
       vault,
       { apply: vi.fn(), livePaths: () => new Set<string>() },
-      tagIndexOf(WARM)
+      tagIndexOf(WARM),
+      () => ({ status: "unavailable" })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     expect(controller.currentSnapshot()?.decisionFor("Recipes.md").visible).toBe(true);

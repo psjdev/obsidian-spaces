@@ -40,6 +40,8 @@ interface Harness {
   plugin: SpacesPlugin;
   /** Every tag index handed to the controller, newest last. */
   installed: TagIndex[];
+  /** Every property snapshot accessor handed to the controller, newest last. */
+  propertyInstalled: Array<() => unknown>;
   /** How many times a coalesced recompute was requested. */
   requested: () => number;
   fire: () => void;
@@ -58,10 +60,12 @@ function harness(active: SpaceDefinition | null): Harness {
     metadataCache: { getFileCache: () => null },
   };
   const installed: TagIndex[] = [];
+  const propertyInstalled: Array<() => unknown> = [];
   let requested = 0;
   record.controller = {
     activeSpace: () => active,
     setTagIndex: (index: TagIndex) => void installed.push(index),
+    setPropertySnapshot: (get: () => unknown) => void propertyInstalled.push(get),
   };
   // Shadows the private method: the coalescer itself is `eventCoalescer.ts`'s
   // business and is tested there.
@@ -71,12 +75,26 @@ function harness(active: SpaceDefinition | null): Harness {
   return {
     plugin,
     installed,
+    propertyInstalled,
     requested: () => requested,
     fire: () => (plugin as unknown as { onMetadataEvent(): void }).onMetadataEvent(),
   };
 }
 
 describe("a metadata-cache event", () => {
+  it("replaces the property snapshot as well, whichever space is active", () => {
+    // The same staleness the tag index had: a property member would otherwise
+    // go on answering from the frontmatter as it was when the snapshot was
+    // first read.
+    for (const active of [null, FOLDER_SPACE, PATH_SPACE, TAG_SPACE]) {
+      const h = harness(active);
+      h.fire();
+      h.fire();
+      expect(h.propertyInstalled.length).toBe(2);
+      expect(h.propertyInstalled[0]).not.toBe(h.propertyInstalled[1]);
+    }
+  });
+
   it("replaces the tag index while All is active", () => {
     // The reported repro: tag a note with All active, switch to the tag
     // space, and the note is missing. Nothing else in the session replaces

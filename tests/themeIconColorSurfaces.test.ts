@@ -53,7 +53,8 @@ async function harness(useThemeIconColor: boolean) {
       apply: vi.fn(),
       livePaths: () => new Set<string>(),
     },
-    createMapTagIndex(new Map())
+    createMapTagIndex(new Map()),
+    () => ({ status: "unavailable" })
   );
   return { defs, runtime, controller };
 }

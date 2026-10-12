@@ -7,9 +7,10 @@ import { compileIgnore, canonicalPath } from "../visibility/glob";
 import { RevealedSet } from "../visibility/RevealedSet";
 import { sameSelection } from "../order/sortOverride";
 import { hasRoot, rootOf } from "../visibility/folderSpace";
-import { watchesMetadata } from "../definitions/membership";
+import { holdsPropertyMember, watchesMetadata } from "../definitions/membership";
 import { resolveMembers } from "./resolveMembers";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { PropertyIndex, PropertySnapshot } from "../visibility/PropertyIndex";
 import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from "../types";
 
 interface ControllerHost {
@@ -89,6 +90,7 @@ export class SpaceController {
     private vault: VaultIndex,
     private host: ControllerHost,
     private tags: TagIndex,
+    private properties: () => PropertySnapshot,
     private layout?: LayoutHooks
   ) {}
 
@@ -106,6 +108,32 @@ export class SpaceController {
    */
   setTagIndex(index: TagIndex): void {
     this.tags = index;
+  }
+
+  /**
+   * The property snapshot accessor is replaced wholesale when a note's
+   * metadata changes, for the reason the tag index is. It is a FUNCTION so a
+   * lazy one costs nothing until a property member asks.
+   */
+  setPropertySnapshot(get: () => PropertySnapshot): void {
+    this.properties = get;
+  }
+
+  /** The CURRENT property snapshot, asked of the accessor on each call. */
+  propertySnapshot(): PropertySnapshot {
+    return this.properties();
+  }
+
+  /**
+   * The property index, or `null` while the metadata cache is cold.
+   *
+   * For a membership question asked outside a recompute. Each call asks the
+   * accessor, which rebuilds on every ask while cold, so a caller that needs
+   * it for several spaces reads it ONCE and passes it down.
+   */
+  propertyIndex(): PropertyIndex | null {
+    const snapshot = this.properties();
+    return snapshot.status === "ready" ? snapshot.index : null;
   }
 
   /**
@@ -329,10 +357,40 @@ export class SpaceController {
    * Storage is left alone — only what is handed to the engine changes.
    */
   private membersForSnapshot(space: SpaceDefinition): readonly PathMember[] {
-    if (!hasRoot(space)) return resolveMembers(space, this.tags);
-    const root = rootOf(space);
-    return root === null ? [] : [{ path: root, kind: "folder" }];
+    if (hasRoot(space)) {
+      const root = rootOf(space);
+      return root === null ? [] : [{ path: root, kind: "folder" }];
+    }
+    // Asked ONCE per resolve, and only for a space that holds a property
+    // member: while the cache is cold the accessor rebuilds on every ask, and
+    // a space with no property member must not pay a vault walk for it.
+    const holdsProperty = holdsPropertyMember(space);
+    const index = holdsProperty ? this.propertyIndex() : null;
+    const definition = holdsProperty ? JSON.stringify([space.members, space.exclude]) : "";
+    if (holdsProperty && index === null) {
+      // UNAVAILABLE IS NOT EMPTY. Publishing what a null index resolves to
+      // would blank a property space's rows on every cold start. Keep the
+      // previous resolve of THIS definition when there is one; an edited
+      // definition (or a first start) has none, so its property members
+      // contribute nothing until readiness arrives and a recompute runs.
+      const prev = this.lastResolved;
+      if (prev !== null && prev.id === space.id && prev.definition === definition) {
+        return prev.members;
+      }
+      return resolveMembers(space, this.tags, null);
+    }
+    const members = resolveMembers(space, this.tags, index);
+    if (holdsProperty) this.lastResolved = { id: space.id, definition, members };
+    return members;
   }
+
+  /**
+   * The last resolve of a property space made against a READY snapshot, kept
+   * only so an unavailable snapshot does not blank it. One entry, because only
+   * the active space is ever resolved. Never written by a resolve that ran
+   * without an index.
+   */
+  private lastResolved: { id: string; definition: string; members: PathMember[] } | null = null;
 
   private recompute(
     opts: { pruneClosed: boolean },

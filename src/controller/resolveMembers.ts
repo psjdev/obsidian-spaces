@@ -1,10 +1,12 @@
 import type { PathMember, SpaceDefinition } from "../types";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { TagIndex } from "../visibility/TagIndex";
 import { canonicalPath } from "../visibility/glob";
 
 /**
  * The member list the visibility engine is handed, with every tag member
- * expanded into the notes carrying that tag.
+ * expanded into the notes carrying that tag and every property member into
+ * the notes whose frontmatter matches it.
  *
  * The engine never learns what a tag is. It receives file members, which it
  * already knows how to seed, so scaffolding, pruning, ignore precedence and
@@ -12,10 +14,10 @@ import { canonicalPath } from "../visibility/glob";
  * `membersForSnapshot` already plays for a folder space, which presents
  * itself as a space whose single member is its root.
  *
- * Exclusions are applied HERE for tag matches rather than left to the engine.
- * An expanded note arrives as a seed, and seeds bypass the engine's ignore
- * step by design, so an excluded tag match that reached the engine would be
- * visible. A hand-added member is a seed for the same reason and survives its
+ * Exclusions are applied HERE for tag and property matches rather than left
+ * to the engine. An expanded note arrives as a seed, and seeds bypass the
+ * engine's ignore step by design, so an excluded match that reached the
+ * engine would be visible. A hand-added member is a seed for the same reason and survives its
  * own exclusion, which is the intended precedence.
  *
  * ## The per-path tail is the whole cost
@@ -39,7 +41,12 @@ import { canonicalPath } from "../visibility/glob";
  */
 export function resolveMembers(
   space: SpaceDefinition,
-  tags: TagIndex
+  tags: TagIndex,
+  // `null` when no property snapshot is ready. A property member then
+  // contributes nothing. That is "not known yet", not "matches nothing", so a
+  // caller that publishes the result as a space's membership must keep its
+  // previous result instead; this function cannot tell the two apart.
+  properties: PropertyIndex | null
 ): PathMember[] {
   // Null rather than an empty Set. The usual space has no exclusions at all,
   // and a null test per matched path is cheaper than a hash lookup that can
@@ -63,23 +70,40 @@ export function resolveMembers(
   };
 
   for (const m of space.members) {
-    if (m.kind === "file" || m.kind === "folder") {
-      // A hand picked member is never dropped by an exclusion. Removing one
-      // removes the member.
-      add(m, canonicalPath(m.path));
-      continue;
-    }
-    if (m.kind === "tag") {
-      for (const path of tags.pathsMatching(m.tag)) {
-        const key = canonicalPath(path);
-        if (excluded !== null && excluded.has(key)) continue;
-        add({ kind: "file", path }, key);
+    switch (m.kind) {
+      case "file":
+      case "folder":
+        // A hand picked member is never dropped by an exclusion. Removing one
+        // removes the member.
+        add(m, canonicalPath(m.path));
+        break;
+      case "tag":
+        for (const path of tags.pathsMatching(m.tag)) {
+          const key = canonicalPath(path);
+          if (excluded !== null && excluded.has(key)) continue;
+          add({ kind: "file", path }, key);
+        }
+        break;
+      case "property": {
+        if (properties === null) break;
+        const matched =
+          m.value === undefined
+            ? properties.pathsWithKey(m.key)
+            : properties.pathsMatching(m.key, m.value);
+        for (const path of matched) {
+          const key = canonicalPath(path);
+          if (excluded !== null && excluded.has(key)) continue;
+          add({ kind: "file", path }, key);
+        }
+        break;
       }
-      continue;
+      default: {
+        // A member kind with no case above. Adding one to `MemberEntry` fails
+        // HERE, at compile time, instead of silently contributing nothing.
+        const unreached: never = m;
+        return unreached;
+      }
     }
-    // A property member names no path and is not expanded yet (a later task
-    // adds that branch), so it contributes nothing here. Falling through
-    // rather than treating it as a path is the point.
   }
   return out;
 }

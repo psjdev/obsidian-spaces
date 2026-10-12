@@ -59,7 +59,7 @@ const TAGGED: MemberEntry[] = [{ kind: "tag", tag: "project" }];
 describe("resolveMembers, per matched path", () => {
   it("canonicalises a matched path once, not twice", () => {
     spy.mockClear();
-    const out = resolveMembers(space(TAGGED), tags);
+    const out = resolveMembers(space(TAGGED), tags, null);
     expect(out).toHaveLength(3);
     expect(spy).toHaveBeenCalledTimes(3);
   });
@@ -67,7 +67,7 @@ describe("resolveMembers, per matched path", () => {
   it("canonicalises it once when the space does have exclusions", () => {
     spy.mockClear();
     // Three matches plus the one stored exclusion the Set is built from.
-    const out = resolveMembers(space(TAGGED, ["Work/b.md"]), tags);
+    const out = resolveMembers(space(TAGGED, ["Work/b.md"]), tags, null);
     expect(out.map((m) => m.path)).toEqual(["Work/a.md", "Work/c.md"]);
     expect(spy).toHaveBeenCalledTimes(4);
   });
@@ -76,14 +76,14 @@ describe("resolveMembers, per matched path", () => {
     // `exclude: []` is stored by the schema's own normalisation and reaches
     // here as often as an absent one, so both must take the fast path.
     spy.mockClear();
-    resolveMembers(space(TAGGED, []), tags);
+    resolveMembers(space(TAGGED, []), tags, null);
     expect(spy).toHaveBeenCalledTimes(3);
   });
 });
 
 describe("resolveMembers, unchanged behaviour", () => {
   it("still drops an excluded match spelled in another case", () => {
-    const out = resolveMembers(space(TAGGED, ["work/B.MD"]), tags);
+    const out = resolveMembers(space(TAGGED, ["work/B.MD"]), tags, null);
     expect(out.map((m) => m.path)).toEqual(["Work/a.md", "Work/c.md"]);
   });
 
@@ -92,7 +92,8 @@ describe("resolveMembers, unchanged behaviour", () => {
     // the intended precedence and the fast path must not change it.
     const out = resolveMembers(
       space([{ kind: "file", path: "Loose.md" }], ["Loose.md"]),
-      tags
+      tags,
+      null
     );
     expect(out).toEqual([{ kind: "file", path: "Loose.md" }]);
   });
@@ -100,13 +101,14 @@ describe("resolveMembers, unchanged behaviour", () => {
   it("still seeds one member when a tag match and a hand-added file differ only in case", () => {
     const out = resolveMembers(
       space([...TAGGED, { kind: "file", path: "work/a.md" }]),
-      tags
+      tags,
+      null
     );
     expect(out).toHaveLength(3);
   });
 
   it("still returns a space with no tag members unchanged", () => {
     const s = space([{ kind: "folder", path: "Work" }]);
-    expect(resolveMembers(s, tags)).toEqual([{ kind: "folder", path: "Work" }]);
+    expect(resolveMembers(s, tags, null)).toEqual([{ kind: "folder", path: "Work" }]);
   });
 });
