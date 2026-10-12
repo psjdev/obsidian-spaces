@@ -176,13 +176,26 @@ export function coveringTagIn(
  * caller.
  */
 export function pathMembers(space: SpaceDefinition): PathMember[] {
-  // POSITIVE, not `kind !== "tag"`, and with no hand-written predicate: the
-  // compiler infers `m is file | folder` from this body and checks it. With the
-  // declared return type, a future member kind that CARRIES A PATH widens
-  // `PathMember`, so the filtered result stops matching and this stops
-  // compiling. A kind with no path, like `property`, is correctly left out and
-  // is not an error.
-  return space.members.filter((m) => m.kind === "file" || m.kind === "folder");
+  return space.members.filter(isPathMember);
+}
+
+function isPathMember(m: MemberEntry): m is PathMember {
+  switch (m.kind) {
+    case "file":
+    case "folder":
+      return true;
+    case "tag":
+    case "property":
+      return false;
+    default: {
+      // A member kind with no case above. Adding one to `MemberEntry` fails
+      // HERE, at compile time, instead of reaching the callers of
+      // `pathMembers` as a member with no `path`. The `never` is what checks
+      // the list; the predicate on its own would be taken on trust.
+      const unreached: never = m;
+      return unreached;
+    }
+  }
 }
 
 /**
