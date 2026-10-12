@@ -29,7 +29,7 @@ import {
   createLazyPropertySnapshot,
   createObsidianPropertySnapshot,
 } from "./visibility/ObsidianPropertyIndex";
-import { PropertyRefreshHub, RefreshFlushState, installThenNotify, metadataNotifyRoute, submitVaultWork } from "./visibility/PropertyRefreshHub";
+import { PropertyRefreshHub, RefreshFlushState, metadataNotifyRoute, runFlush, submitMetadataWork, submitVaultWork } from "./visibility/PropertyRefreshHub";
 import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
@@ -1438,57 +1438,37 @@ export default class SpacesPlugin extends Plugin {
       clear: (handle) => window.clearTimeout(handle),
       now: () => Date.now(),
     },
-    flush: () => {
-      // ONE coalescer, one timer, for vault events and metadata events alike.
-      // A note creation emits both, and two timers flushed twice and notified
-      // pickers twice. What this flush does depends on what the burst held.
-      const { full, rebuild } = this.flushState.take();
-      if (!full) {
-        // Metadata only, with no active space watching it: nothing in the
-        // vault moved, so no re-index, no re-sort, and `onMetadataEvent` has
-        // already installed the snapshot. Pickers are the only audience.
-        this.finishPropertySnapshot(false);
-        return;
-      }
-      // The vault index is a snapshot; replace it in place so every captured
-      // controller reference stays valid. Built at flush time, so it is the
-      // burst's end state rather than any intermediate one.
-      this.controller.setVaultIndex(createObsidianVaultIndex(this.app.vault));
-      // Replaced in the same breath, and LAZY. A recompute reading a fresh
-      // vault against a stale tag index would show a note the vault has and
-      // the tags do not, so the index must not survive this flush — but
-      // building it here unconditionally charged every user an O(vault)
-      // metadata walk per burst of vault events, tags or no tags. The wrapper
-      // keeps the first half and drops the second: the walk happens when
-      // `resolveMembers` expands a tag member and at no other time, and
-      // because it can only happen AFTER the line above, it is never older
-      // than the vault index it is read against.
-      this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
-      // Replaced with the tag index and for the same reason, and lazy for the
-      // same reason: the walk happens when a property member asks. Skipped
-      // (`rebuild` false) only when one was installed after the burst's last
-      // vault event, which `RefreshFlushState` explains.
-      //
-      // Pickers are told here, AFTER the replacement and BEFORE
-      // `controller.refresh()`: the snapshot is already in place, so a throw
-      // from the refresh must not leave them stale for the burst. `notify`
-      // isolates watcher errors itself.
-      this.finishPropertySnapshot(rebuild);
-      this.controller.refresh();
-    },
+    // ONE coalescer, one timer, for vault events and metadata events alike.
+    // A note creation emits both, and two timers flushed twice and notified
+    // pickers twice. What the flush does depends on what the burst held, and
+    // `runFlush` decides that, so the work-budget tests run the same code.
+    //
+    // The vault index replacement is O(vault) and is only for a burst that held
+    // a VAULT event. A metadata burst recomputes and notifies and does not
+    // re-index the tree: a note's metadata is not vault structure.
+    flush: () =>
+      runFlush(this.flushState, {
+        // A snapshot, replaced in place so every captured controller reference
+        // stays valid. Built at flush time, so it is the burst's end state.
+        replaceVaultIndex: () =>
+          this.controller.setVaultIndex(createObsidianVaultIndex(this.app.vault)),
+        // LAZY: the metadata walk happens when `resolveMembers` expands a tag
+        // member and at no other time. Replaced after the vault index, so it is
+        // never older than the vault index it is read against.
+        replaceTagIndex: () =>
+          this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app))),
+        // LAZY for the same reason: the walk happens when a property member
+        // asks. Skipped only when one was installed after the burst's last
+        // vault event, which `RefreshFlushState` explains.
+        installPropertySnapshot: () =>
+          this.controller.setPropertySnapshot(this.newPropertySnapshot()),
+        notifyPickers: () => this.propertyRefresh.notify(),
+        refresh: () => this.controller.refresh(),
+      }),
   });
 
   /** What the coming flush has to do. See `RefreshFlushState`. */
   private readonly flushState = new RefreshFlushState();
-
-  private finishPropertySnapshot(rebuild: boolean): void {
-    installThenNotify(
-      () => {
-        if (rebuild) this.controller.setPropertySnapshot(this.newPropertySnapshot());
-      },
-      () => this.propertyRefresh.notify()
-    );
-  }
 
   /**
    * An open property picker is a metadata consumer in its own right.
@@ -1574,10 +1554,11 @@ export default class SpacesPlugin extends Plugin {
     this.controller.setPropertySnapshot(this.newPropertySnapshot());
     // Pickers are NOT told here, and that is deliberate. Every route below is
     // coalesced, and exactly one of them notifies: when the active space
-    // watches metadata the vault flush rebuilds the snapshot and notifies, so
-    // a direct call here would walk the vault twice per event and discard the
-    // first walk; when it does not, a picker-only flush does it, but only
-    // while a picker is open, through the same coalescer. Do not add a direct `notify()` call here.
+    // watches metadata the shared flush recomputes and notifies, so a direct
+    // call here would walk the vault twice per event and discard the first
+    // walk; when it does not, a picker-only flush does it, but only while a
+    // picker is open, through the same coalescer. Do not add a direct
+    // `notify()` call here.
     const route = metadataNotifyRoute(
       watchesMetadata(this.controller.activeSpace()),
       this.propertyRefresh.size
@@ -1588,15 +1569,15 @@ export default class SpacesPlugin extends Plugin {
       // metadata events gets the notify-only flush.
       void this.vaultChanges.submit(async () => undefined);
     } else {
-      // No membership work to run first, only the coalesced tail. Submitting
-      // an empty unit of work is how this reuses the existing window and burst
-      // ceiling rather than adding a second timer. `onVaultChange` clears
-      // `fresh` synchronously, and the install below sets it again straight
-      // after, which is the order that lets the flush skip a second rebuild.
-      void this.onVaultChange(async () => undefined);
+      // A RECOMPUTE, not a vault event: the flush refreshes the active space
+      // and does not re-index the vault tree, which is O(vault) and which a
+      // note's metadata cannot have changed. Submitting through the shared
+      // coalescer reuses its window and burst ceiling rather than adding a
+      // second timer.
+      void submitMetadataWork((work) => this.vaultChanges.submit(work), this.flushState);
     }
-    // AFTER the submit, which for a vault-flush route clears it: the snapshot
-    // installed above postdates every vault event this burst has seen so far.
+    // The snapshot installed above postdates every vault event this burst has
+    // seen so far, so a full flush need not install another.
     this.flushState.noteSnapshotInstalled();
   }
 

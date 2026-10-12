@@ -65,10 +65,11 @@ export function installThenNotify(install: () => void, notify: () => void): void
 /**
  * Which coalescer a metadata event's picker notification rides.
  *
- * - "vault-flush": the active space watches metadata, so the vault flush is
- *   already scheduled, rebuilds the snapshot and notifies. Notifying here too
- *   would walk the vault twice per event, the second walk discarding the
- *   first's snapshot.
+ * - "vault-flush": the active space watches metadata, so the shared flush must
+ *   recompute it, and it notifies too. Notifying here as well would walk the
+ *   vault twice per event, the second walk discarding the first's snapshot.
+ *   Despite the name this does not re-index the vault TREE: a metadata event
+ *   queues a recompute (`submitMetadataWork`), not vault work.
  * - "picker-flush": nothing else will flush, but a picker is open, so a
  *   notify-only flush (no re-index, no re-sort; the snapshot is already
  *   installed by the event handler) is scheduled on the shared coalescer
@@ -116,6 +117,7 @@ export function metadataNotifyRoute(spaceWatchesMetadata: boolean, pickers: numb
  */
 export class RefreshFlushState {
   private full = false;
+  private recompute = false;
   private fresh = false;
 
   /** A vault event has arrived. Clears `fresh` only; see `markFull`. */
@@ -128,14 +130,37 @@ export class RefreshFlushState {
     this.full = true;
   }
 
+  /**
+   * The active space's contents may have changed, but the vault did not: a
+   * note's metadata changed. The flush recomputes and notifies and does NOT
+   * re-index the vault tree. Call from inside queued work, for the reason
+   * `markFull` gives.
+   */
+  markRecompute(): void {
+    this.recompute = true;
+  }
+
   noteSnapshotInstalled(): void {
     this.fresh = true;
   }
 
-  /** Reads and resets. `rebuild` is only ever true on a full flush. */
-  take(): { full: boolean; rebuild: boolean } {
-    const result = { full: this.full, rebuild: this.full && !this.fresh };
+  /**
+   * Reads and resets.
+   *
+   * - `full`: a vault event happened, so the vault tree is stale.
+   * - `recompute`: the active space must be recomputed. True whenever `full`
+   *   is, and also for a metadata burst in a space that watches metadata.
+   * - `rebuild`: install a second property snapshot. Only ever true on a full
+   *   flush; a metadata event installs its own.
+   */
+  take(): { full: boolean; recompute: boolean; rebuild: boolean } {
+    const result = {
+      full: this.full,
+      recompute: this.full || this.recompute,
+      rebuild: this.full && !this.fresh,
+    };
     this.full = false;
+    this.recompute = false;
     this.fresh = false;
     return result;
   }
@@ -161,4 +186,67 @@ export function submitVaultWork(
       state.markFull();
     }
   });
+}
+
+/**
+ * Queues a metadata event's recompute on the shared coalescer. The metadata
+ * counterpart of `submitVaultWork`, and the reason a metadata event no longer
+ * walks the vault TREE: it marks the burst for a recompute, not for a
+ * re-index. `markRecompute` runs inside the queued work for the reason
+ * `submitVaultWork` marks `full` there.
+ */
+export function submitMetadataWork(
+  submit: (work: () => Promise<unknown>) => Promise<void>,
+  state: RefreshFlushState
+): Promise<void> {
+  return submit(async () => {
+    state.markRecompute();
+  });
+}
+
+/** What a flush can do to the world. Each is one decision `runFlush` makes. */
+export interface FlushActions {
+  /** Replace the vault tree index. O(vault); only when the tree changed. */
+  replaceVaultIndex(): void;
+  /** Replace the lazy tag index. One closure until something asks. */
+  replaceTagIndex(): void;
+  /** Install a fresh lazy property snapshot. One closure until something asks. */
+  installPropertySnapshot(): void;
+  /** Tell open pickers. */
+  notifyPickers(): void;
+  /** Recompute the active space and re-apply it. */
+  refresh(): void;
+}
+
+/**
+ * What the coalescer's flush does, decided in one place so main.ts and the
+ * work-budget tests run the same code.
+ *
+ * - A VAULT burst re-indexes the tree, replaces the tag index and a property
+ *   snapshot not already installed after it, tells pickers, recomputes.
+ * - A METADATA burst in a space that watches metadata only tells pickers and
+ *   recomputes. The tree did not move, and the tag index and snapshot were
+ *   replaced by the event itself.
+ * - A METADATA burst with nobody watching only tells pickers.
+ *
+ * Pickers are told AFTER the install and BEFORE the refresh: a throw from the
+ * refresh must not leave them stale for the burst.
+ */
+export function runFlush(state: RefreshFlushState, actions: FlushActions): void {
+  const { full, recompute, rebuild } = state.take();
+  if (full) {
+    // The vault index is a snapshot; built at flush time so it is the burst's
+    // end state rather than any intermediate one. The tag index goes with it:
+    // a fresh vault read against a stale tag index shows a note the vault has
+    // and the tags do not (see `TagIndex.ts`).
+    actions.replaceVaultIndex();
+    actions.replaceTagIndex();
+  }
+  installThenNotify(
+    () => {
+      if (rebuild) actions.installPropertySnapshot();
+    },
+    () => actions.notifyPickers()
+  );
+  if (recompute) actions.refresh();
 }

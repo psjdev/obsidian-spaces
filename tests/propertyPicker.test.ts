@@ -4,6 +4,7 @@ import {
   PropertyRefreshHub,
   RefreshFlushState,
   installThenNotify,
+  submitMetadataWork,
   submitVaultWork,
   metadataNotifyRoute,
 } from "../src/visibility/PropertyRefreshHub";
@@ -76,7 +77,7 @@ const fakePlugin = (opts: { spaceWatchesMetadata?: boolean } = {}) => {
     const route = metadataNotifyRoute(opts.spaceWatchesMetadata ?? false, hub.size);
     if (route === "none") return;
     if (route === "picker-flush") void vaultChanges.submit(async () => undefined);
-    else vaultEvent();
+    else void submitMetadataWork((w) => vaultChanges.submit(w), state);
     state.noteSnapshotInstalled();
   };
   return {
@@ -254,23 +255,31 @@ describe("RefreshFlushState", () => {
     state.noteSnapshotInstalled();
     state.noteVaultEvent(); // arrived after the install: a picker may have read it
     state.markFull();
-    expect(state.take()).toEqual({ full: true, rebuild: true });
+    expect(state.take()).toEqual({ full: true, recompute: true, rebuild: true });
   });
   it("does not rebuild when the install postdates the vault event", () => {
     const state = new RefreshFlushState();
     state.noteVaultEvent();
     state.markFull();
     state.noteSnapshotInstalled();
-    expect(state.take()).toEqual({ full: true, rebuild: false });
+    expect(state.take()).toEqual({ full: true, recompute: true, rebuild: false });
+  });
+  it("recomputes without a re-index for a metadata burst, and never rebuilds", () => {
+    const state = new RefreshFlushState();
+    state.markRecompute();
+    state.noteSnapshotInstalled();
+    expect(state.take()).toEqual({ full: false, recompute: true, rebuild: false });
+    state.markRecompute();
+    expect(state.take()).toEqual({ full: false, recompute: true, rebuild: false });
   });
   it("is not full for a metadata-only burst, and resets after take", () => {
     const state = new RefreshFlushState();
     state.noteSnapshotInstalled();
-    expect(state.take()).toEqual({ full: false, rebuild: false });
+    expect(state.take()).toEqual({ full: false, recompute: false, rebuild: false });
     state.noteVaultEvent();
     state.markFull();
-    expect(state.take()).toEqual({ full: true, rebuild: true });
-    expect(state.take()).toEqual({ full: false, rebuild: false });
+    expect(state.take()).toEqual({ full: true, recompute: true, rebuild: true });
+    expect(state.take()).toEqual({ full: false, recompute: false, rebuild: false });
   });
 });
 

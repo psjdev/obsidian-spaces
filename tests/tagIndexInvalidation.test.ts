@@ -67,10 +67,14 @@ function harness(active: SpaceDefinition | null): Harness {
     setTagIndex: (index: TagIndex) => void installed.push(index),
     setPropertySnapshot: (get: () => unknown) => void propertyInstalled.push(get),
   };
-  // Shadows the private method: the coalescer itself is `eventCoalescer.ts`'s
-  // business and is tested there.
-  record.onVaultChange = async () => {
-    requested++;
+  // Shadows the shared coalescer: the coalescer itself is `eventCoalescer.ts`'s
+  // business and is tested there. A metadata event in a space that watches
+  // metadata submits its recompute here; it no longer goes through
+  // `onVaultChange`, which is for vault events.
+  record.vaultChanges = {
+    submit: async () => {
+      requested++;
+    },
   };
   return {
     plugin,
