@@ -66,8 +66,47 @@ export interface SeamHarnessOptions {
   snapshot?: null;
 }
 
+/**
+ * A tree item as this harness holds it: Obsidian's own shape plus the `parent`
+ * back-pointer, which is the field the C2 defect corrupts.
+ *
+ * `parent` is not part of `FolderItemLike` because the SEAM never reads it —
+ * only Obsidian's `sort()` writes it, through `vChildren.addChild`. It is
+ * modelled here and nowhere in `src/` for exactly that reason.
+ */
+export interface SeamItem extends FolderItemLike {
+  parent?: SeamItem | null;
+}
+
 export interface SeamHarness {
   filterAndOrderFolder(folderPath: string, items: FolderItemLike[]): FolderItemLike[];
+  /**
+   * Obsidian's `sort()`, modelled only as far as PARENT POINTERS.
+   *
+   * `sort()` walks every folder the view knows, calls `getSortedFolderItems`
+   * for each, and hands the result to `vChildren.addChild`, which REASSIGNS
+   * each returned child's `parent` to the folder being sorted. That last step
+   * is the whole mechanism behind C2: a compacted run's tip is returned twice
+   * in one pass — once for the head's parent, which is where it is drawn, and
+   * once for the run's own unrendered intermediate, which is where it is not —
+   * and the later write wins.
+   *
+   * Folders are visited in `fileItems` insertion order with the VAULT ROOT
+   * LAST. The ordering is not arbitrary: the C2 probe measured a real
+   * Obsidian 1.13.7 reporting the correct `(root)` parent for a TOP-LEVEL run
+   * and the wrong intermediate for a NESTED one, and a root sorted after the
+   * run's own folders is the only visit order that produces both. A harness
+   * that sorted the root first would make the top-level case look broken too,
+   * and would stop telling the two apart.
+   */
+  sortWholeTree(): void;
+  /**
+   * The path of the item `sortWholeTree` left as this path's `parent`, `null`
+   * for an item nothing adopted, or `undefined` for a path the view does not
+   * know. A top-level row reports `""`, the vault root item's own path; the
+   * vault root itself reports `null`, because nothing sorts its parent.
+   */
+  parentPointerOf(path: string): string | null | undefined;
   /** The plugin's own `livePermits`, so the subset guard can be asserted directly. */
   livePermits(folderPath: string, itemPath: string | undefined): boolean;
   /**
@@ -89,6 +128,12 @@ export interface SeamHarness {
   /** The plugin and its one explorer view, for tests that drive the re-sort memo. */
   plugin: SpacesPlugin;
   view: { sort(): void };
+}
+
+/** Every folder in the tree, vault root last. See `sortWholeTree` for why. */
+function folderVisitOrder(tree: Record<string, string[]>): string[] {
+  const folders = Object.keys(tree);
+  return [...folders.filter((p) => p !== ""), ...folders.filter((p) => p === "")];
 }
 
 function nameOf(path: string): string {
@@ -219,8 +264,8 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
   // arrives as input and the same row looked up as a substitution tip are the
   // same object — which is what makes the seam's identity-based subset rule
   // mean anything here: the head is in-input, the tip is not.
-  const fileItems: Record<string, FolderItemLike> = Object.fromEntries(
-    [...nodes.keys()].map((p) => [p, folderItem(p)])
+  const fileItems: Record<string, SeamItem> = Object.fromEntries(
+    [...nodes.keys()].map((p) => [p, folderItem(p) as SeamItem])
   );
   const rootNode = nodes.get("");
   // Enough of an explorer view for `probe()` to answer "ok", so
@@ -255,6 +300,27 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
     // passes it, which is the only way the production seam ever calls this.
     filterAndOrderFolder: (folderPath, items) =>
       plugin["filterAndOrderFolder"](folderPath, items, view),
+    sortWholeTree: () => {
+      // The production install, so every folder below goes through `patch()`'s
+      // override, `isAllowed` and the raw-items fallback — the same stack
+      // Obsidian's own `sort()` runs on.
+      plugin["ensureOrderingPatched"]();
+      for (const path of folderVisitOrder(tree)) {
+        const node = nodes.get(path);
+        if (!(node instanceof TFolder)) continue;
+        const folderItemForPath = fileItems[path];
+        // `vChildren.addChild(child)`: the adoption, which is the only part of
+        // Obsidian's sort this harness reproduces.
+        for (const kid of view.getSortedFolderItems(node)) {
+          (kid as SeamItem).parent = folderItemForPath ?? null;
+        }
+      }
+    },
+    parentPointerOf: (path) => {
+      const item = fileItems[path];
+      if (!item) return undefined;
+      return item.parent ? (item.parent.file?.path ?? null) : null;
+    },
     livePermits: (folderPath, itemPath) => plugin["livePermits"](folderPath, itemPath),
     sortRootThroughSeam: () => {
       // The production install, not a hand-rolled `patch()` call: it is what

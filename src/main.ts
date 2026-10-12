@@ -1975,6 +1975,40 @@ export default class SpacesPlugin extends Plugin {
     view?: object | null
   ) => FolderItemLike[] = (folderPath, items, view) => {
     this.admittedThisCall.clear();
+    // A COMPACTED RUN'S HIDDEN FOLDERS ANSWER WITH NOTHING. Before any other
+    // work, because every other branch here ends in rows, and a row from one
+    // of these folders is the C2 defect.
+    //
+    // Obsidian's `sort()` walks every folder in `view.fileItems`, calls this
+    // for each, and then lets `vChildren.addChild` REASSIGN each returned
+    // child's `parent` to the folder it just sorted. A run's head and
+    // intermediates have no row — the tip is drawn in the head's place, at the
+    // head's level — but they are still real folders holding the next segment,
+    // so answering honestly makes one of them adopt the tip after the folder
+    // the tip is actually drawn under has already adopted it. Measured in a
+    // real Obsidian: the row for `Nested/Chain/L1/L2/L3` drawn at depth 1
+    // under `Nested`, with `parent` reading `Nested/Chain/L1/L2`. Rendering
+    // survives that; keyboard navigation, which walks `parent`, does not. A
+    // top-level run escaped only because the vault root happens to be sorted
+    // last, so its adoption was the one that stuck.
+    //
+    // `[]` and not the filtered rows: the seam's `isAllowed` rejects anything
+    // that is not a subset of its input, and a rejection makes `patch` return
+    // the RAW items — the whole vault inside the space. An empty array is a
+    // subset of every input, so this exit is the one that cannot be refused.
+    //
+    // Nothing is lost by returning early here. These folders have no row, so
+    // nothing expands them and nothing asks them to be drawn; the only caller
+    // is the whole-tree walk above. Skipping `observeSortOrder()` for them
+    // costs nothing either, because that same walk reaches every other folder
+    // in the vault in the same pass and each one records it.
+    //
+    // The vault root cannot reach this: the visibility engine's ancestor
+    // closure stops before `""` (VisibilityEngine.ts, `while (d !== "")`), so
+    // the root is never scaffold and so never part of a run. Nor can a folder
+    // space's root: its own member is `exact-member`, and `runFrom` extends
+    // only through scaffold.
+    if (this.chainIndexNow?.hiddenSegments.has(folderPath)) return [];
     // Folder spaces. The vault root is answered with the
     // ROOT FOLDER's children, so the root itself never renders and its contents
     // sit at depth 0. Everything at or under the root is served by its own

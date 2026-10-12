@@ -34,6 +34,25 @@ export interface Run {
 export interface ChainIndex {
   runByHead: Map<string, Run>;
   runByTip: Map<string, Run>;
+  /**
+   * Every folder of a run that gets NO row: the head and each intermediate,
+   * down to but excluding the tip. Keyed by path, valued by the run it belongs
+   * to, so a caller holding a folder path asks one question.
+   *
+   * The sort seam needs this, and needs it as a membership test rather than as
+   * a walk. Obsidian's `sort()` asks every folder it knows for its children
+   * and then lets `vChildren.addChild` REASSIGN each answer's `parent`. A
+   * hidden segment is still a real folder holding the next segment, so left to
+   * answer honestly it adopts the tip a second time — while the tip's row is
+   * drawn at the HEAD's level, under a different folder entirely. Measured in
+   * a real Obsidian before this map existed: a row drawn at depth 1 under
+   * `Nested` whose `parent` was `Nested/Chain/L1/L2`, a path with no row at
+   * all.
+   *
+   * A one-folder "run" is not a run (`runFrom` refuses it), so this map is
+   * never empty for a run that is in it: `segments.length - 1` is at least 1.
+   */
+  hiddenSegments: Map<string, Run>;
 }
 
 /**
@@ -80,30 +99,73 @@ function isHead(path: string, tree: ChainTree): boolean {
 }
 
 /**
- * Every run in the space, by head and by tip.
+ * The run's unrendered folders: the head, and every intermediate above the
+ * tip.
  *
- * Built ONCE per visibility snapshot and read by three consumers: the sort
- * seam substitutes by head, the seam's permits predicate admits by tip, and
- * the explorer adapter labels by tip. One producer and a shared answer is what
- * keeps those three from disagreeing about what is compacted.
+ * Climbed from the TIP with `tree.parentOf` rather than built by joining the
+ * head's path with `segments`. `segments` are NAMES, so joining them would
+ * need a path separator, and this module has deliberately never known one —
+ * it asks the tree for `parentOf` and `nameOf` instead. Climbing also cannot
+ * drift from `runFrom`, which descended the same links.
+ *
+ * `segments.length - 1` steps, because `segments` names the head through the
+ * tip inclusive and the tip is the one folder of a run that DOES render.
+ */
+function hiddenSegmentsOf(run: Run, tree: ChainTree): string[] {
+  const out: string[] = [];
+  let current = run.tip;
+  for (let i = run.segments.length - 1; i > 0; i--) {
+    const parent = tree.parentOf(current);
+    // A tree that ran out of parents before the head is a tree that has moved
+    // under us. Stop rather than invent a path: a short list blanks fewer
+    // folders, which is the honest-tree direction this transform falls to
+    // everywhere.
+    if (parent === null) break;
+    out.push(parent);
+    current = parent;
+  }
+  return out;
+}
+
+/**
+ * Every run in the space, by head, by tip, and by hidden segment.
+ *
+ * Built ONCE per visibility snapshot and read by four consumers: the sort
+ * seam substitutes by head and blanks by hidden segment, the seam's permits
+ * predicate admits by tip, and the explorer adapter labels by tip. One
+ * producer and a shared answer is what keeps those four from disagreeing about
+ * what is compacted — and blanking is the consumer that most needs the
+ * agreement, because a folder blanked by a run nothing else believes in would
+ * lose its rows outright.
  */
 export function buildChainIndex(folders: readonly string[], tree: ChainTree): ChainIndex {
   const runByHead = new Map<string, Run>();
   const runByTip = new Map<string, Run>();
+  const hiddenSegments = new Map<string, Run>();
   for (const path of folders) {
     if (!isHead(path, tree)) continue;
     const run = runFrom(path, tree);
     if (!run) continue;
     runByHead.set(path, run);
     runByTip.set(run.tip, run);
+    for (const hidden of hiddenSegmentsOf(run, tree)) hiddenSegments.set(hidden, run);
   }
-  return { runByHead, runByTip };
+  return { runByHead, runByTip, hiddenSegments };
 }
 
 /**
  * Whether two indexes describe the same runs: the same heads, each with the
- * same tip and the same segments in the same order. `runByTip` is derived from
- * `runByHead`, so comparing heads covers both.
+ * same tip and the same segments in the same order, and the same set of hidden
+ * segments. `runByTip` is derived from `runByHead`, so comparing heads covers
+ * it.
+ *
+ * `hiddenSegments` is derived too, but from the runs AND the tree, so it is
+ * compared rather than inferred. A tie here keeps the PREVIOUS index object,
+ * and that object is what the sort seam blanks folders by: an index that
+ * agreed about every head while disagreeing about one hidden segment would
+ * leave that folder answering the sort honestly, which is the whole C2 defect
+ * back again. The keys are enough — each maps to the run its head already
+ * matched.
  *
  * Exists so the plugin can keep the PREVIOUS index object when a rebuild
  * produced nothing new. The re-sort memo compares the index by identity, and a
@@ -124,6 +186,10 @@ export function sameChainIndex(a: ChainIndex | null, b: ChainIndex | null): bool
     for (let i = 0; i < runA.segments.length; i++) {
       if (runA.segments[i] !== runB.segments[i]) return false;
     }
+  }
+  if (a.hiddenSegments.size !== b.hiddenSegments.size) return false;
+  for (const hidden of a.hiddenSegments.keys()) {
+    if (!b.hiddenSegments.has(hidden)) return false;
   }
   return true;
 }

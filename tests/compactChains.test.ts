@@ -125,6 +125,35 @@ describe("buildChainIndex", () => {
     const ix = buildChainIndex(["Archive"], t);
     expect(ix.runByHead.size).toBe(0);
     expect(ix.runByTip.size).toBe(0);
+    expect(ix.hiddenSegments.size).toBe(0);
+  });
+
+  it("indexes every folder of the run that gets no row, and not the tip", () => {
+    // The head and each intermediate. The tip is the one folder of a run that
+    // renders, so it must NOT be here: the sort seam blanks what this map
+    // holds, and blanking the tip would empty the compacted row.
+    const ix = buildChainIndex(["Work", "Work/Clients", "Work/Clients/Northwind", "Archive"], t);
+    expect([...ix.hiddenSegments.keys()].sort()).toEqual(["Work", "Work/Clients"]);
+    expect(ix.hiddenSegments.has("Work/Clients/Northwind")).toBe(false);
+    expect(ix.hiddenSegments.get("Work/Clients")?.tip).toBe("Work/Clients/Northwind");
+  });
+
+  it("indexes the hidden segments of a run that does not start at the top level", () => {
+    // The nested shape C2 was measured on: the head's parent is a visible
+    // folder of its own, so the tip's row is drawn under it and every folder
+    // between the two must stay silent.
+    const b = treeOf({
+      Nested: ["Nested/Chain", "Nested/note.md"],
+      "Nested/Chain": ["Nested/Chain/L1"],
+      "Nested/Chain/L1": ["Nested/Chain/L1/L2"],
+      "Nested/Chain/L1/L2": ["Nested/Chain/L1/L2/a.md"],
+    });
+    const ix = buildChainIndex(
+      ["Nested", "Nested/Chain", "Nested/Chain/L1", "Nested/Chain/L1/L2"],
+      b
+    );
+    expect([...ix.hiddenSegments.keys()].sort()).toEqual(["Nested/Chain", "Nested/Chain/L1"]);
+    expect(ix.hiddenSegments.has("Nested")).toBe(false);
   });
 
   it("indexes a run that starts under a branching parent", () => {
@@ -225,5 +254,17 @@ describe("sameChainIndex", () => {
     const a = indexOf({ A: ["A/B"], "A/B": ["A/B/x.md"] });
     const b = indexOf({ C: ["C/D"], "C/D": ["C/D/x.md"] });
     expect(sameChainIndex(a, b)).toBe(false);
+  });
+
+  it("differs when the hidden segments differ although every head matches", () => {
+    // A tie keeps the PREVIOUS index object, and that object is what the sort
+    // seam blanks folders by. Agreeing about the heads while disagreeing about
+    // which folders are silent would keep an index that lets one of them
+    // answer the sort, which is C2 again.
+    const a = buildChainIndex(["Work"], treeOf(WORK));
+    const b = buildChainIndex(["Work"], treeOf(WORK));
+    b.hiddenSegments.delete("Work/Clients");
+    expect(sameChainIndex(a, b)).toBe(false);
+    expect(sameChainIndex(b, a)).toBe(false);
   });
 });
