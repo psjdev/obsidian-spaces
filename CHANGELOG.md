@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.10.0 — 2026-10-12
+
+A folder that exists only to lead to one more folder no longer costs a row of
+its own. Turn on **Compact folder chains** under Settings → Appearance, and a
+chain of folders that leads to a single folder draws as one row named for the
+folders it replaces, such as `Work/Clients/Northwind`. The row is the deepest
+folder in the chain, so collapsing it, renaming it, its context menu and
+dropping a note onto it all act on that folder. Folders you added to a space
+yourself always keep their own row. The setting is vault-wide and starts off.
+
+A compacted row that is wider than the file explorer drops its leading
+folders, one at a time, until the rest fits, with two dots in their place.
+Hover the row to see the whole path. Widen the file explorer and the folders
+come back as soon as they fit, and the row keeps up while you drag the pane.
+Turn **Shorten long compacted paths** off to always draw the whole path.
+
+Dragging a compacted row takes the whole chain with it, and you can reorder
+it among the rows beside it. Dropping it inside another folder is refused,
+with a notice saying so.
+
 ## 0.9.0 — 2026-10-07
 
 Drag a note or folder from the file tree onto a space's icon to add it to that
