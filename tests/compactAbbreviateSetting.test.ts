@@ -1,6 +1,6 @@
 /**
- * The two settings that shorten a compacted path, mirroring
- * `tests/compactSetting.test.ts` for the toggle they sit beside.
+ * The setting that shortens a compacted path, mirroring
+ * `tests/compactSetting.test.ts` for the toggle it sits beside.
  *
  * `abbreviateCompactedPaths` DEFAULTS TRUE, unlike every other boolean on the
  * Appearance page, and that asymmetry is the thing these tests pin. Without

@@ -42,9 +42,10 @@ const INDEX = buildChainIndex(["Work"], COMPACT_TREE);
 const PLAIN_LABEL = { abbreviateWhenOverflowing: false };
 
 /**
- * A run long enough to be SHORTENED at the default threshold, so the `gap`
- * span is actually rendered and the stylesheet's reach for it can be asserted
- * against the real nesting rather than a hand-built span.
+ * A run of four folders, drawn SHORTENED below by telling the pass the row
+ * does not fit, so the `gap` span is actually rendered and the stylesheet's
+ * reach for it can be asserted against the real nesting rather than against a
+ * hand-built span.
  */
 const DEEP_CHAIN = ["A", "A/B", "A/B/C", "A/B/C/D"];
 const DEEP_TREE = {

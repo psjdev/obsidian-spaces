@@ -55,19 +55,6 @@ const OVERFLOW_SLACK = 1;
 export type OverflowProbe = (title: HTMLElement) => boolean;
 
 /**
- * The production probe: TWO comparisons, because the overflow this feature
- * exists for is not visible on one of them alone.
- *
- * Measured in a real vault at a 246px pane, with
- * `Research/2026/Q4/Projects/Atlas/Design/Decisions` compacted onto one row:
- * the row's own content was 263px of a 222px box, AND Obsidian's
- * `.tree-item-inner` -- the tip, the one segment naming the row -- was laid
- * out at a client width of ZERO. The row is a flex container, so a prefix
- * wide enough squeezes the tip to nothing without the row itself reporting any
- * overflow at all. Asking only the row would miss exactly the case that
- * matters most, since the squeezed element is the part the reader needs.
- */
-/**
  * What one label pass is told beyond the index and the policy.
  *
  * Both are optional and both default to production: an ordinary caller writes
@@ -87,6 +74,19 @@ export interface LabelPassOptions {
   overflows?: OverflowProbe;
 }
 
+/**
+ * The production probe: TWO comparisons, because the overflow this feature
+ * exists for is not visible on one of them alone.
+ *
+ * Measured in a real vault at a 246px pane, with
+ * `Research/2026/Q4/Projects/Atlas/Design/Decisions` compacted onto one row:
+ * the row's own content was 263px of a 222px box, AND Obsidian's
+ * `.tree-item-inner` -- the tip, the one segment naming the row -- was laid
+ * out at a client width of ZERO. The row is a flex container, so a prefix
+ * wide enough squeezes the tip to nothing without the row itself reporting any
+ * overflow at all. Asking only the row would miss exactly the case that
+ * matters most, since the squeezed element is the part the reader needs.
+ */
 export function rowOverflows(title: HTMLElement): boolean {
   if (title.scrollWidth > title.clientWidth + OVERFLOW_SLACK) return true;
   const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
@@ -176,6 +176,25 @@ export class ExplorerAdapter {
    * user had chosen, and pass the whole suite.
    */
   setChainIndex(index: ChainIndex | null, policy: CompactLabelPolicy): void {
+    // A CHANGE here re-opens the question a kept decision closed.
+    //
+    // `applyCompactLabels` recognises a row already drawn short by the text in
+    // its prefix, and that text is `../<parent>/` for EVERY run ending at this
+    // tip -- the last two segments are fixed by the path. So a run whose HEAD
+    // moved (a sibling appears under the head, and the run now starts a folder
+    // lower) draws the same short label and would never be measured again,
+    // even though its full label is now shorter and might fit. The index is
+    // the honest signal: `main.ts` keeps the previous OBJECT when the runs are
+    // unchanged (`sameChainIndex`), so a different one means they really did
+    // change, and this costs nothing on the `file-open` path that reaches here
+    // most often. Compared by identity for the index and by VALUE for the
+    // policy, because `compactLabelOptions()` builds a fresh object each call.
+    if (
+      index !== this.chainIndex ||
+      policy.abbreviateWhenOverflowing !== this.labelPolicy.abbreviateWhenOverflowing
+    ) {
+      this.remeasure = true;
+    }
     this.chainIndex = index;
     this.labelPolicy = policy;
   }
@@ -217,11 +236,28 @@ export class ExplorerAdapter {
       const observer = new MutationObserver(() => this.schedule());
       observer.observe(container, { childList: true, subtree: true });
       this.observers.push(observer);
-      // Whether a compacted label fits is a fact about the PANE, and nothing
-      // else in the plugin hears a sidebar being dragged: no mutation, no
-      // snapshot, no setting write. Without this, a row shortened in a narrow
-      // pane stays shortened once the pane is widened, and a row that fitted
-      // goes on overflowing a pane the user just narrowed.
+      // Whether a compacted label fits is a fact about the PANE, and a
+      // sidebar drag reaches nothing else that re-runs the label pass: it
+      // produces no mutation of the tree, no snapshot and no setting write.
+      // (`SwitcherView` watches the same pane with an observer of its own, for
+      // its strip's alignment; neither knows about the other.) Without this, a
+      // row shortened in a narrow pane stays shortened once the pane is
+      // widened, and a row that fitted goes on overflowing a pane the user
+      // just narrowed.
+      //
+      // CAN THIS FEED ITSELF? It observes the container the label pass writes
+      // into, which `SwitcherView.ts:245` is careful to rule out for its own.
+      // Here the answer is bounded rather than impossible, and the bound is
+      // worth stating. A pass is SYNCHRONOUS -- draw full, measure, draw short
+      // all happen in one task -- and a ResizeObserver reports the size at
+      // delivery, which is the end of the frame. So the browser never sees the
+      // intermediate layouts, only the pass's final one. A pass that changes
+      // no label leaves that final layout identical and reports nothing. A
+      // pass that DOES change one can flip a horizontal scrollbar, which is a
+      // content-box change this observer would report; that costs one further
+      // debounced pass, whose own final layout is then identical, so the chain
+      // stops there. The residual is one extra pass per genuine relabel on a
+      // pane whose scrollbar is on the edge, 120ms after it, and not a loop.
       //
       // `defaultView`, not Obsidian's `win`: the same cross-window handle
       // `SwitcherView` uses, and the one the DOM lib types constructors on. It
@@ -308,11 +344,12 @@ export class ExplorerAdapter {
       // reading `Work/Clients` with nothing left to say it should not.
       const titles: HTMLElement[] = [];
       c.querySelectorAll<HTMLElement>(SEL.titleWithPath).forEach((t) => titles.push(t));
-      // The policy is never read on this path — a null index labels nothing,
-      // so nothing is drawn and nothing is measured — but it is passed rather
-      // than defaulted, so this call stays the same shape as the one in
-      // `applyNow`.
-      applyCompactLabels(titles, null, this.labelPolicy);
+      // The policy and the probe are never read on this path — a null index
+      // labels nothing, so nothing is drawn and nothing is measured — but both
+      // are passed rather than defaulted, so this call stays the same shape as
+      // the one in `applyNow` and there is one probe in this class rather than
+      // a second default to drift from it.
+      applyCompactLabels(titles, null, this.labelPolicy, { overflows: this.overflows });
     }
   }
 
@@ -583,9 +620,18 @@ function prefixTextOn(title: HTMLElement): string | null {
 /**
  * Draw one compacted row, long or short.
  *
- * Idempotent on purpose: called again with the same run and the same decision
- * it touches nothing at all, which is what keeps the adapter's own
- * MutationObserver from scheduling an endless chain of passes.
+ * Idempotent where it MATTERS: called again with the same run and the same
+ * decision it adds and removes no nodes, which is what keeps the adapter's own
+ * MutationObserver -- a `childList` observer -- from scheduling an endless
+ * chain of passes.
+ *
+ * It is not inert. The `aria-label` and the row class below are written
+ * unconditionally, so a second call does set an attribute to the value it
+ * already holds. That is deliberate: both are cheap, and gating them would
+ * make the drawn label the record of what the attribute should be, which is
+ * the kind of stashed state this pass does not keep. It is safe only because
+ * no observer in `src/` watches attributes; one added later would have to read
+ * this.
  */
 function drawRow(
   title: HTMLElement,

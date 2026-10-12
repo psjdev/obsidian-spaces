@@ -75,6 +75,101 @@ function treeOver(chain: readonly string[]): Parameters<typeof buildChainIndex>[
 const DEEP: ChainIndex = buildChainIndex([DEEP_CHAIN[0]], treeOver(DEEP_CHAIN));
 const PAIR: ChainIndex = buildChainIndex([PAIR_CHAIN[0]], treeOver(PAIR_CHAIN));
 
+/**
+ * The SAME tip, reached by a shorter run.
+ *
+ * A note appears beside `2026` under `Research`, so `Research` no longer leads
+ * onward alone and the run starts one folder lower. The tip's path does not
+ * move, so the row is the same row -- and `../Design/Decisions` is what BOTH
+ * runs draw when shortened, because the last two segments are fixed by the
+ * path. Nothing about the row itself says the question is open again.
+ */
+const SHALLOWER: ChainIndex = buildChainIndex(DEEP_CHAIN, {
+  visibleChildrenOf: (p: string) => {
+    if (p === "Research") return ["Research/2026", "Research/Archive.md"];
+    const i = DEEP_CHAIN.indexOf(p);
+    if (i > 0 && i < DEEP_CHAIN.length - 1) return [DEEP_CHAIN[i + 1]];
+    if (p === DEEP_TIP) return [`${DEEP_TIP}/a.md`];
+    return [];
+  },
+  isFolder: (p: string) => DEEP_CHAIN.includes(p),
+  isScaffold: (p: string) => DEEP_CHAIN.includes(p),
+  parentOf: (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
+  nameOf: (p: string) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
+});
+/** What the shorter run draws in full: `Research/` is no longer part of it. */
+const SHALLOWER_FULL = "2026/Q4/Projects/Atlas/Design/Decisions";
+
+/** Everything visible and scaffold, which is all `applyNow` asks of a snapshot. */
+const SNAP: VisibilitySnapshot = {
+  decisionFor: () => ({
+    visible: true,
+    reason: "scaffold",
+    canRemoveMembership: false,
+    overridesIgnore: false,
+  }),
+  visiblePaths: () => new Set(DEEP_CHAIN),
+};
+
+/** One deep row in a real container, which is what an adapter needs to bind. */
+function mount(): HTMLElement {
+  document.body.innerHTML = `<div class="nav-files-container">
+    <div class="tree-item nav-folder">
+      <div class="tree-item-self nav-folder-title" data-path="${DEEP_TIP}">
+        <div class="tree-item-icon collapse-icon"></div>
+        <div class="tree-item-inner nav-folder-title-content">Decisions</div>
+      </div>
+    </div>
+  </div>`;
+  return document.querySelector(".nav-files-container") as HTMLElement;
+}
+
+/** Every observer this window handed out, so teardown can be audited. */
+interface FakeRO {
+  observed: Element[];
+  disconnected: number;
+}
+
+/**
+ * A ResizeObserver this test can FIRE, in place of the one jsdom does not
+ * implement.
+ *
+ * `tests/helpers/jsdomGaps.ts` installs a no-op for every suite, which is the
+ * honest model when nothing can be resized. These tests need the opposite: to
+ * say "the pane moved" without a layout engine, and to count what the adapter
+ * did about it.
+ */
+function installFakeResizeObserver(): {
+  made: FakeRO[];
+  fire: () => void;
+  restore: () => void;
+} {
+  const made: FakeRO[] = [];
+  let callback: (() => void) | null = null;
+  const original = window.ResizeObserver;
+  window.ResizeObserver = class {
+    private readonly me: FakeRO = { observed: [], disconnected: 0 };
+    constructor(cb: () => void) {
+      made.push(this.me);
+      callback = cb;
+    }
+    observe(el: Element): void {
+      this.me.observed.push(el);
+    }
+    unobserve(): void {}
+    disconnect(): void {
+      this.me.disconnected++;
+    }
+  } as unknown as typeof ResizeObserver;
+  return {
+    made,
+    fire: () => callback?.(),
+    restore: () => {
+      window.ResizeObserver = original;
+    },
+  };
+}
+
 /** The real row shape: `[data-path]` is `.tree-item-self` inside `.tree-item`. */
 function row(path: string, name: string): HTMLElement {
   const wrapper = document.createElement("div");
@@ -184,6 +279,31 @@ describe("the shortening decision is the measurement", () => {
     expect(title.textContent).toBe("../Design/Decisions");
   });
 
+  it("never mistakes a row drawn WHOLE for one already decided to shorten", () => {
+    // WHAT THE KEEP-SHORT GUARD HAS TO GET RIGHT. It recognises "already
+    // decided" by the prefix reading what a SHORTENING would draw, and the
+    // cheaper test -- is there a prefix at all -- is wrong in exactly one
+    // direction: it reads a row drawn whole as a decision to shorten. The
+    // skip path then draws it short without measuring anything, so the second
+    // ordinary pass over a row that FITS would shorten it, and no later pass
+    // would put it back.
+    const fitting = deepRow();
+    applyCompactLabels([fitting], DEEP, ON, { overflows: NEVER });
+    expect(fitting.textContent).toBe(DEEP_FULL);
+    applyCompactLabels([fitting], DEEP, ON, { overflows: NEVER });
+    expect(fitting.textContent).toBe(DEEP_FULL);
+    expect(fitting.hasAttribute("aria-label")).toBe(false);
+
+    // The same row drawn whole because the SETTING is off, then turned on: it
+    // is measured, not assumed.
+    const title = deepRow();
+    applyCompactLabels([title], DEEP, OFF, { overflows: ALWAYS });
+    expect(title.textContent).toBe(DEEP_FULL);
+    applyCompactLabels([title], DEEP, ON, { overflows: ALWAYS });
+    expect(title.textContent).toBe("../Design/Decisions");
+    expect(title.getAttribute("aria-label")).toBe(DEEP_FULL);
+  });
+
   it("leaves a shortened row alone until it is asked to re-measure", () => {
     // What a sidebar resize changes, and what an ordinary pass must not. An
     // ordinary pass redrawing the full label to measure it would rewrite the
@@ -238,11 +358,26 @@ describe("rowOverflows, the production probe", () => {
     expect(rowOverflows(title)).toBe(true);
   });
 
-  it("allows a single pixel of slack, because the two widths round opposite ways", () => {
+  it("allows a single pixel of slack, because both widths are rounded", () => {
     const title = deepRow();
     widths(title, 223, 222);
     widths(title.querySelector(SEL.rowText) as HTMLElement, 60, 60);
     expect(rowOverflows(title)).toBe(false);
+  });
+
+  it("allows ONE pixel and not two, so the slack cannot quietly widen", () => {
+    // Pinned from above as well as below: a slack of 2 passes every other
+    // assertion in this file, and each pixel of it is a row that overflows and
+    // is left long.
+    const title = deepRow();
+    widths(title, 224, 222);
+    widths(title.querySelector(SEL.rowText) as HTMLElement, 60, 60);
+    expect(rowOverflows(title)).toBe(true);
+
+    const inner = deepRow();
+    widths(inner, 200, 222);
+    widths(inner.querySelector(SEL.rowText) as HTMLElement, 62, 60);
+    expect(rowOverflows(inner)).toBe(true);
   });
 });
 
@@ -255,70 +390,27 @@ describe("rowOverflows, the production probe", () => {
  * disconnects it, and that is the difference between a feature and a leak.
  */
 describe("the nav container's ResizeObserver", () => {
-  const SNAP: VisibilitySnapshot = {
-    decisionFor: () => ({
-      visible: true,
-      reason: "scaffold",
-      canRemoveMembership: false,
-      overridesIgnore: false,
-    }),
-    visiblePaths: () => new Set(DEEP_CHAIN),
-  };
-
-  /** Every observer this test's window handed out, so teardown can be audited. */
-  interface FakeRO {
-    observed: Element[];
-    disconnected: number;
-  }
-  let made: FakeRO[] = [];
-  let fire: (() => void) | null = null;
-  let original: typeof ResizeObserver;
+  let ro: ReturnType<typeof installFakeResizeObserver>;
+  const made = (): FakeRO[] => ro.made;
+  const fire = (): void => ro.fire();
 
   beforeEach(() => {
-    made = [];
-    fire = null;
-    original = window.ResizeObserver;
-    window.ResizeObserver = class {
-      private readonly me: FakeRO = { observed: [], disconnected: 0 };
-      constructor(cb: () => void) {
-        made.push(this.me);
-        fire = cb;
-      }
-      observe(el: Element): void {
-        this.me.observed.push(el);
-      }
-      unobserve(): void {}
-      disconnect(): void {
-        this.me.disconnected++;
-      }
-    } as unknown as typeof ResizeObserver;
+    ro = installFakeResizeObserver();
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    window.ResizeObserver = original;
+    ro.restore();
     document.body.innerHTML = "";
   });
-
-  function mount(): HTMLElement {
-    document.body.innerHTML = `<div class="nav-files-container">
-      <div class="tree-item nav-folder">
-        <div class="tree-item-self nav-folder-title" data-path="${DEEP_TIP}">
-          <div class="tree-item-icon collapse-icon"></div>
-          <div class="tree-item-inner nav-folder-title-content">Decisions</div>
-        </div>
-      </div>
-    </div>`;
-    return document.querySelector(".nav-files-container") as HTMLElement;
-  }
 
   it("watches the container it was bound to", () => {
     const container = mount();
     const a = new ExplorerAdapter();
     a.bind(container);
-    expect(made.length).toBe(1);
-    expect(made[0].observed).toEqual([container]);
+    expect(made().length).toBe(1);
+    expect(made()[0].observed).toEqual([container]);
     a.unbind();
   });
 
@@ -334,9 +426,9 @@ describe("the nav container's ResizeObserver", () => {
 
     // The pane is dragged wider: many callbacks, one pass.
     fits = true;
-    fire!();
-    fire!();
-    fire!();
+    fire();
+    fire();
+    fire();
     expect(title.textContent!.trim()).toBe("../Design/Decisions");
     vi.runAllTimers();
     expect(title.textContent!.trim()).toBe(DEEP_FULL);
@@ -353,13 +445,47 @@ describe("the nav container's ResizeObserver", () => {
     const title = container.querySelector("[data-path]") as HTMLElement;
     expect(prefixOf(title)).not.toBeNull();
 
-    // A resize in flight at the moment the plugin unloads.
-    fire!();
+    // A resize in flight at the moment the plugin unloads. The settle timer
+    // is asserted by COUNT, because the repainting half of this test is
+    // satisfied by `applyNow`'s own "no containers" guard whether or not the
+    // timer was cleared -- so without the count, dropping the clear from
+    // `unbind()` passes.
+    const armed = vi.getTimerCount();
+    fire();
+    expect(vi.getTimerCount()).toBe(armed + 1);
     a.unbind();
-    expect(made[0].disconnected).toBe(1);
+    expect(made()[0].disconnected).toBe(1);
+    expect(vi.getTimerCount()).toBe(armed);
+
     vi.runAllTimers();
     expect(prefixOf(title)).toBeNull();
     expect(title.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("re-opens the decision when the RUNS change, not only on a resize", () => {
+    // The keep-short guard reads the prefix, and `../Design/Decisions` is what
+    // every run ending at this tip draws when shortened -- the last two
+    // segments are fixed by the path. So a run whose head moved would keep a
+    // decision taken about a label it no longer has. `setChainIndex` is where
+    // that is caught, because `main.ts` hands over the same index OBJECT while
+    // the runs are unchanged.
+    const container = mount();
+    let fits = false;
+    const a = new ExplorerAdapter(() => !fits);
+    a.bind(container);
+    a.setChainIndex(DEEP, ON);
+    a.apply(SNAP);
+    const title = container.querySelector("[data-path]") as HTMLElement;
+    expect(title.textContent!.trim()).toBe("../Design/Decisions");
+
+    // A sibling appears under `Research`: the run now starts at `2026`, and
+    // the full label is short enough to fit.
+    fits = true;
+    a.setChainIndex(SHALLOWER, ON);
+    a.apply(SNAP);
+    expect(title.textContent!.trim()).toBe(SHALLOWER_FULL);
+    expect(title.hasAttribute("aria-label")).toBe(false);
+    a.unbind();
   });
 
   it("disconnects the previous observers when the panes are rebound", () => {
@@ -369,9 +495,90 @@ describe("the nav container's ResizeObserver", () => {
     const a = new ExplorerAdapter();
     a.bind(container);
     a.bind(container);
-    expect(made.length).toBe(2);
-    expect(made[0].disconnected).toBe(1);
+    expect(made().length).toBe(2);
+    expect(made()[0].disconnected).toBe(1);
     a.unbind();
-    expect(made[1].disconnected).toBe(1);
+    expect(made()[1].disconnected).toBe(1);
+  });
+});
+
+/**
+ * THE PASS MUST STOP, and nothing else in this file can tell that it does.
+ *
+ * Every other test here drives `applyCompactLabels` or `applyNow` by hand, one
+ * call at a time, so none of them can see a pass that SCHEDULES ANOTHER ONE.
+ * The adapter's MutationObserver watches the container the pass writes into,
+ * so a pass that keeps rewriting the prefix feeds that observer, which calls
+ * `schedule()`, which runs the pass again, for as long as the plugin is
+ * loaded. Measured on this branch with `remeasure` left latched: 17 label
+ * passes in 600ms of an idle explorer, against 2 when it is cleared.
+ *
+ * What makes the chain terminate is one line -- `applyNow` consuming
+ * `this.remeasure` rather than reading it -- and deleting that line passed the
+ * whole suite before this test existed.
+ *
+ * REAL TIMERS, deliberately. The loop runs on the adapter's own
+ * `requestAnimationFrame` and on the microtask turn a MutationObserver is
+ * delivered in. A fake clock would have to be ASKED to advance, and a test
+ * that asks for each iteration cannot notice the one it did not ask for.
+ */
+describe("the label pass settles", () => {
+  let ro: ReturnType<typeof installFakeResizeObserver>;
+
+  beforeEach(() => {
+    ro = installFakeResizeObserver();
+  });
+
+  afterEach(() => {
+    ro.restore();
+    document.body.innerHTML = "";
+  });
+
+  /** Longer than the 120ms resize settle, and many animation frames wide. */
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 250));
+
+  it("stops after a resize instead of relabelling for as long as it is loaded", async () => {
+    const container = mount();
+    // Two independent counters: what the pass READ, and what it WROTE. The
+    // loop shows up in both, and either one alone could be satisfied by an
+    // adapter that had stopped doing the other.
+    let measured = 0;
+    let writes = 0;
+    const a = new ExplorerAdapter(() => {
+      measured++;
+      return true;
+    });
+    const spy = new MutationObserver((records) => {
+      writes += records.length;
+    });
+    try {
+      a.bind(container);
+      a.setChainIndex(DEEP, ON);
+      a.apply(SNAP);
+      const title = container.querySelector("[data-path]") as HTMLElement;
+      expect(title.textContent!.trim()).toBe("../Design/Decisions");
+      await settle();
+      const idle = { measured, writes };
+
+      spy.observe(container, { childList: true, subtree: true });
+      ro.fire();
+      await settle();
+      // The resize was answered: the row was drawn in full, measured and
+      // drawn short again, so both counters moved exactly once.
+      const answered = { measured, writes };
+      expect(answered.measured).toBeGreaterThan(idle.measured);
+      expect(answered.writes).toBeGreaterThan(0);
+
+      // And then nothing, through two further settles. An adapter that has
+      // latched `remeasure` is measuring and rewriting on every frame by now.
+      await settle();
+      await settle();
+      expect(measured).toBe(answered.measured);
+      expect(writes).toBe(answered.writes);
+      expect(title.textContent!.trim()).toBe("../Design/Decisions");
+    } finally {
+      spy.disconnect();
+      a.unbind();
+    }
   });
 });
