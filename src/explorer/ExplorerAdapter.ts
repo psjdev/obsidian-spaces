@@ -203,11 +203,17 @@ export class ExplorerAdapter {
    * because it is a list of what to UNDO, and undoing is this instance's job.
    *
    * It does not grow without bound: an entry goes in when a prefix is drawn
-   * and comes out when it is removed, so the size is the number of compacted
-   * tips the explorer is currently holding elements for, and `bindAll` calls
-   * `unbind()` first, which empties it on every layout change. The elements it
-   * keeps alive between those points are the same ones Obsidian is keeping
-   * alive on its own tree items.
+   * and comes out when it is removed, and `bindAll` calls `unbind()` first,
+   * which empties it on every layout change.
+   *
+   * Most of what it keeps alive between those points is what Obsidian is
+   * keeping alive anyway, on its own tree items. NOT ALL of it: a row whose
+   * folder is deleted or renamed while the row is detached is never drawn
+   * again and so is never restored, and this is a strong `Set`, so that one
+   * element outlives Obsidian's own tree item until the next
+   * `bind`/`unbind`. Bounded by a layout change, which is why it is accepted
+   * — and a `WeakSet` is not the alternative it looks like, because the
+   * record has to be ITERATED at teardown and a `WeakSet` cannot be.
    */
   private readonly drawn = new Set<HTMLElement>();
 
@@ -362,7 +368,9 @@ export class ExplorerAdapter {
       window.cancelAnimationFrame(this.frame);
       this.frame = 0;
     }
-    this.clearOwnedClasses();
+    // "everywhere": teardown IS the outgoing-container window, and the only
+    // caller inside it.
+    this.clearOwnedClasses("everywhere");
     this.containers = [];
     this.snapshot = null;
     this.elsewhereFirst = null;
@@ -400,7 +408,9 @@ export class ExplorerAdapter {
    *    be detached from its document by the time this runs (`changeLayout()`
    *    replaces `.nav-files-container`, and `bindExplorer` unbinds when it
    *    finds none), and a detached container is not reachable from the
-   *    document either.
+   *    document either. Its rows carry no prefix unless they were compacted,
+   *    so the record does not hold them either — pinned by the detached-
+   *    container case in `tests/compactTeardownSweep.test.ts`.
    *  - The DOCUMENTS those containers and rows belong to, asked for our own
    *    classes rather than enumerated row by row. This is what reaches the
    *    LIVE tree when the adapter is holding an outgoing container —
@@ -412,16 +422,30 @@ export class ExplorerAdapter {
    *    finds a row Obsidian has DETACHED — see `LabelPassOptions.drawn`.
    *
    * Overlap between the three is free: every removal here is idempotent.
+   *
+   * THE SCOPE ARGUMENT, and why it is not an optimisation. The document reach
+   * is for ONE window — the moment the adapter is holding a container the
+   * layout has already replaced — and `unbind()`/teardown is the only caller
+   * inside it. The other two callers are `applyNow`'s null-snapshot branch,
+   * which runs on every apply while filtering is PAUSED (an ordinary state the
+   * user can sit in all day), and its unhealthy branch, which runs on every
+   * MutationObserver pass while the DOM contract looks broken. Both still hold
+   * their containers; neither is in that window. Sweeping the whole document
+   * there asks for four classes across the whole app, repeatedly, to find
+   * rows that are by definition inside the tree we are bound to.
    */
-  private clearOwnedClasses(): void {
+  private clearOwnedClasses(reach: "bound" | "everywhere"): void {
     const roots: ParentNode[] = [...this.containers];
-    const docs = new Set<Document>();
-    for (const c of this.containers) docs.add(c.ownerDocument);
-    // A remembered row's document, so a sweep still has a document to ask
-    // when every container has already gone (`unbind()` empties the list, and
-    // a popout explorer's rows do not belong to this one's document anyway).
-    for (const title of this.drawn) docs.add(title.ownerDocument);
-    for (const doc of docs) roots.push(doc);
+    if (reach === "everywhere") {
+      const docs = new Set<Document>();
+      for (const c of this.containers) docs.add(c.ownerDocument);
+      // A remembered row's document, so a sweep still has a document to ask
+      // when every container has already gone (`unbind()` empties the list,
+      // and a popout explorer's rows do not belong to this one's document
+      // anyway).
+      for (const title of this.drawn) docs.add(title.ownerDocument);
+      for (const doc of docs) roots.push(doc);
+    }
 
     for (const root of roots) {
       for (const cls of ALL_OWNED_CLASSES) {
@@ -429,23 +453,35 @@ export class ExplorerAdapter {
       }
       // `CLS.compacted` needs no query of its own, although it is not in
       // `ALL_OWNED_CLASSES`: `drawRow` only ever adds it to a row it also puts
-      // a prefix on, and `restoreRow` below takes the two off together. A
-      // query for it here would be a branch no test could reach.
+      // a prefix on, and `restoreRow` below takes the two off together. No
+      // test can reach a query for it, and here is the one shape that could:
+      // if Obsidian ever replaced the `.tree-item-self` inside a surviving
+      // `.tree-item`, the orphaned title would restore with a null
+      // `parentElement` and the wrapper would keep the class with nothing left
+      // to take it off. Obsidian builds `selfEl` once per tree item, so that
+      // is unlikely rather than impossible.
       //
       // Found by OUR element rather than by walking every `[data-path]` row:
       // the prefix is the thing that has to come off, and it is the one node
       // in this tree that says so. `restoreRow` is the same function the
       // ordinary pass gives a row back with, so there is one definition of
       // "restored" rather than a second one that could drift.
+      //
+      // Not subsumed by the record below, although every ordinary pass makes
+      // it look that way: this is the only reach that finds a prefix left by a
+      // session whose teardown never ran, where the record starts EMPTY and
+      // the element is already in the user's explorer.
       root.querySelectorAll<HTMLElement>(`.${CLS_COMPACT_PREFIX}`).forEach((prefix) => {
         const title = prefix.parentElement;
         if (title) restoreRow(title, this.drawn);
       });
     }
 
-    // Copied first: `restoreRow` deletes from the set it is iterating.
+    // Copied first: `restoreRow` deletes from the set it is iterating — which
+    // is also why no `clear()` follows. The set is empty when this loop ends,
+    // and a `clear()` here would be a second way to empty it that no test
+    // could tell from the first.
     for (const title of [...this.drawn]) restoreRow(title, this.drawn);
-    this.drawn.clear();
   }
 
   /** Coalesce bursts of mutations into a single pass. */
@@ -478,7 +514,10 @@ export class ExplorerAdapter {
     if (this.containers.length === 0) return 0;
 
     if (this.snapshot === null) {
-      this.clearOwnedClasses();
+      // "bound": filtering is PAUSED, which is an ordinary state reached on
+      // every apply while it lasts, and the containers we still hold are the
+      // whole of the tree our classes are on.
+      this.clearOwnedClasses("bound");
       return 0;
     }
 
@@ -514,7 +553,10 @@ export class ExplorerAdapter {
     if (titles.length === 0 && rowCount > 0) {
       const wasHealthy = this.healthy;
       this.healthy = false;
-      this.clearOwnedClasses();
+      // "bound", for the same reason as the paused branch above: this runs on
+      // every observer pass while the DOM contract looks broken, and the
+      // containers are still held.
+      this.clearOwnedClasses("bound");
       if (wasHealthy) this.healthListener?.(false);
       return 0;
     }
@@ -655,7 +697,10 @@ export function applyCompactLabels(
     const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
     if (!textEl) continue;
     const run = index?.runByTip.get(path);
-    if (!run) {
+    // Not a tip, OR a tip whose chain is visibly still nested — see
+    // `drawnWhereTheHeadWas`. `!index` leads because without one there are no
+    // runs at all, which is also what makes `run` findable below it.
+    if (!index || !run || !drawnWhereTheHeadWas(title, run, index)) {
       restoreRow(title, drawn);
       continue;
     }
@@ -687,6 +732,57 @@ export function applyCompactLabels(
     const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
     if (textEl) drawRow(title, textEl, run, true, drawn);
   }
+}
+
+/**
+ * Is this tip row drawn WHERE ITS HEAD WAS, which is the only position a
+ * compacted label is true of?
+ *
+ * MEASURED, NOT PREDICTED, and that is the whole point. The index is a promise
+ * that the sort seam substituted the run's tip for its head, so the chain
+ * draws as one row at the head's position. `main.ts` gates the index on a live
+ * seam and drops it when a re-sort is refused, which settles every state that
+ * is knowable before or after the attempt — but `substituteCompacted` ALSO
+ * fails open per run, leaving a chain nested when this pane holds no tree item
+ * for that run's tip. In that state the patch is on, `sort()` succeeded, every
+ * up-front check says "live", `runByTip` still holds the run, and the joined
+ * path lands on a folder the user can see sitting under its own parent. No
+ * gate upstream can see that door; this pass can, because the answer is in the
+ * DOM in front of it. A compacted row's DISPLAYED position is the truth.
+ *
+ * `hiddenSegments` is exactly the question to ask: it maps every folder of a
+ * run that gets NO row — the head and each intermediate, excluding the tip —
+ * to the run it belongs to. So a tip drawn under one of its own run's hidden
+ * segments is a chain that did not compact, whatever anything upstream
+ * believed.
+ *
+ * IDENTITY against THIS run, not membership of the map. Another run's hidden
+ * segment is a different situation entirely — that run compacted, this one is
+ * merely drawn inside it — and suppressing on it would turn one chain's
+ * success into another chain's lost label.
+ *
+ * THE CLIMB is three steps and the SHAPE validates itself: `title` is the
+ * `.tree-item-self`, its parent is the `.tree-item` wrapper, that one's parent
+ * is the `.tree-item-children` subtree, and ITS parent is the ancestor row's
+ * own `.tree-item` — whose direct-child `[data-path]` row carries the path.
+ * `:scope >` for the same reason the rest of this pass uses it: a descendant
+ * query would find a child row first.
+ *
+ * EVERY UNKNOWN RESOLVES TOWARD LABELLING. No ancestor row (a top-level run,
+ * or a row Obsidian has detached) is not nested, so it labels; a DOM that does
+ * not match this shape at all finds no ancestor path and labels too. The check
+ * can only ever take a label away from a row that is demonstrably in the wrong
+ * place, which is the direction this transform fails in everywhere else.
+ */
+function drawnWhereTheHeadWas(title: HTMLElement, run: Run, index: ChainIndex): boolean {
+  const childrenEl = title.parentElement?.parentElement;
+  const ancestorRow = childrenEl?.parentElement;
+  const ancestorTitle = ancestorRow?.querySelector<HTMLElement>(
+    `:scope > ${SEL.treeRow}${SEL.titleWithPath}`
+  );
+  const ancestorPath = ancestorTitle?.getAttribute("data-path");
+  if (!ancestorPath) return true;
+  return index.hiddenSegments.get(ancestorPath) !== run;
 }
 
 /** What this module would write into the prefix for a run, drawn either way. */
@@ -789,9 +885,11 @@ function drawRow(
 /**
  * Give a row that is not a compacted tip back to Obsidian.
  *
- * Unconditional, and cheap: both removals are no-ops on a row that was never
- * compacted. Gating them on the class would make the class the record of what
- * to undo, which is the kind of stashed state this pass does not keep.
+ * Unconditional, and cheap: removing the prefix element and the row class are
+ * both no-ops on a row that was never compacted. Gating them on the class
+ * would make the class the record of what to undo, which is the kind of
+ * stashed state this pass does not keep. The third removal, the tooltip, is
+ * the one exception below.
  *
  * The tooltip is the one exception, and it is taken off only where this
  * module put it: `aria-label` is a DOM attribute anyone may use, and a blanket

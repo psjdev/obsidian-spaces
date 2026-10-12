@@ -18,14 +18,25 @@
  * row is in no container and in no document, so no query can find it; only a
  * record of what was written can.
  *
- * SO THE SWEEP HAS TWO REACHES, and neither subsumes the other:
- *  - the DOCUMENT, asked for our own classes, which finds a row that is still
- *    rendered but has left the container the adapter holds. `bindExplorer`
- *    already documents that window: `changeLayout()` replaces
- *    `.nav-files-container`, and a cleanup scoped to the held container
- *    "can never reach the live tree either".
+ * SO THE SWEEP HAS THREE REACHES, and no one of them subsumes the others:
+ *  - the bound CONTAINERS, which are the only way back to a row inside a
+ *    container the layout has already detached: it is in no document, and its
+ *    rows carry no prefix unless they were compacted, so the record misses
+ *    them too.
+ *  - the DOCUMENT, asked for our own classes and for our own prefix element,
+ *    which finds a row that is still rendered but has left the container the
+ *    adapter holds. `bindExplorer` already documents that window:
+ *    `changeLayout()` replaces `.nav-files-container`, and a cleanup scoped to
+ *    the held container "can never reach the live tree either". The prefix
+ *    half also finds one left by a session whose teardown never ran, where the
+ *    record starts empty.
  *  - the RECORD of rows a label was drawn on, which is the only thing that
  *    reaches a detached one.
+ *
+ * The document reach is for teardown ALONE, because the outgoing-container
+ * window is the only thing it is for. The sweep's other two callers -- a
+ * paused apply and an unhealthy pass -- still hold their containers and ask
+ * only those.
  */
 import { describe, expect, it, afterEach } from "vitest";
 import { ExplorerAdapter } from "../src/explorer/ExplorerAdapter";
@@ -220,5 +231,132 @@ describe("teardown sweeps the whole tree, not the render window", () => {
     title.setAttribute("aria-label", "Obsidian's own");
     a.unbind();
     expect(title.getAttribute("aria-label")).toBe("Obsidian's own");
+  });
+
+  it("clears an owned class off a row inside a container that is itself detached", () => {
+    // The CONTAINERS reach, which neither of the other two subsumes.
+    // `changeLayout()` can detach the whole `.nav-files-container` the
+    // adapter is holding: its rows are then in no document, so the document
+    // reach cannot see them, and they carry no prefix, so the record does not
+    // hold them either. Only the container the adapter still has a reference
+    // to leads back to them.
+    const c = container(TIP);
+    const a = new ExplorerAdapter(() => false);
+    a.bind(c);
+    a.setChainIndex(null, ON);
+    a.apply(SNAP);
+    const title = titleIn(c, TIP);
+    const wrapper = title.parentElement as HTMLElement;
+    expect(wrapper.classList.contains(CLS.scaffold)).toBe(true);
+
+    c.remove();
+
+    a.unbind();
+
+    expect(wrapper.classList.contains(CLS.scaffold)).toBe(false);
+  });
+
+  it("clears a prefix left behind by a session whose teardown never ran", () => {
+    // The `.spaces-compact-prefix` query, which the record subsumes in every
+    // ordinary pass and in nothing else. A crash or a skipped unload leaves a
+    // prefix ELEMENT in the user's explorer reading `Clients/` beside a folder
+    // named `Meetings`; the next session's record is EMPTY, so the only thing
+    // that can find it is a query for our own element.
+    const c = container(TIP);
+    const title = titleIn(c, TIP);
+    const stale = document.createElement("span");
+    stale.className = CLS_COMPACT_PREFIX;
+    stale.textContent = "Clients/Northwind/";
+    title.insertBefore(stale, title.firstChild);
+
+    const a = new ExplorerAdapter(() => false);
+    a.bind(c);
+    expect(a["drawn"].size).toBe(0);
+
+    a.unbind();
+
+    expect(prefixOf(title)).toBeNull();
+    expect(a["drawn"].size).toBe(0);
+  });
+
+  it("takes our tooltip off a recorded row whose prefix has already gone", () => {
+    // `restoreRow` is unconditional on purpose: it does not read the prefix to
+    // decide whether there is anything to undo. A row can be in the record,
+    // carrying an `aria-label` this module wrote, with the prefix element gone
+    // -- Obsidian replacing a row's children is enough. Gating the rest of the
+    // restoration on the prefix would strand that tooltip and leave the row in
+    // the record forever.
+    const c = container(TIP);
+    const a = new ExplorerAdapter(() => true);
+    a.bind(c);
+    a.setChainIndex(INDEX, ON);
+    a.apply(SNAP);
+    const title = titleIn(c, TIP);
+    expect(title.getAttribute("aria-label")).toBe(FULL);
+    (prefixOf(title) as HTMLElement).remove();
+    expect(a["drawn"].size).toBe(1);
+
+    a.unbind();
+
+    expect(title.hasAttribute("aria-label")).toBe(false);
+    expect(a["drawn"].size).toBe(0);
+  });
+
+  it("sweeps only the bound tree on a paused apply, and the document on unbind", () => {
+    // A paused apply is an ORDINARY state, not a degraded one, and it reaches
+    // the sweep on every `file-open` while the pause is on. The document reach
+    // exists for the outgoing-container window -- the moment between
+    // `changeLayout()` replacing `.nav-files-container` and the adapter being
+    // re-bound -- which a pause is not in. Asking the whole document for four
+    // classes on every paused apply is work for a window that is not open.
+    const c = container(TIP);
+    const elsewhere = document.createElement("div");
+    elsewhere.className = CLS.scaffold;
+    document.body.appendChild(elsewhere);
+
+    const a = new ExplorerAdapter(() => false);
+    a.bind(c);
+    a.setChainIndex(null, ON);
+    a.apply(SNAP);
+    const wrapper = titleIn(c, TIP).parentElement as HTMLElement;
+    expect(wrapper.classList.contains(CLS.scaffold)).toBe(true);
+
+    // The pause: `applyAdapterSnapshot` hands over a null snapshot.
+    a.apply(null);
+    expect(wrapper.classList.contains(CLS.scaffold)).toBe(false);
+    expect(elsewhere.classList.contains(CLS.scaffold)).toBe(true);
+
+    // Teardown keeps all three reaches, because that IS the window.
+    a.unbind();
+    expect(elsewhere.classList.contains(CLS.scaffold)).toBe(false);
+  });
+
+  it("sweeps only the bound tree when the DOM contract looks broken", () => {
+    // The unhealthy branch runs on every MutationObserver pass for as long as
+    // the tree looks unrecognisable, which can be the rest of the session.
+    // Same reasoning as the paused branch: the containers are still held, so
+    // the document reach buys nothing and costs four queries a pass.
+    const c = container(TIP);
+    const elsewhere = document.createElement("div");
+    elsewhere.className = CLS.scaffold;
+    document.body.appendChild(elsewhere);
+
+    const a = new ExplorerAdapter(() => false);
+    a.bind(c);
+    a.setChainIndex(null, ON);
+    a.apply(SNAP);
+    const wrapper = titleIn(c, TIP).parentElement as HTMLElement;
+    expect(wrapper.classList.contains(CLS.scaffold)).toBe(true);
+
+    // Rows, but none of them path-bearing: the shape that says the contract
+    // changed.
+    titleIn(c, TIP).removeAttribute("data-path");
+    a.apply(SNAP);
+
+    expect(wrapper.classList.contains(CLS.scaffold)).toBe(false);
+    expect(elsewhere.classList.contains(CLS.scaffold)).toBe(true);
+
+    a.unbind();
+    expect(elsewhere.classList.contains(CLS.scaffold)).toBe(false);
   });
 });

@@ -7,16 +7,25 @@
  * adapter writes the joined label onto whatever row that substitution
  * produced. Only the first of those needs a patched, working seam.
  *
- * So there are four reachable states in which the label half runs and the sort
- * half does not: the private method is absent from the build, `patch` is
- * refused because another plugin holds the same property, `bindExplorer`'s
- * step 5 throws before anything is patched, and `requestResort` answers false
- * because `sort()` threw. In every one of them the chain is still drawn
- * NESTED — no substitution happened — and the joined path is stamped onto the
- * head's row anyway, so the user reads `Design/Decisions/2026` on a folder
- * that is visibly `Design` with `Decisions` nested underneath it. That is
- * worse than doing nothing, which is why "the index is null" is the required
- * outcome rather than a nicety.
+ * The states in which the label half would run and the sort half would not are
+ * what this file enumerates, and there are more of them than the plan named:
+ * the private method is absent from the build, `patch` is refused because
+ * another plugin holds the same property, `bindExplorer`'s step 5 throws
+ * before anything is patched, there is no explorer pane at all, one pane of
+ * two is unpatched, and `requestResort` answers false because `sort()` threw.
+ * In every one of them the chain is still drawn NESTED — no substitution
+ * happened — and the joined path is stamped onto the head's row anyway, so the
+ * user reads `Design/Decisions/2026` on a folder that is visibly `Design` with
+ * `Decisions` nested underneath it. That is worse than doing nothing, which is
+ * why "the index is null" is the required outcome rather than a nicety.
+ *
+ * ONE MORE STATE IS NOT HERE, and deliberately: a patched seam whose re-sort
+ * SUCCEEDED, where `substituteCompacted` still failed open for one run because
+ * this pane holds no tree item for its tip. Every question this gate can ask
+ * answers "live", and that one chain is nested anyway. It is not a property of
+ * the seam, so it is not settled by a gate: `applyCompactLabels` measures it
+ * off the drawn tree instead (`drawnWhereTheHeadWas`, pinned in
+ * `tests/compactRowLabel.test.ts`).
  *
  * A SECOND PANE is the same bug through a different door: `patch` is per view,
  * the index is one object, and the adapter labels every bound container. One
@@ -171,5 +180,112 @@ describe("the chain index is gated on the sort seam being live", () => {
 
     expect(h.plugin["chainIndexNow"]).not.toBe(null);
     expect(h.labelledPaths()).toEqual([TIP]);
+  });
+
+  it("drops the ADAPTER's copy too, at the one place the verdict is reached", () => {
+    // `applyFilterAndOrdering` has four call sites and only two of them
+    // re-seed the adapter afterwards. `recordSortOverride` and
+    // `restoreSavedOrdering` just call it and render the switcher, so a
+    // refusal reached from either used to leave the plugin's index null --
+    // the seam stops substituting -- while the adapter's own copy stayed
+    // live and went on stamping the joined path on every observer pass.
+    // That is the outcome the drop exists to prevent, not a milder one.
+    const h = harness();
+    expect(h.plugin["chainIndexNow"]).not.toBe(null);
+    expect(h.labelledPaths()).toEqual([TIP]);
+
+    (h.view as { sort: () => void }).sort = () => {
+      throw new Error("Spaces test: this pane's sort() throws");
+    };
+    // What a real gesture leaves behind: whatever changed dropped the memo,
+    // so the next call actually attempts the re-sort.
+    h.plugin["lastResort"] = null;
+    // The ONLY line `recordSortOverride` reaches before rendering.
+    h.plugin["applyFilterAndOrdering"]();
+
+    expect(h.plugin["chainIndexNow"]).toBe(null);
+    expect(h.plugin["adapter"]["chainIndex"]).toBe(null);
+    // The adapter draws on its own schedule, so the proof is a pass it runs
+    // with nobody re-seeding it.
+    h.plugin["adapter"].applyNow();
+    expect(h.labelledPaths()).toEqual([]);
+  });
+
+  it("re-sorts the panes that already substituted when a LIVE index is dropped", () => {
+    // The index is live for the whole `requestResort` loop, so a pane that
+    // sorted before a later pane threw has ALREADY rendered the
+    // substitution. Nulling the index afterwards does not move it back: the
+    // next apply rebuilds a live index, that pane re-sorts compacted, the
+    // other throws, and the index is nulled again -- leaving the tip
+    // folder's bare name at the head's position with no label, for good. A
+    // second pass with the index gone renders it honestly.
+    const h = harness({ seam: "sort-throws", secondPane: "ok" });
+    const views = h.plugin["sortedViews"] as unknown as { sort: () => void }[];
+    expect(views.length).toBe(2);
+    let sorts = 0;
+    views[1].sort = (): void => {
+      sorts += 1;
+    };
+
+    // Both panes are patched, so the gate builds a live index again.
+    h.plugin["onSnapshotApplied"](h.plugin["controller"].currentSnapshot());
+
+    expect(h.plugin["chainIndexNow"]).toBe(null);
+    expect(sorts).toBe(2);
+  });
+
+  it("does not re-sort a second time when the refusal dropped nothing", () => {
+    // Compaction off means there was no index to drop, so a refused re-sort
+    // is just a refused re-sort. Sorting every pane again would be work for
+    // a substitution that never happened.
+    const h = makePluginForSeam({
+      compactFolderChains: false,
+      tree: TREE,
+      visible: VISIBLE,
+      members: ["Clients/Meetings/a.md"],
+      rows: [TIP],
+      seam: "sort-throws",
+      secondPane: "ok",
+    });
+    const views = h.plugin["sortedViews"] as unknown as { sort: () => void }[];
+    expect(views.length).toBe(2);
+    let sorts = 0;
+    views[1].sort = (): void => {
+      sorts += 1;
+    };
+
+    h.plugin["onSnapshotApplied"](h.plugin["controller"].currentSnapshot());
+
+    expect(h.plugin["chainIndexNow"]).toBe(null);
+    expect(sorts).toBe(1);
+  });
+
+  it("asks the workspace nothing at all while filtering is paused", () => {
+    // The gate is LAST of `rebuildChainIndex`'s guards, below the pause, and
+    // this is what pins that placement: the gate walks the workspace's
+    // leaves, and a pause cannot use the answer. Counted the way
+    // `tests/productCommands.test.ts` counts leaf lookups around
+    // `ensureOrderingPatched`, which is the same discipline.
+    const h = harness();
+    const snap = h.plugin["controller"].currentSnapshot();
+    const p = h.plugin as unknown as { explorerViews: () => object[] };
+    const real = p.explorerViews;
+    let lookups = 0;
+    p.explorerViews = (): object[] => {
+      lookups += 1;
+      return real();
+    };
+
+    h.plugin["filteringPaused"] = true;
+    h.plugin["rebuildChainIndex"](snap);
+    expect(h.plugin["chainIndexNow"]).toBe(null);
+    expect(lookups).toBe(0);
+
+    // The control, and it is what makes the count above mean "the pause
+    // returned first" rather than "the gate never looks".
+    h.plugin["filteringPaused"] = false;
+    h.plugin["rebuildChainIndex"](snap);
+    expect(h.plugin["chainIndexNow"]).not.toBe(null);
+    expect(lookups).toBe(1);
   });
 });

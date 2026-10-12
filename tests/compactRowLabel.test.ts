@@ -746,3 +746,117 @@ describe("applyCompactLabels, shortened", () => {
     });
   });
 });
+
+/**
+ * A TIP IS ONLY A COMPACTED ROW WHERE THE HEAD WAS.
+ *
+ * The index is a promise that the sort seam substituted the run's tip for its
+ * head, so the chain draws as one row at the head's position. The gate in
+ * `main.ts` settles every way the seam can be dead BEFORE the attempt, and
+ * `applyFilterAndOrdering` settles the refusal after it — but there is one
+ * state neither can see. `substituteCompacted` fails open per run when a pane
+ * cannot resolve that run's tip item: the patch is on, `sort()` succeeded,
+ * every up-front check says "live", and this one chain still rendered NESTED.
+ * `runByTip` holds it all the same, so the joined path landed on a folder
+ * visibly sitting under its own parent.
+ *
+ * So the pass stops predicting and MEASURES. A row that is a tip but is drawn
+ * UNDER one of its own run's hidden segments is a chain that did not compact,
+ * whatever anything upstream believed, and the answer is in the DOM in front
+ * of the pass. Every unknown resolves toward labelling, so a tree that does
+ * not match this shape costs nothing.
+ */
+describe("applyCompactLabels only labels a tip drawn where the head was", () => {
+  const TIP = "Top/Work/Clients/Meetings";
+  const KIDS: Record<string, string[]> = {
+    // Two visible children, so `Top` itself is not a run and keeps its row.
+    Top: ["Top/Work", "Top/note.md"],
+    "Top/Work": ["Top/Work/Clients"],
+    "Top/Work/Clients": [TIP],
+    [TIP]: [`${TIP}/a.md`],
+    // A SECOND, unrelated run, so "a hidden segment" and "a hidden segment of
+    // THIS run" can be told apart.
+    Other: ["Other/Thing"],
+    "Other/Thing": ["Other/Thing/b.md"],
+  };
+  const FOLDERS = ["Top", "Top/Work", "Top/Work/Clients", TIP, "Other", "Other/Thing"];
+  const NESTED_TREE = {
+    visibleChildrenOf: (p: string) => KIDS[p] ?? [],
+    isFolder: (p: string) => FOLDERS.includes(p),
+    isScaffold: (p: string) => FOLDERS.includes(p),
+    parentOf: (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null),
+    nameOf: (p: string) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p),
+  };
+  /**
+   * `Top/Work -> Clients -> Meetings`, whose hidden segments are `Top/Work`
+   * and `Top/Work/Clients`, plus `Other -> Thing`, whose hidden segment is
+   * `Other`.
+   */
+  const NESTED = buildChainIndex(FOLDERS, NESTED_TREE);
+  const FULL = "Work/Clients/Meetings";
+
+  /** The `.tree-item-children` subtree Obsidian draws a row's children into. */
+  function childrenOf(r: ReturnType<typeof row>): HTMLElement {
+    const kids = r.wrapper.ownerDocument.createElement("div");
+    kids.className = "tree-item-children nav-folder-children";
+    r.wrapper.appendChild(kids);
+    return kids;
+  }
+
+  const labelled = (title: HTMLElement): boolean => prefixOf(title) !== null;
+
+  it("labels a tip drawn as a sibling where its head was", () => {
+    // The ordinary case, and the control for the three below: the
+    // substitution happened, so the tip's row sits under `Top` — the head's
+    // own parent — with nothing of the run between them.
+    const host = document.createElement("div");
+    const top = row(host, "Top", "Top");
+    const tip = row(childrenOf(top), TIP, "Meetings");
+    label([top.title, tip.title], NESTED, ABBREV);
+    expect(labelled(tip.title)).toBe(true);
+    expect(tip.title.getAttribute("aria-label")).toBe(FULL);
+  });
+
+  it("leaves a tip drawn under its own run's hidden segment alone", () => {
+    // The seventh state, as a tree: nothing was substituted, so `Top/Work`
+    // and `Top/Work/Clients` still have rows and the tip is three levels
+    // down. A label here would read `Work/Clients/Meetings` on a folder the
+    // user can see nested under `Clients`.
+    const host = document.createElement("div");
+    const top = row(host, "Top", "Top");
+    const head = row(childrenOf(top), "Top/Work", "Work");
+    const mid = row(childrenOf(head), "Top/Work/Clients", "Clients");
+    const tip = row(childrenOf(mid), TIP, "Meetings");
+    label([top.title, head.title, mid.title, tip.title], NESTED, ABBREV);
+    expect(labelled(tip.title)).toBe(false);
+    expect(tip.wrapper.classList.contains(CLS.compacted)).toBe(false);
+    expect(tip.title.hasAttribute("aria-label")).toBe(false);
+    // Untouched, not merely unlabelled: the row still reads what Obsidian
+    // drew.
+    expect(tip.title.textContent).toBe("Meetings");
+  });
+
+  it("labels a tip drawn under a DIFFERENT run's hidden segment", () => {
+    // Identity against THIS run, not membership of the map. `Other` is
+    // hidden because `Other -> Thing` compacted, which says nothing about
+    // where `Top/Work`'s run was drawn — and suppressing on it would turn
+    // one run's compaction into another run's loss.
+    const host = document.createElement("div");
+    const other = row(host, "Other", "Other");
+    const tip = row(childrenOf(other), TIP, "Meetings");
+    label([other.title, tip.title], NESTED, ABBREV);
+    expect(labelled(tip.title)).toBe(true);
+    expect(tip.title.getAttribute("aria-label")).toBe(FULL);
+  });
+
+  it("labels a tip at the top level, with no ancestor row at all", () => {
+    // A run whose head was top-level draws its one row at the top level, so
+    // there is no ancestor to ask. Unknown resolves toward labelling, which
+    // is also what a detached row gets.
+    const host = document.createElement("div");
+    const tip = row(host, TIP, "Meetings");
+    label([tip.title], NESTED, ABBREV);
+    expect(labelled(tip.title)).toBe(true);
+    expect(tip.title.getAttribute("aria-label")).toBe(FULL);
+  });
+});

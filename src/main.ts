@@ -2323,12 +2323,16 @@ export default class SpacesPlugin extends Plugin {
     // — and because the re-sort memo keys on it.
     //
     // The re-sort comes before the ADAPTER because whether it actually
-    // happened is half the answer to "may these rows be labelled". Three of
-    // the four ways the seam can be dead are settled inside
-    // `rebuildChainIndex`; the fourth, `requestResort` refusing, is only
-    // knowable after the attempt, and `applyFilterAndOrdering` drops the index
-    // when it sees it. Labelling first would stamp the joined path onto a tree
-    // nothing re-sorted. (The re-sort is NOT coupled to the adapter the other
+    // happened is half the answer to "may these rows be labelled". Every way
+    // the seam can be dead BEFORE the attempt is settled inside
+    // `rebuildChainIndex` — the setting, the pause, no pane at all, and each
+    // pane the gate finds unpatched — and the one that is only knowable AFTER
+    // it, `requestResort` refusing, is settled by `applyFilterAndOrdering`,
+    // which drops the index and the adapter's copy together. (A substitution
+    // that fails open for one run is settled by neither, because it is not a
+    // property of the seam at all: `applyCompactLabels` measures that one off
+    // the drawn tree. See `drawnWhereTheHeadWas`.) Labelling first would stamp
+    // the joined path onto a tree nothing re-sorted. (The re-sort is NOT coupled to the adapter the other
     // way round: `filterAndOrderFolder` reads `controller.currentSnapshot()`,
     // which the controller assigns before it calls this callback at all.
     // Reading `this.adapter.currentSnapshot()` instead WOULD couple them, by
@@ -2406,7 +2410,17 @@ export default class SpacesPlugin extends Plugin {
   private chainIndexNow: ChainIndex | null = null;
 
   /**
-   * EVERY main-window explorer pane is running our sort override.
+   * EVERY main-window explorer pane that is not DEFERRED is running our sort
+   * override.
+   *
+   * The deferred exclusion is `explorerViews()`'s, not this method's: a
+   * collapsed sidebar at startup has none of the seam's methods yet, so
+   * probing it would report "unknown" for a build that is perfectly capable.
+   * It is enough here because a deferred leaf's `containerEl` holds no
+   * `.nav-files-container`, so `bindExplorer` binds nothing from it and the
+   * adapter has no row in it to label -- the pane this gate would be
+   * protecting does not exist yet. It becomes an ordinary pane, and an
+   * ordinary input to this gate, on the `layout-change` that materialises it.
    *
    * THE GATE THE INDEX HANGS OFF, and the reason it exists: compaction is two
    * mechanisms that have to agree. The sort seam substitutes a run's TIP for
@@ -2425,11 +2439,19 @@ export default class SpacesPlugin extends Plugin {
    * one-shot Notice and turn filtering off everywhere), so it answers "ok" for
    * a split explorer with one pane patched and one not — which is the same bug
    * seen from the unpatched pane, since the adapter labels every bound
-   * container from the one index. `isPatched` is the module's own record of
-   * where the override actually went, so "absent from the build", "`patch`
-   * declined because another plugin holds the property" and "the patch step
-   * threw before it got there" all answer the same way without this method
-   * having to tell them apart.
+   * container from the one index. `isPatched` is the module's own record that
+   * `patch` SUCCEEDED on a view -- not that the override is still in that
+   * view's call chain, which `unpatch` itself contemplates it may not be
+   * (`nativeExplorerSort.ts` checks `getSortedFolderItems !== entry.override`
+   * before restoring). It is the right question anyway: "absent from the
+   * build", "`patch` declined because another plugin holds the property" and
+   * "the patch step threw before it got there" all answer the same way
+   * without this method having to tell them apart, and a plugin that WRAPS
+   * our override and calls through is still live -- a stricter identity test
+   * would silently turn compaction off for that user. An override that was
+   * genuinely displaced is caught where it matters, at the label:
+   * `drawnWhereTheHeadWas` asks the DOM whether the chain actually compacted
+   * rather than taking this record's word for it.
    *
    * THROWING IS ANSWERED WITH FALSE. `bindExplorer` already guards step 5, so
    * `ensureOrderingPatched` throwing is a state the plugin carries on from
@@ -2466,7 +2488,11 @@ export default class SpacesPlugin extends Plugin {
     // LAST of the guards above, and deliberately below the pause: this one
     // walks the workspace's leaves, and a pause must not pay for a lookup it
     // cannot use — the same discipline `ensureOrderingPatched` keeps, where
-    // `tests/productCommands.test.ts` pins it by counting.
+    // `tests/productCommands.test.ts` pins its own placement by counting leaf
+    // lookups. THIS line is pinned the same way, by its own test
+    // ("asks the workspace nothing at all while filtering is paused",
+    // `tests/compactSeamGate.test.ts`): paused, the count is zero; unpaused,
+    // it is one.
     if (!this.seamIsPatchedEverywhere()) {
       this.chainIndexNow = null;
       return;
@@ -2852,6 +2878,7 @@ export default class SpacesPlugin extends Plugin {
     if (this.sortedViews.length === 0) return;
     const signature = this.currentResortSignature();
     if (this.lastResort && sameResortSignature(this.lastResort, signature)) return;
+    const hadIndex = this.chainIndexNow !== null;
     let every = true;
     for (const view of this.sortedViews) {
       if (!requestResort(view)) every = false;
@@ -2859,16 +2886,42 @@ export default class SpacesPlugin extends Plugin {
     this.lastResort = every ? signature : null;
     // THE FOURTH WAY THE INDEX OUTLIVES ITS SORT, and the only one that is
     // not knowable before the attempt. `seamIsPatchedEverywhere` answers the
-    // other three up front; here the patch is on and `sort()` still refused,
+    // others up front; here the patch is on and `sort()` still refused,
     // so the tree keeps whatever it was last rendered as and the substitution
     // this index describes did not happen. The adapter must not label it: the
     // joined path on a row the chain is still nested under is the one outcome
     // worse than not compacting. Dropped here, at the one place the verdict
     // exists, rather than at each of this method's four call sites.
     //
+    // THE ADAPTER'S COPY GOES WITH IT, and that is not a nicety. The adapter's
+    // copy is what DRAWS — it labels on its own MutationObserver schedule,
+    // from the index it was last handed. Two of this method's four call sites
+    // (`recordSortOverride`, `restoreSavedOrdering`) never re-seed it, so a
+    // drop that touched only this field left the seam no longer substituting
+    // while the adapter went on stamping the joined path. That is the exact
+    // outcome the paragraph above says this line exists to prevent, reached
+    // from the other side.
+    //
     // `lastResort` is already null above, so the next event retries; a retry
     // that succeeds rebuilds the index from the snapshot in the ordinary way.
-    if (!every) this.chainIndexNow = null;
+    if (!every) {
+      this.chainIndexNow = null;
+      this.adapter.setChainIndex(null, this.compactLabelOptions());
+      // Panes that DID sort rendered the substitution before the refusal was
+      // known: the index is live for the whole loop above, so a pane earlier
+      // in it has already drawn the tip folder's bare name at the head's
+      // position. Nulling the index does not move that back on its own, and
+      // nothing else will — the next apply rebuilds a live index, that pane
+      // re-sorts compacted, the other refuses again, and the row stays
+      // unlabelled at a position it never earned. A second pass with the
+      // index gone renders those panes honestly; a pane that threw throws
+      // again and is no worse off. No recursion: `requestResort` reaches the
+      // seam, which now reads a null index.
+      //
+      // Guarded on `hadIndex` so a refusal with compaction off — the ordinary
+      // case — costs nothing.
+      if (hadIndex) for (const view of this.sortedViews) requestResort(view);
+    }
   }
 
   /** See `applyFilterAndOrdering` for why these four fields and no others. */
@@ -3778,10 +3831,6 @@ export default class SpacesPlugin extends Plugin {
       this.dragOrdering?.unbind();
       this.dragOrdering = null;
     });
-    // Before adapter.unbind(): a throw there would otherwise strand the sort
-    // override and leave the tree custom-ordered after a disable.
-    // The ORDER is still load-bearing: guarding each step means a failure
-    // cannot reorder them, only skip one.
     this.unloadStep("restoring the new-file location", () => {
       this.restoreNewFileParent?.();
       this.restoreNewFileParent = null;
@@ -3790,6 +3839,19 @@ export default class SpacesPlugin extends Plugin {
       this.restoreNativeCreate?.();
       this.restoreNativeCreate = null;
     });
+    // THESE TWO ARE SAFE IN EITHER ORDER, and it is worth saying so here
+    // because the pair looks like it must be ordered. `teardownOrdering()`
+    // reaches `unpatch`, which forces a `sort()` that re-renders the whole
+    // unfiltered vault — pushing compacted rows straight out of the explorer's
+    // render window, where no query can find them, moments before the adapter
+    // sweeps. What carries that is not the order: it is `ExplorerAdapter`'s
+    // RECORD of the rows it drew a prefix on, which holds a detached row when
+    // nothing else can. `LabelPassOptions.drawn` is where that argument is
+    // written out in full.
+    //
+    // Nor can a throw make the order matter: every step here runs through
+    // `unloadStep`, which catches and logs, so a failure in either one cannot
+    // skip the other — only itself.
     this.unloadStep("unpatching the sort seam", () => this.teardownOrdering());
     this.unloadStep("unbinding the explorer adapter", () => this.adapter.unbind());
     this.unloadStep("destroying the switcher", () => this.switcher?.destroy());
