@@ -728,7 +728,7 @@ describe("applyCompactLabels, shortened", () => {
     // The pane is widened and settles, so the kept decision is re-opened and
     // the full label fits. There is nothing a tooltip could add now, and a
     // stale one would claim a shortening that is no longer happening.
-    applyCompactLabels([r.title], DEEP, ABBREV, { remeasure: true, overflows: () => false });
+    applyCompactLabels([r.title], DEEP, ABBREV, { epoch: 1, overflows: () => false });
     expect(r.title.hasAttribute("aria-label")).toBe(false);
   });
 

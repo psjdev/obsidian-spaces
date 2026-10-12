@@ -326,18 +326,18 @@ describe("the shortening decision is the measurement", () => {
     });
 
     it("gives folders BACK one at a time when the pane grows", () => {
-      // The other direction, which is the one a user drags toward. A remeasure
-      // re-opens the decision from the whole label, so the row lands on the
-      // longest label the wider pane now fits rather than on whatever it was
-      // showing.
+      // The other direction, which is the one a user drags toward. A bumped
+      // epoch re-opens the decision from the whole label, so the row lands on
+      // the longest label the wider pane now fits rather than on whatever it
+      // was showing.
       const title = deepRow();
       applyCompactLabels([title], DEEP, ON, { overflows: fits(20) });
       expect(title.textContent).toBe("../Design/Decisions");
 
-      applyCompactLabels([title], DEEP, ON, { overflows: fits(40), remeasure: true });
+      applyCompactLabels([title], DEEP, ON, { overflows: fits(40), epoch: 1 });
       expect(title.textContent).toBe("../Q4/Projects/Atlas/Design/Decisions");
 
-      applyCompactLabels([title], DEEP, ON, { overflows: fits(60), remeasure: true });
+      applyCompactLabels([title], DEEP, ON, { overflows: fits(60), epoch: 2 });
       expect(title.textContent).toBe("Research/2026/Q4/Projects/Atlas/Design/Decisions");
       expect(title.hasAttribute("aria-label")).toBe(false);
     });
@@ -355,6 +355,61 @@ describe("the shortening decision is the measurement", () => {
       applyCompactLabels([title], DEEP, ON, { overflows: probe });
       expect(probe).not.toHaveBeenCalled();
       expect(title.textContent).toBe("../Projects/Atlas/Design/Decisions");
+    });
+
+    it("re-measures a row that was out of the window when the pane changed", () => {
+      // THE DETACHED ROW. Obsidian windows the explorer: a row scrolled out
+      // of view keeps its element on its tree item but leaves the DOM, so it
+      // is not in the `titles` a pass is handed. A resize that happens while
+      // it is out is therefore spent without reaching it, and when it comes
+      // back the pass that sees it is an ordinary one. Under a single
+      // "re-measure next pass" flag the row kept whatever level it was last
+      // drawn at, so a user who scrolled, widened the pane and scrolled back
+      // found one row still reading `../Design/Decisions` in an explorer wide
+      // enough for the whole path, beside compacted rows drawn in full.
+      //
+      // The epoch is what fixes it: a row carries the measurement regime its
+      // decision was taken under, so one that missed the bump is undecided
+      // when it returns, whatever pass happens to be running.
+      const decidedAt = new WeakMap<HTMLElement, number>();
+      const onScreen = deepRow();
+      const scrolledOut = deepRow();
+
+      applyCompactLabels([onScreen, scrolledOut], DEEP, ON, {
+        overflows: fits(20),
+        epoch: 1,
+        decidedAt,
+      });
+      expect(scrolledOut.textContent).toBe("../Design/Decisions");
+
+      // The pane widens while the second row is out of the window.
+      applyCompactLabels([onScreen], DEEP, ON, { overflows: fits(60), epoch: 2, decidedAt });
+      expect(onScreen.textContent).toBe(DEEP_FULL);
+
+      // It comes back on an ORDINARY pass, which bumps nothing.
+      applyCompactLabels([onScreen, scrolledOut], DEEP, ON, {
+        overflows: fits(60),
+        epoch: 2,
+        decidedAt,
+      });
+      expect(scrolledOut.textContent).toBe(DEEP_FULL);
+    });
+
+    it("leaves a row that WAS decided at this epoch alone, and measures nothing", () => {
+      // The other half: the epoch must not turn every pass into a measuring
+      // pass. The adapter's own MutationObserver watches the container this
+      // writes into, so a pass that re-measured unconditionally would write,
+      // schedule itself, and redraw the explorer for as long as the plugin
+      // was loaded.
+      const decidedAt = new WeakMap<HTMLElement, number>();
+      const title = deepRow();
+      applyCompactLabels([title], DEEP, ON, { overflows: fits(20), epoch: 7, decidedAt });
+      expect(title.textContent).toBe("../Design/Decisions");
+
+      const probe = vi.fn(() => true);
+      applyCompactLabels([title], DEEP, ON, { overflows: probe, epoch: 7, decidedAt });
+      expect(probe).not.toHaveBeenCalled();
+      expect(title.textContent).toBe("../Design/Decisions");
     });
 
     it("carries the tooltip at every level that hides a folder", () => {
@@ -424,7 +479,7 @@ describe("the shortening decision is the measurement", () => {
     applyCompactLabels([title], DEEP, ON, { overflows: NEVER });
     expect(title.textContent).toBe("../Design/Decisions");
 
-    applyCompactLabels([title], DEEP, ON, { overflows: NEVER, remeasure: true });
+    applyCompactLabels([title], DEEP, ON, { overflows: NEVER, epoch: 1 });
     expect(title.textContent).toBe(DEEP_FULL);
     expect(title.hasAttribute("aria-label")).toBe(false);
   });
@@ -641,11 +696,12 @@ describe("the nav container's ResizeObserver", () => {
  * The adapter's MutationObserver watches the container the pass writes into,
  * so a pass that keeps rewriting the prefix feeds that observer, which calls
  * `schedule()`, which runs the pass again, for as long as the plugin is
- * loaded. Measured on this branch with `remeasure` left latched: 17 label
+ * loaded. Measured on this branch with the old `remeasure` flag left latched:
+ * 17 label
  * passes in 600ms of an idle explorer, against 2 when it is cleared.
  *
  * What makes the chain terminate is one line -- `applyNow` consuming
- * `this.remeasure` rather than reading it -- and deleting that line passed the
+ * the flag rather than reading it -- and deleting that line passed the
  * whole suite before this test existed.
  *
  * REAL TIMERS, deliberately. The loop runs on the adapter's own
@@ -701,7 +757,7 @@ describe("the label pass settles", () => {
       expect(answered.writes).toBeGreaterThan(0);
 
       // And then nothing, through two further settles. An adapter that has
-      // latched `remeasure` is measuring and rewriting on every frame by now.
+      // latched epoch is measuring and rewriting on every frame by now.
       await settle();
       await settle();
       expect(measured).toBe(answered.measured);

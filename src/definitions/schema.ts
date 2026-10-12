@@ -420,7 +420,10 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // leave a document holding any unrecognised value on the broken label,
         // which is the failure this setting exists to remove.
         abbreviateCompactedPaths: st.abbreviateCompactedPaths !== false,
-        // `compactPathThreshold` was read here and is read nowhere now:
+        // `compactPathThreshold` was read here in an earlier draft of this
+        // feature and is read nowhere now. No RELEASE ever carried it, so no
+        // stored document can hold one; what follows is why removing a read
+        // would have been safe even if one did:
         // shortening triggers on a measured overflow instead of on a folder
         // count. Removing it is a READ-SIDE change and nothing else. Every
         // settings key is listed by name in this object, so a document still

@@ -102,6 +102,7 @@ export type ActiveSpaceStyle = "shaded" | "boxed" | "bolded";
  * drew before 0.7.0.
  */
 export type DropIndicatorStyle = "box" | "line";
+
 interface SpacesSettings {
   globalIgnore: string[];
   /**

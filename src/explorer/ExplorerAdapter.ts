@@ -75,13 +75,35 @@ export type OverflowProbe = (title: HTMLElement) => boolean;
  */
 export interface LabelPassOptions {
   /**
-   * Decide every row again, including the ones already drawn short.
+   * WHICH MEASUREMENT REGIME IS CURRENT, bumped by anything that can change
+   * what fits: a pane resize, or a change of runs or policy.
    *
-   * Set by a pane resize, which is the event the adapter hears that
-   * can turn a row which did not fit into one that does. See
-   * `applyCompactLabels` for why an ordinary pass must NOT do this.
+   * A NUMBER RATHER THAN A FLAG, and the difference is a row the pass cannot
+   * see. This was a single "decide every row again" boolean, set by a resize
+   * and cleared by the pass that followed it. Obsidian windows the explorer,
+   * so a row scrolled out of view is in no container and in no `titles`: the
+   * resize was spent by a pass that never reached it, and when it came back
+   * the pass that saw it was an ordinary one, so it kept the level it was
+   * last drawn at. A user who scrolled, widened the pane and scrolled back
+   * found one row still shortened in an explorer wide enough for the whole
+   * path, beside compacted rows drawn in full.
+   *
+   * An epoch is per ROW rather than per pass, so a row that missed the bump
+   * is undecided until some pass actually measures it, whichever one that
+   * turns out to be. See `applyCompactLabels` for why an ordinary pass must
+   * not re-open a decision that IS current.
    */
-  remeasure?: boolean;
+  epoch?: number;
+  /**
+   * The epoch each row's standing decision was taken under.
+   *
+   * A `WeakMap` because it answers a question about a row rather than holding
+   * a list: it is never iterated, it keeps nothing alive, and it needs no
+   * teardown of its own. Absent, every row counts as decided at epoch zero,
+   * which is what a caller with no bookkeeping of its own means by "keep what
+   * is drawn".
+   */
+  decidedAt?: WeakMap<HTMLElement, number>;
   /** The measuring step. Defaults to `rowOverflows`. */
   overflows?: OverflowProbe;
   /**
@@ -196,16 +218,29 @@ export class ExplorerAdapter {
    */
   private labelPolicy: CompactLabelPolicy = { abbreviateWhenOverflowing: true };
   /**
-   * Set by a pane resize, consumed by the next label pass.
+   * The current measurement regime, bumped by anything that can change what
+   * fits in the pane.
    *
    * A row already drawn short is normally left alone: deciding again means
    * drawing the full label to measure it, and a pass that rewrote the prefix
    * every time would be seen by this class's own MutationObserver and schedule
-   * the next pass forever. A pane resize is the event this class hears that
-   * can turn a row which did not fit into one that does, so it is the one that
-   * asks for the decision to be retaken.
+   * the next pass forever. So the decision stands until something that could
+   * change it happens, and the bump is how this class says so.
+   *
+   * NEVER RESET, including by `unbind()`. It is a sequence number, not a
+   * state: a row decided under epoch 4 must still read as stale after a
+   * rebind, and setting it back to zero would make a stale decision look
+   * current. It costs one integer that no teardown has to remember.
    */
-  private remeasure = false;
+  private measureEpoch = 0;
+  /**
+   * Which epoch each row's standing decision was taken under.
+   *
+   * Beside the epoch rather than inside the pass, because the pass is
+   * stateless and the question outlives it: a row absent from one pass is
+   * asked about by the next. See `LabelPassOptions.decidedAt`.
+   */
+  private readonly decidedAt = new WeakMap<HTMLElement, number>();
 
   /**
    * Every row this adapter currently has a prefix element on.
@@ -265,7 +300,7 @@ export class ExplorerAdapter {
       index !== this.chainIndex ||
       policy.abbreviateWhenOverflowing !== this.labelPolicy.abbreviateWhenOverflowing
     ) {
-      this.remeasure = true;
+      this.measureEpoch += 1;
     }
     this.chainIndex = index;
     this.labelPolicy = policy;
@@ -367,7 +402,7 @@ export class ExplorerAdapter {
     if (this.resizeTimer) return;
     this.resizeTimer = window.setTimeout(() => {
       this.resizeTimer = 0;
-      this.remeasure = true;
+      this.measureEpoch += 1;
       this.applyNow();
     }, RELABEL_FRAME_MS);
   }
@@ -387,7 +422,6 @@ export class ExplorerAdapter {
       window.clearTimeout(this.resizeTimer);
       this.resizeTimer = 0;
     }
-    this.remeasure = false;
     if (this.frame) {
       window.cancelAnimationFrame(this.frame);
       this.frame = 0;
@@ -465,9 +499,10 @@ export class ExplorerAdapter {
       const docs = new Set<Document>();
       for (const c of this.containers) docs.add(c.ownerDocument);
       // A remembered row's document, so a sweep still has a document to ask
-      // when every container has already gone (`unbind()` empties the list,
-      // and a popout explorer's rows do not belong to this one's document
-      // anyway).
+      // when every container has already gone: `unbind()` empties the list,
+      // and a row Obsidian detached is in no container even before that.
+      // (Not about pop-outs. `explorerLeaves()` filters those by document
+      // before anything is bound, so no pop-out row can be in this record.)
       for (const title of this.drawn) docs.add(title.ownerDocument);
       for (const doc of docs) roots.push(doc);
     }
@@ -498,7 +533,18 @@ export class ExplorerAdapter {
       // the element is already in the user's explorer.
       root.querySelectorAll<HTMLElement>(`.${CLS_COMPACT_PREFIX}`).forEach((prefix) => {
         const title = prefix.parentElement;
-        if (title) restoreRow(title, this.drawn);
+        if (!title) return;
+        // THE TOOLTIP, WHICH ONLY THIS REACH MAY TAKE ON TRUST. `ourTooltips`
+        // is module state, so in exactly the case this reach exists for -- a
+        // prefix left by a session whose teardown never ran, read by a freshly
+        // evaluated module -- the record is EMPTY and `restoreRow` would leave
+        // the `aria-label` behind on a row it has just made ordinary again.
+        // Here a prefix element IS the proof the attribute is ours: nothing
+        // but `drawRow` writes one, and it writes the tooltip with it. Every
+        // other caller still has to ask the record, for the reason
+        // `restoreRow` gives.
+        title.removeAttribute(ARIA_LABEL);
+        restoreRow(title, this.drawn);
       });
     }
 
@@ -623,13 +669,13 @@ export class ExplorerAdapter {
         }
       }
     }
-    // The flag is consumed HERE rather than read in place, so a pass that
-    // returned early above cannot swallow a resize: it stays set until a pass
-    // actually reaches the labels.
-    const remeasure = this.remeasure;
-    this.remeasure = false;
+    // Handed over rather than consumed: nothing here clears the epoch, so a
+    // pass that returned early above cannot swallow a resize, and neither can
+    // a pass whose `titles` happened not to include a given row. Each row
+    // catches up on its own, at whichever pass first measures it.
     applyCompactLabels(titles, this.chainIndex, this.labelPolicy, {
-      remeasure,
+      epoch: this.measureEpoch,
+      decidedAt: this.decidedAt,
       overflows: this.overflows,
       drawn: this.drawn,
     });
@@ -665,8 +711,11 @@ export class ExplorerAdapter {
  * this writes into with a MutationObserver, so those writes would schedule the
  * next pass, which would write again: the explorer would redraw every frame
  * for as long as the plugin was loaded. The decision is therefore kept until
- * something that could change it happens, which is a pane resize, and
- * `remeasure` is how the adapter says so.
+ * something that could change it happens, which is a pane resize or a change
+ * of runs, and the EPOCH is how the adapter says so. It is carried per ROW
+ * rather than per pass, so a row the bumping pass could not see -- one
+ * Obsidian had scrolled out of its window -- is still undecided when it comes
+ * back. See `LabelPassOptions.epoch`.
  *
  * WHAT IS WRITTEN, AND WHAT IS NOT. `titles` are `[data-path]` elements, which
  * in Obsidian are `.tree-item-self` -- the ROW, whose children are the collapse
@@ -684,9 +733,11 @@ export class ExplorerAdapter {
  * Design/` + `Decisions` when the pane took three folders off it, and the
  * inner still holds only the folder's own name.
  *
- * FAILS OPEN PER ROW. A row with no text element is skipped entirely -- no
- * prefix, and not even classed. There is nothing to anchor the prefix to, and
- * a class with no label is a style on a row that reads as an ordinary folder.
+ * FAILS OPEN PER ROW. A row with no text element gets no prefix and no class:
+ * there is nothing to anchor a prefix to, and a class with no label is a style
+ * on a row that reads as an ordinary folder. It is RESTORED rather than
+ * skipped, because a row this pass drew earlier and that has since lost its
+ * text element would otherwise keep a prefix no later pass would remove.
  *
  * RESTORATION IS REMOVING ONE ELEMENT, plus the class, plus the tooltip
  * attribute when this pass put one there. Nothing else. No text is rewritten,
@@ -716,6 +767,19 @@ export function applyCompactLabels(
 ): void {
   const overflows = pass.overflows ?? rowOverflows;
   const drawn = pass.drawn;
+  const decidedAt = pass.decidedAt;
+  const epoch = pass.epoch ?? 0;
+  /**
+   * Draw a row and record the regime it was decided under, in ONE place.
+   *
+   * Every write in this pass goes through here. Stamping at each of the four
+   * call sites instead would make a forgotten one a row that is never
+   * measured again, which is the bug the epoch exists to fix.
+   */
+  const settle = (title: HTMLElement, textEl: HTMLElement, run: Run, drop: number): void => {
+    drawRow(title, textEl, run, drop, drawn);
+    decidedAt?.set(title, epoch);
+  };
   /** The rows drawn in full that still need a verdict, and at what level. */
   const undecided: { title: HTMLElement; run: Run; drop: number }[] = [];
 
@@ -729,19 +793,22 @@ export function applyCompactLabels(
     // the row itself keeps that impossible either way, and the direct-child
     // form says so. The same reasoning applies to the prefix below.
     const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
-    if (!textEl) continue;
     const run = index?.runByTip.get(path);
     // Not a tip, OR a tip whose chain is visibly still nested — see
     // `drawnWhereTheHeadWas`. `!index` leads because without one there are no
     // runs at all, which is also what makes `run` findable below it.
-    if (!index || !run || !drawnWhereTheHeadWas(title, run, index)) {
+    // `!textEl` leads for the reason the docblock gives: a row with nothing to
+    // anchor a prefix to cannot be drawn, and a row this pass drew EARLIER
+    // that has since lost its text element must still be given back rather
+    // than left carrying a prefix nothing will take off.
+    if (!textEl || !index || !run || !drawnWhereTheHeadWas(title, run, index)) {
       restoreRow(title, drawn);
       continue;
     }
     // Turned off means never measured. The answer could not change the label,
     // and reading a width forces a layout.
     if (!policy.abbreviateWhenOverflowing) {
-      drawRow(title, textEl, run, 0, drawn);
+      settle(title, textEl, run, 0);
       continue;
     }
     // Already shortened, and nothing has happened that could change by how
@@ -749,12 +816,18 @@ export function applyCompactLabels(
     // reason above. A row drawn in FULL is not kept this way: it is the state
     // a newly narrowed pane has to be able to move off, and it is also what a
     // run `compactLabel` refuses to shorten at any width draws forever.
-    const standing = pass.remeasure ? null : drawnDropOn(title, run);
+    //
+    // ASKED OF THE ROW, not of the pass. A row whose decision was taken under
+    // an older epoch is undecided however ordinary this pass is, which is how
+    // a row that was scrolled out of the window when the pane moved is
+    // reached at all.
+    const current = decidedAt ? decidedAt.get(title) === epoch : epoch === 0;
+    const standing = current ? drawnDropOn(title, run) : null;
     if (standing !== null && standing > 0) {
-      drawRow(title, textEl, run, standing, drawn);
+      settle(title, textEl, run, standing);
       continue;
     }
-    drawRow(title, textEl, run, 0, drawn);
+    settle(title, textEl, run, 0);
     undecided.push({ title, run, drop: 0 });
   }
 
@@ -785,7 +858,7 @@ export function applyCompactLabels(
       const textEl = row.title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
       if (!textEl) continue;
       row.drop += 1;
-      drawRow(row.title, textEl, row.run, row.drop, drawn);
+      settle(row.title, textEl, row.run, row.drop);
       pending.push(row);
     }
   }

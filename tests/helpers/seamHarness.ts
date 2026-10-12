@@ -153,7 +153,7 @@ export interface SeamHarnessOptions {
  * - `"sort-throws"` — patched normally, but `sort()` throws, so
  *   `requestResort` answers false and the tree keeps its previous render.
  */
-export type SeamShape = "ok" | "absent" | "refused" | "sort-throws";
+type SeamShape = "ok" | "absent" | "refused" | "sort-throws";
 
 /**
  * Applies a seam shape to a view that currently has the real one.
@@ -319,7 +319,7 @@ function renderNestedInto(
  * only Obsidian's `sort()` writes it, through `vChildren.addChild`. It is
  * modelled here and nowhere in `src/` for exactly that reason.
  */
-export interface SeamItem extends FolderItemLike {
+interface SeamItem extends FolderItemLike {
   parent?: SeamItem | null;
 }
 

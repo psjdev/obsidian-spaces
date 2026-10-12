@@ -74,7 +74,7 @@
 
    `.is-cut` is OBSIDIAN's class, not ours (it marks a row the user has cut;
    we never set it, so do not look for where we do). Obsidian dims it to 0.5 at
-   specificity (0,2,0), which this rule's (0,3,0) would override, so a cut
+   specificity (0,2,0), which this rule's (0,4,0) would override, so a cut
    compacted row would lose the cue. The `:not(.is-cut)` stands this rule
    down on a cut row, which then falls back to the scaffold rule above (0.45,
    dimmer than Obsidian's 0.5, exactly as a cut plain scaffold row already
