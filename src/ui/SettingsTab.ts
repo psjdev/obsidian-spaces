@@ -297,8 +297,8 @@ export class SpacesSettingTab extends PluginSettingTab {
         // can I not change this"; a sentence answers it.
         desc:
           "When Compact folder chains is on, a compacted row whose path is too " +
-          "wide for the file explorer reads as two dots and the last two folder " +
-          "names. Hover the row to see the whole path.",
+          "wide for the file explorer drops leading folders until it fits, with " +
+          "two dots in their place. Hover the row to see the whole path.",
         control: { type: "toggle", key: "abbreviateCompactedPaths" },
       },
       {

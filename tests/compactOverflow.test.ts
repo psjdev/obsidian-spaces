@@ -248,9 +248,13 @@ describe("the shortening decision is the measurement", () => {
     expect(drawnAtEachMeasurement).toEqual([3, 3, 3]);
   });
 
-  it("measures every row before it shortens any of them", () => {
-    // The other half of the batching: the writes come after ALL the reads, so
-    // no measurement is taken against a tree half of which has already moved.
+  it("measures every row before it shortens any of them, in every round", () => {
+    // The other half of the batching: inside a round the writes come after
+    // ALL the reads, so no measurement is taken against a tree half of which
+    // has already moved. The climb makes this a per-ROUND property -- the
+    // second round does measure rows the first round shortened, which is the
+    // point of it -- so what has to hold is that every measurement within one
+    // round sees the same tree.
     const titles = [deepRow(), deepRow(), deepRow()];
     const shortenedAtEachMeasurement: number[] = [];
     applyCompactLabels(titles, DEEP, ON, {
@@ -261,8 +265,112 @@ describe("the shortening decision is the measurement", () => {
         return true;
       },
     });
-    expect(shortenedAtEachMeasurement).toEqual([0, 0, 0]);
+    // Three rows measured per round, and nothing drawn short in the first.
+    expect(shortenedAtEachMeasurement.length % titles.length).toBe(0);
+    expect(shortenedAtEachMeasurement.slice(0, 3)).toEqual([0, 0, 0]);
+    for (let i = 0; i < shortenedAtEachMeasurement.length; i += titles.length) {
+      const round = shortenedAtEachMeasurement.slice(i, i + titles.length);
+      expect(new Set(round).size).toBe(1);
+    }
+    // A pane that fits nothing pushes every row to the floor and stops there.
     for (const t of titles) expect(t.textContent).toBe("../Design/Decisions");
+  });
+
+  /**
+   * THE CLIMB, measured: a row gives up what the pane took and no more.
+   *
+   * The probe models a pane as a character budget, which is the only kind of
+   * width jsdom can offer. It is enough for the property under test: the pass
+   * must try the whole label first, then one folder less, and stop at the
+   * first label inside the budget.
+   */
+  describe("one folder at a time", () => {
+    /** A pane that fits `chars` characters of label and no more. */
+    const fits = (chars: number): OverflowProbe => (title) =>
+      (title.textContent ?? "").length > chars;
+
+    // 48 characters whole, then 42, 37, 34, 25 and 19 as the folders go.
+    for (const [budget, label] of [
+      [60, "Research/2026/Q4/Projects/Atlas/Design/Decisions"],
+      [48, "Research/2026/Q4/Projects/Atlas/Design/Decisions"],
+      [45, "../2026/Q4/Projects/Atlas/Design/Decisions"],
+      [40, "../Q4/Projects/Atlas/Design/Decisions"],
+      [36, "../Projects/Atlas/Design/Decisions"],
+      [30, "../Atlas/Design/Decisions"],
+      [20, "../Design/Decisions"],
+      [4, "../Design/Decisions"],
+    ] as const) {
+      it(`keeps every folder a ${budget} character pane has room for`, () => {
+        const title = deepRow();
+        applyCompactLabels([title], DEEP, ON, { overflows: fits(budget) });
+        expect(title.textContent).toBe(label);
+      });
+    }
+
+    it("stops at the parent rather than measuring forever", () => {
+      // A pane narrower than the shortest label this run can draw. The row
+      // settles at the floor, and the pass ENDS -- the count is the assertion,
+      // because a climb with no ceiling would call the probe until the stack
+      // or the test runner gave out.
+      const title = deepRow();
+      let calls = 0;
+      applyCompactLabels([title], DEEP, ON, {
+        overflows: () => {
+          calls++;
+          return true;
+        },
+      });
+      expect(title.textContent).toBe("../Design/Decisions");
+      // Six measurements: the whole label and the five levels below it.
+      expect(calls).toBe(6);
+    });
+
+    it("gives folders BACK one at a time when the pane grows", () => {
+      // The other direction, which is the one a user drags toward. A remeasure
+      // re-opens the decision from the whole label, so the row lands on the
+      // longest label the wider pane now fits rather than on whatever it was
+      // showing.
+      const title = deepRow();
+      applyCompactLabels([title], DEEP, ON, { overflows: fits(20) });
+      expect(title.textContent).toBe("../Design/Decisions");
+
+      applyCompactLabels([title], DEEP, ON, { overflows: fits(40), remeasure: true });
+      expect(title.textContent).toBe("../Q4/Projects/Atlas/Design/Decisions");
+
+      applyCompactLabels([title], DEEP, ON, { overflows: fits(60), remeasure: true });
+      expect(title.textContent).toBe("Research/2026/Q4/Projects/Atlas/Design/Decisions");
+      expect(title.hasAttribute("aria-label")).toBe(false);
+    });
+
+    it("keeps a part-way level across an ordinary pass, and measures nothing", () => {
+      // The keep-short guard has to recognise a row shortened by THREE
+      // folders, not only one shortened to the floor. A guard that compared
+      // against the floor label alone would call this row undecided, draw it
+      // whole and climb again on every mutation the observer sees.
+      const title = deepRow();
+      applyCompactLabels([title], DEEP, ON, { overflows: fits(36) });
+      expect(title.textContent).toBe("../Projects/Atlas/Design/Decisions");
+
+      const probe = vi.fn(() => true);
+      applyCompactLabels([title], DEEP, ON, { overflows: probe });
+      expect(probe).not.toHaveBeenCalled();
+      expect(title.textContent).toBe("../Projects/Atlas/Design/Decisions");
+    });
+
+    it("carries the tooltip at every level that hides a folder", () => {
+      // The row says less than the path at every level above zero, so the
+      // hover has to answer at every one of them -- not only at the floor.
+      for (const [budget, label] of [
+        [45, "../2026/Q4/Projects/Atlas/Design/Decisions"],
+        [30, "../Atlas/Design/Decisions"],
+        [20, "../Design/Decisions"],
+      ] as const) {
+        const title = deepRow();
+        applyCompactLabels([title], DEEP, ON, { overflows: fits(budget) });
+        expect(title.textContent).toBe(label);
+        expect(title.getAttribute("aria-label")).toBe(DEEP_TIP);
+      }
+    });
   });
 
   it("writes nothing on a repeated pass, so our own pass cannot re-trigger itself", () => {
@@ -414,7 +522,7 @@ describe("the nav container's ResizeObserver", () => {
     a.unbind();
   });
 
-  it("re-runs the label pass once the resize settles, and re-measures", () => {
+  it("re-runs the label pass on the next frame, and re-measures", () => {
     const container = mount();
     let fits = false;
     const a = new ExplorerAdapter(() => !fits);
@@ -436,6 +544,29 @@ describe("the nav container's ResizeObserver", () => {
     a.unbind();
   });
 
+  it("relabels within a frame of the resize, not a tenth of a second after it", () => {
+    // WHAT THIS PINS, AND WHY IT IS A TEST RATHER THAN A COMMENT. The pass
+    // used to be debounced 120ms: a sidebar drag relabelled nothing while it
+    // moved and then snapped once the pointer stopped, which reads as the
+    // plugin lagging the app. One frame is the budget now, and restoring any
+    // settle timer longer than a frame fails here.
+    const container = mount();
+    let fits = false;
+    const a = new ExplorerAdapter(() => !fits);
+    a.bind(container);
+    a.setChainIndex(DEEP, ON);
+    a.apply(SNAP);
+    const title = container.querySelector("[data-path]") as HTMLElement;
+    expect(title.textContent!.trim()).toBe("../Design/Decisions");
+
+    fits = true;
+    fire();
+    // One frame's worth of time, and nothing like 120ms.
+    vi.advanceTimersByTime(20);
+    expect(title.textContent!.trim()).toBe(DEEP_FULL);
+    a.unbind();
+  });
+
   it("disconnects on teardown, and nothing it armed reaches the torn-down tree", () => {
     const container = mount();
     const a = new ExplorerAdapter(() => true);
@@ -445,8 +576,8 @@ describe("the nav container's ResizeObserver", () => {
     const title = container.querySelector("[data-path]") as HTMLElement;
     expect(prefixOf(title)).not.toBeNull();
 
-    // A resize in flight at the moment the plugin unloads. The settle timer
-    // is asserted by COUNT, because the repainting half of this test is
+    // A resize in flight at the moment the plugin unloads. The armed pass is
+    // asserted by COUNT, because the repainting half of this test is
     // satisfied by `applyNow`'s own "no containers" guard whether or not the
     // timer was cleared -- so without the count, dropping the clear from
     // `unbind()` passes.
@@ -534,7 +665,7 @@ describe("the label pass settles", () => {
     document.body.innerHTML = "";
   });
 
-  /** Longer than the 120ms resize settle, and many animation frames wide. */
+  /** Many animation frames wide, which is what a runaway pass would use. */
   const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 250));
 
   it("stops after a resize instead of relabelling for as long as it is loaded", async () => {

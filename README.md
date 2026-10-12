@@ -213,13 +213,13 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Allow reordering outside spaces | On | The same, for **All** |
 | Restore tabs when switching spaces | Off | Whether each space restores its own tabs. On, switching also rearranges your panes; off changes nothing about which rows are visible |
 | Compact folder chains | Off | Draws a chain of folders that leads to a single folder as one row named for the folders it replaces (see below) |
-| Shorten long compacted paths | On | Draws a compacted path that is too wide for the file explorer as two dots and the last two folder names |
+| Shorten long compacted paths | On | Drops leading folders from a compacted path that is too wide for the file explorer, with two dots in their place |
 
 A space that gathers notes from across your vault shows the folders they live in, so one note several folders deep costs several rows. Turn on **Compact folder chains** under Settings → Appearance, and a chain of folders that leads to a single folder draws as one row named for the folders it replaces, such as `Work/Clients/Northwind`. Folders you added to the space yourself always keep their own row.
 
 The compacted row is the deepest folder with a longer label, so collapsing it, its context menu and dropping onto it all act on that folder. The setting is vault-wide.
 
-A row whose path is wider than the file explorer draws as `../Design/Decisions` instead, and names the full path when you hover it. Widen the file explorer and the row goes back to the whole path as soon as it fits. Turn **Shorten long compacted paths** off to always draw the whole path.
+A row whose path is wider than the file explorer drops its leading folders, one at a time, until the rest fits. `Research/2026/Q4/Projects/Atlas/Design/Decisions` reads `../Q4/Projects/Atlas/Design/Decisions` in a pane that is a little too narrow and `../Design/Decisions` in a much narrower one, and the row names the full path when you hover it. Widen the file explorer and the folders come back as soon as they fit. Turn **Shorten long compacted paths** off to always draw the whole path.
 
 ## Your files and your data
 

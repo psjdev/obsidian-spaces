@@ -3,6 +3,7 @@ import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
 import {
   compactLabel,
   isAbbreviated,
+  maxDrop,
   type CompactLabelPolicy,
   type LabelPart,
 } from "../ui/compactLabel";
@@ -21,14 +22,25 @@ import type { ChainIndex, Run } from "../visibility/compactChains";
 const ARIA_LABEL = "aria-label";
 
 /**
- * How long the pane must stop moving before the labels are measured again.
+ * The ceiling on how often a moving pane may re-run the label pass: one frame.
  *
- * A sidebar drag fires the observer on nearly every pointer move, and each
- * re-measurement forces a synchronous layout over a window of rows. Settling
- * first means one measurement per drag instead of one per frame, and the user
- * cannot read a label mid-drag anyway.
+ * NOT A SETTLE TIMER, and the difference is the whole behavior. This one is
+ * armed by the first resize and never restarted, so a pass runs a frame after
+ * the pane STARTS moving and once a frame for as long as it keeps moving. The
+ * 120ms debounce it replaced was restarted by every callback, so a drag
+ * relabelled nothing at all until the pointer stopped.
+ *
+ * A TIMER RATHER THAN `requestAnimationFrame`, which this was written as
+ * first. Measured in the running app, in an Obsidian window that is visible
+ * but not focused: `requestAnimationFrame` fired after 969ms, a 0ms timer
+ * after 0ms and a 120ms timer after 130ms. Chromium throttles frames for a
+ * window nobody is looking at, and `document.visibilityState` still reads
+ * "visible" throughout, so nothing in the page can see it coming. A user with
+ * the explorer on a second monitor would have watched a label take a second
+ * to catch up, and `e2e/deep-compact.mjs` went from 15/15 to 9/15 on exactly
+ * that lag.
  */
-const RESIZE_SETTLE_MS = 120;
+const RELABEL_FRAME_MS = 16;
 
 /**
  * How much wider than its box a row's content may measure and still count as
@@ -65,7 +77,7 @@ export interface LabelPassOptions {
   /**
    * Decide every row again, including the ones already drawn short.
    *
-   * Set by a settled pane resize, which is the event the adapter hears that
+   * Set by a pane resize, which is the event the adapter hears that
    * can turn a row which did not fit into one that does. See
    * `applyCompactLabels` for why an ordinary pass must NOT do this.
    */
@@ -157,7 +169,7 @@ export class ExplorerAdapter {
   private observers: MutationObserver[] = [];
   /** One per bound container, disconnected in `unbind()` with the rest. */
   private resizeObservers: ResizeObserver[] = [];
-  /** The settle timer armed by `onPaneResize`, cleared in `unbind()`. */
+  /** The pass armed by `onPaneResize`, cleared in `unbind()`. */
   private resizeTimer = 0;
   private snapshot: VisibilitySnapshot | null = null;
   /**
@@ -184,7 +196,7 @@ export class ExplorerAdapter {
    */
   private labelPolicy: CompactLabelPolicy = { abbreviateWhenOverflowing: true };
   /**
-   * Set by a settled pane resize, consumed by the next label pass.
+   * Set by a pane resize, consumed by the next label pass.
    *
    * A row already drawn short is normally left alone: deciding again means
    * drawing the full label to measure it, and a pass that rewrote the prefix
@@ -315,9 +327,9 @@ export class ExplorerAdapter {
       // no label leaves that final layout identical and reports nothing. A
       // pass that DOES change one can flip a horizontal scrollbar, which is a
       // content-box change this observer would report; that costs one further
-      // debounced pass, whose own final layout is then identical, so the chain
-      // stops there. The residual is one extra pass per genuine relabel on a
-      // pane whose scrollbar is on the edge, 120ms after it, and not a loop.
+      // pass, whose own final layout is then identical, so the chain stops
+      // there. The residual is one extra pass per genuine relabel on a pane
+      // whose scrollbar is on the edge, one frame after it, and not a loop.
       //
       // `defaultView`, not Obsidian's `win`: the same cross-window handle
       // `SwitcherView` uses, and the one the DOM lib types constructors on. It
@@ -332,20 +344,32 @@ export class ExplorerAdapter {
   }
 
   /**
-   * A settled resize, then one ordinary pass with the decision retaken.
+   * A resize, then one pass with the decision retaken -- in the next frame,
+   * not after the drag stops.
    *
-   * Debounced rather than coalesced into a frame like `schedule()`: a sidebar
-   * drag fires the observer on nearly every pointer move, each pass re-reads
-   * the layout of a window of rows, and a label nobody can read mid-drag is
-   * worth nothing. One measurement per drag, taken where it stops.
+   * ARMED, NOT RESTARTED, AND IT USED TO BE DEBOUNCED. A 120ms settle timer
+   * was restarted by every callback, so a sidebar drag relabelled nothing at
+   * all while it moved and then snapped once, a tenth of a second after the
+   * pointer came to rest. The reasoning for it was that a label nobody can
+   * read mid-drag is worth nothing, and that is wrong twice: the row is what
+   * the user is dragging the pane to read, and the snap arrives after they
+   * have stopped looking for it. Obsidian's own text reflows under the same
+   * drag, so ours standing still reads as the plugin lagging the app.
+   *
+   * ONE PASS PER FRAME IS THE CEILING, which is what makes this affordable:
+   * the observer delivers at most once a frame, a pass is synchronous, and a
+   * pass already armed swallows every further callback until it runs. The
+   * climb inside the pass costs one layout per level given up, and during a
+   * drag that is a level or two, because the row starts each pass where the
+   * last one left it.
    */
   private onPaneResize(): void {
-    if (this.resizeTimer) window.clearTimeout(this.resizeTimer);
+    if (this.resizeTimer) return;
     this.resizeTimer = window.setTimeout(() => {
       this.resizeTimer = 0;
       this.remeasure = true;
       this.applyNow();
-    }, RESIZE_SETTLE_MS);
+    }, RELABEL_FRAME_MS);
   }
 
   unbind(): void {
@@ -621,22 +645,28 @@ export class ExplorerAdapter {
  * belongs to Obsidian, which also uses it for inline rename, so restoring it
  * exactly matters more than the labelling does.
  *
- * THREE PASSES, AND THAT IS THE POINT. Whether a compacted label fits is
- * something only the laid-out pane knows, so the row is drawn in full,
- * measured, and redrawn short if it did not fit. Done row by row that is
- * write-read-write-read down a window of about fifty rows, and every read
- * after a write forces the browser to lay the tree out again. So: every row is
- * drawn first, then every row is measured, then every row that overflowed is
- * redrawn. One layout instead of fifty.
+ * WRITES, THEN READS, THEN ROUND AGAIN, AND THAT IS THE POINT. Whether a
+ * compacted label fits is something only the laid-out pane knows, so the row
+ * is drawn, measured, and redrawn one folder shorter if it did not fit. Done
+ * row by row that is write-read-write-read down a window of about fifty rows,
+ * and every read after a write forces the browser to lay the tree out again.
+ * So each round draws every undecided row, then measures every undecided row:
+ * one layout per round rather than one per row.
  *
- * WHY A ROW ALREADY DRAWN SHORT IS LEFT ALONE. The first pass would have to
- * put the full label back to measure it, and the third would shorten it again
- * -- rewriting the prefix on every pass, forever. `ExplorerAdapter` watches
- * the very container this writes into with a MutationObserver, so those writes
- * would schedule the next pass, which would write again: the explorer would
- * redraw every frame for as long as the plugin was loaded. The decision is
- * therefore kept until something that could change it happens, which is a pane
- * resize, and `remeasure` is how the adapter says so.
+ * THE ROUNDS ARE THE SHORTENING. A row gives up its leading folders one at a
+ * time and settles at the first level that fits, so the rounds a pass costs
+ * are the folders the narrowest row on screen had to give up -- bounded by the
+ * longest run, and in practice one or two while a pane is being dragged, since
+ * each frame starts from where the last one left the row.
+ *
+ * WHY A ROW ALREADY DRAWN SHORT IS LEFT ALONE. A pass would have to put the
+ * whole label back to measure it, and then shorten it again -- rewriting the
+ * prefix on every pass, forever. `ExplorerAdapter` watches the very container
+ * this writes into with a MutationObserver, so those writes would schedule the
+ * next pass, which would write again: the explorer would redraw every frame
+ * for as long as the plugin was loaded. The decision is therefore kept until
+ * something that could change it happens, which is a pane resize, and
+ * `remeasure` is how the adapter says so.
  *
  * WHAT IS WRITTEN, AND WHAT IS NOT. `titles` are `[data-path]` elements, which
  * in Obsidian are `.tree-item-self` -- the ROW, whose children are the collapse
@@ -650,9 +680,9 @@ export class ExplorerAdapter {
  * Instead ONE element of our own (`CLS_COMPACT_PREFIX`) carries every part but
  * the tip -- the leads and separators, and the `..` gap when the label was
  * shortened -- inserted as a sibling immediately before the text element. The
- * row reads `Clients/` + `Meetings` exactly as it did, or `../Design/` +
- * `Decisions` when it was shortened, and the inner still holds only the
- * folder's own name.
+ * row reads `Clients/` + `Meetings` exactly as it did, or `../Projects/Atlas/
+ * Design/` + `Decisions` when the pane took three folders off it, and the
+ * inner still holds only the folder's own name.
  *
  * FAILS OPEN PER ROW. A row with no text element is skipped entirely -- no
  * prefix, and not even classed. There is nothing to anchor the prefix to, and
@@ -686,8 +716,8 @@ export function applyCompactLabels(
 ): void {
   const overflows = pass.overflows ?? rowOverflows;
   const drawn = pass.drawn;
-  /** The rows drawn in full that still need a verdict. */
-  const undecided: { title: HTMLElement; run: Run }[] = [];
+  /** The rows drawn in full that still need a verdict, and at what level. */
+  const undecided: { title: HTMLElement; run: Run; drop: number }[] = [];
 
   // PASS ONE: writes only.
   for (const title of titles) {
@@ -711,30 +741,53 @@ export function applyCompactLabels(
     // Turned off means never measured. The answer could not change the label,
     // and reading a width forces a layout.
     if (!policy.abbreviateWhenOverflowing) {
-      drawRow(title, textEl, run, false, drawn);
+      drawRow(title, textEl, run, 0, drawn);
       continue;
     }
-    // Already showing what a "yes" would draw. For a long run that is the
-    // decision taken at the last measurement, kept for the reason above; for a
-    // two-segment run, which `compactLabel` refuses to shorten at any width,
-    // it is the only label there is, so measuring it is work with one possible
-    // outcome.
-    if (!pass.remeasure && textOf(run, true) === prefixTextOn(title)) {
-      drawRow(title, textEl, run, true, drawn);
+    // Already shortened, and nothing has happened that could change by how
+    // much. That is the decision taken at the last measurement, kept for the
+    // reason above. A row drawn in FULL is not kept this way: it is the state
+    // a newly narrowed pane has to be able to move off, and it is also what a
+    // run `compactLabel` refuses to shorten at any width draws forever.
+    const standing = pass.remeasure ? null : drawnDropOn(title, run);
+    if (standing !== null && standing > 0) {
+      drawRow(title, textEl, run, standing, drawn);
       continue;
     }
-    drawRow(title, textEl, run, false, drawn);
-    undecided.push({ title, run });
+    drawRow(title, textEl, run, 0, drawn);
+    undecided.push({ title, run, drop: 0 });
   }
 
-  // PASS TWO: reads only. Nothing in this loop writes, so the layout the first
-  // read forces is the only one, and every later read is served from it.
-  const tooLong = undecided.filter((row) => overflows(row.title));
-
-  // PASS THREE: writes only.
-  for (const { title, run } of tooLong) {
-    const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
-    if (textEl) drawRow(title, textEl, run, true, drawn);
+  // THE CLIMB: read every undecided row, then write one more folder away from
+  // each that did not fit, and go round again. Each round is reads-then-writes
+  // for the reason above -- the first read of a round forces one layout and
+  // every other read in it is served from that same layout, so the cost is one
+  // layout per round rather than one per row.
+  //
+  // IT CLIMBS RATHER THAN JUMPING, and that is the behavior this loop exists
+  // for. Every row starts at its whole label and gives up one leading folder
+  // at a time, so the first level that fits is the first one asked about, and
+  // the row keeps every folder the pane had room for. Jumping straight to the
+  // shortest label is what this replaced: a pane one character too narrow cost
+  // a seven folder run five of its names.
+  //
+  // IT TERMINATES because every round either settles a row or raises its level
+  // by one against a ceiling of `maxDrop`, so the rounds are bounded by the
+  // longest run on screen and the pending set shrinks monotonically. A row
+  // still overflowing at `maxDrop` has nothing left to give and settles there;
+  // the stylesheet's ellipsis takes it from there.
+  let pending = undecided;
+  while (pending.length > 0) {
+    const tooLong = pending.filter((row) => overflows(row.title));
+    pending = [];
+    for (const row of tooLong) {
+      if (row.drop >= maxDrop(row.run.segments)) continue;
+      const textEl = row.title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
+      if (!textEl) continue;
+      row.drop += 1;
+      drawRow(row.title, textEl, row.run, row.drop, drawn);
+      pending.push(row);
+    }
   }
 }
 
@@ -816,11 +869,34 @@ function drawnWhereTheHeadWas(title: HTMLElement, run: Run, index: ChainIndex): 
   return index.hiddenSegments.get(ancestorPath) !== run;
 }
 
-/** What this module would write into the prefix for a run, drawn either way. */
-function textOf(run: Run, abbreviate: boolean): string {
-  return partsFor(run, abbreviate)
+/** What this module would write into the prefix for a run at one level. */
+function textOf(run: Run, drop: number): string {
+  return partsFor(run, drop)
     .map((p) => p.text)
     .join("");
+}
+
+/**
+ * How many leading folders the label on this row is currently standing in for,
+ * or null if it carries no label of ours.
+ *
+ * ASKED OF THE DOM, not kept in a map beside it. The level is already written
+ * into the row -- it is what the prefix reads -- and a second copy in adapter
+ * state would be a record that can disagree with the thing it records, which
+ * is the failure every other decision in this pass is built to avoid (the row
+ * is also the only copy that survives a pass this adapter did not run). The
+ * search is at most one string build per level, on a run of a handful of
+ * folders, and only for rows that already carry a prefix.
+ */
+function drawnDropOn(title: HTMLElement, run: Run): number | null {
+  const text = prefixTextOn(title);
+  if (text === null) return null;
+  for (let drop = 0; drop <= maxDrop(run.segments); drop++) {
+    if (textOf(run, drop) === text) return drop;
+  }
+  // A prefix this pass did not write, or wrote for a different run: the
+  // caller re-measures from the whole label rather than trusting it.
+  return null;
 }
 
 /**
@@ -832,8 +908,8 @@ function textOf(run: Run, abbreviate: boolean): string {
  * element is the defect this shape exists to avoid. A run is two segments or
  * more (`runFrom`), so what is left is never empty.
  */
-function partsFor(run: Run, abbreviate: boolean): readonly LabelPart[] {
-  return compactLabel(run.segments, { abbreviate }).filter((p) => p.role !== "tip");
+function partsFor(run: Run, drop: number): readonly LabelPart[] {
+  return compactLabel(run.segments, { drop }).filter((p) => p.role !== "tip");
 }
 
 /** The text our prefix element currently carries, or null if there is none. */
@@ -870,11 +946,11 @@ function drawRow(
   title: HTMLElement,
   textEl: HTMLElement,
   run: Run,
-  abbreviate: boolean,
+  drop: number,
   drawn?: Set<HTMLElement>
 ): void {
-  const label = compactLabel(run.segments, { abbreviate });
-  const parts = partsFor(run, abbreviate);
+  const label = compactLabel(run.segments, { drop });
+  const parts = partsFor(run, drop);
   const text = parts.map((p) => p.text).join("");
   let prefix = title.querySelector<HTMLElement>(`:scope > .${CLS_COMPACT_PREFIX}`);
   if (!prefix) {
