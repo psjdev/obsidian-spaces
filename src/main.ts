@@ -29,6 +29,7 @@ import {
   createLazyPropertySnapshot,
   createObsidianPropertySnapshot,
 } from "./visibility/ObsidianPropertyIndex";
+import { PropertyRefreshHub } from "./visibility/PropertyRefreshHub";
 import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
@@ -296,6 +297,8 @@ export default class SpacesPlugin extends Plugin {
    * Only ever incremented, and only by `newPropertySnapshot`.
    */
   private propertyGeneration = 0;
+  /** Open property pickers, each owned by the panel that opened it. */
+  private readonly propertyRefresh = new PropertyRefreshHub();
 
   /**
    * Takes `fileManager.getNewFileParent` back off. Null until `start()`
@@ -853,6 +856,10 @@ export default class SpacesPlugin extends Plugin {
     // the coalescer above uses it — the state is created here, so its release
     // belongs here.
     this.register(() => this.releaseSpaceSurface());
+    // Pickers release their own subscription on close; this covers one still
+    // open when the plugin unloads, so no closure over a torn-down view stays
+    // reachable from a plugin that is gone.
+    this.register(() => this.propertyRefresh.clear());
 
     // The right-click half of the gesture. `file-menu` is public and
     // carries the folder the user acted on — the empty explorer body reports
@@ -1450,8 +1457,36 @@ export default class SpacesPlugin extends Plugin {
       // same reason: the walk happens when a property member asks.
       this.controller.setPropertySnapshot(this.newPropertySnapshot());
       this.controller.refresh();
+      // The coalesced tail of a create, delete or rename. Told AFTER the new
+      // snapshot is in place, so a picker that re-reads on this call sees the
+      // replacement and not the picture it is replacing.
+      this.propertyRefresh.notify();
     },
   });
+
+  /**
+   * An open property picker is a metadata consumer in its own right.
+   *
+   * The space gate (`watchesMetadata`) asks whether a SPACE holds a tag or
+   * property member, which is the wrong question while someone is still
+   * choosing one: a picker opened in a files-and-folders space would never
+   * refresh, because nothing in the vault watches metadata yet. The panel or
+   * modal that opens the picker owns this subscription and must call the
+   * returned function when it closes; `onunload` drops any still held.
+   *
+   * It fires when the snapshot has been REPLACED, which happens on a metadata
+   * change, on the readiness transition (`resolved`), and on the coalesced
+   * flush after a file is created, deleted or renamed. It does not fire when a
+   * space's `exclude` or the global ignore changes: those leave the
+   * frontmatter, and so the raw snapshot, untouched, though they do change
+   * filtered member counts.
+   *
+   * The vault-event path is coalesced, so a burst of file events notifies
+   * once, after the burst, not once per file.
+   */
+  subscribePropertyRefresh(onChange: () => void): () => void {
+    return this.propertyRefresh.subscribe(onChange);
+  }
 
   /**
    * A fresh LAZY property snapshot: nothing walks the vault until a property
@@ -1506,6 +1541,9 @@ export default class SpacesPlugin extends Plugin {
     if ((this.controller as SpaceController | undefined) === undefined) return;
     this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
     this.controller.setPropertySnapshot(this.newPropertySnapshot());
+    // Before the space gate below, which is about whether the ACTIVE SPACE
+    // needs a recompute and says nothing about an open picker.
+    this.propertyRefresh.notify();
     if (!watchesMetadata(this.controller.activeSpace())) return;
     // No membership work to run first, only the coalesced tail. Submitting an
     // empty unit of work is how this reuses the existing window and burst
