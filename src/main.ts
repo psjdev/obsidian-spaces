@@ -29,7 +29,7 @@ import {
   createLazyPropertySnapshot,
   createObsidianPropertySnapshot,
 } from "./visibility/ObsidianPropertyIndex";
-import { PropertyRefreshHub, installThenNotify, metadataNotifyRoute } from "./visibility/PropertyRefreshHub";
+import { PropertyRefreshHub, RefreshFlushState, installThenNotify, metadataNotifyRoute } from "./visibility/PropertyRefreshHub";
 import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
@@ -851,7 +851,6 @@ export default class SpacesPlugin extends Plugin {
     // The coalescing window is a live timer, so it must not outlive the
     // plugin. `register` runs this on unload with the rest of the teardown.
     this.register(() => this.vaultChanges.cancel());
-    this.register(() => this.pickerRefreshes.cancel());
     // The body marker comes off and every API subscriber is dropped.
     // Through `register` rather than a line in `onunload` for the same reason
     // the coalescer above uses it — the state is created here, so its release
@@ -1440,6 +1439,17 @@ export default class SpacesPlugin extends Plugin {
       now: () => Date.now(),
     },
     flush: () => {
+      // ONE coalescer, one timer, for vault events and metadata events alike.
+      // A note creation emits both, and two timers flushed twice and notified
+      // pickers twice. What this flush does depends on what the burst held.
+      const { full, rebuild } = this.flushState.take();
+      if (!full) {
+        // Metadata only, with no active space watching it: nothing in the
+        // vault moved, so no re-index, no re-sort, and `onMetadataEvent` has
+        // already installed the snapshot. Pickers are the only audience.
+        this.finishPropertySnapshot(false);
+        return;
+      }
       // The vault index is a snapshot; replace it in place so every captured
       // controller reference stays valid. Built at flush time, so it is the
       // burst's end state rather than any intermediate one.
@@ -1455,37 +1465,27 @@ export default class SpacesPlugin extends Plugin {
       // than the vault index it is read against.
       this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
       // Replaced with the tag index and for the same reason, and lazy for the
-      // same reason: the walk happens when a property member asks.
+      // same reason: the walk happens when a property member asks. Skipped
+      // (`rebuild` false) only when one was installed after the burst's last
+      // vault event, which `RefreshFlushState` explains.
       //
       // Pickers are told here, AFTER the replacement and BEFORE
       // `controller.refresh()`: the snapshot is already in place, so a throw
       // from the refresh must not leave them stale for the burst. `notify`
       // isolates watcher errors itself.
-      this.replacePropertySnapshotAndNotify();
+      this.finishPropertySnapshot(rebuild);
       this.controller.refresh();
     },
   });
 
-  /**
-   * The picker-only tail for a metadata burst when no flush is otherwise
-   * coming. It rebuilds the snapshot and notifies, and deliberately does not
-   * re-index the vault or re-sort the explorer, which is what the vault flush
-   * above costs and what a space that does not watch metadata is gated out of.
-   * Same timer and window as the vault flush, so a sync or an initial
-   * indexing pass of N files notifies once, not N times.
-   */
-  private readonly pickerRefreshes = createVaultChangeCoalescer({
-    timer: {
-      set: (fn, ms) => window.setTimeout(fn, ms),
-      clear: (handle) => window.clearTimeout(handle),
-      now: () => Date.now(),
-    },
-    flush: () => this.replacePropertySnapshotAndNotify(),
-  });
+  /** What the coming flush has to do. See `RefreshFlushState`. */
+  private readonly flushState = new RefreshFlushState();
 
-  private replacePropertySnapshotAndNotify(): void {
+  private finishPropertySnapshot(rebuild: boolean): void {
     installThenNotify(
-      () => this.controller.setPropertySnapshot(this.newPropertySnapshot()),
+      () => {
+        if (rebuild) this.controller.setPropertySnapshot(this.newPropertySnapshot());
+      },
       () => this.propertyRefresh.notify()
     );
   }
@@ -1526,6 +1526,9 @@ export default class SpacesPlugin extends Plugin {
   }
 
   private async onVaultChange(fn: () => Promise<unknown>): Promise<void> {
+    // Synchronously, before the first await: the flush that follows must know
+    // this burst held a vault event, whatever else it also held.
+    this.flushState.noteVaultEvent();
     await this.vaultChanges.submit(fn);
   }
 
@@ -1574,20 +1577,25 @@ export default class SpacesPlugin extends Plugin {
     // watches metadata the vault flush rebuilds the snapshot and notifies, so
     // a direct call here would walk the vault twice per event and discard the
     // first walk; when it does not, a picker-only flush does it, but only
-    // while a picker is open. Do not add a direct `notify()` call here.
+    // while a picker is open, through the same coalescer. Do not add a direct `notify()` call here.
     const route = metadataNotifyRoute(
       watchesMetadata(this.controller.activeSpace()),
       this.propertyRefresh.size
     );
-    if (route === "picker-flush") {
-      void this.pickerRefreshes.submit(async () => undefined);
-      return;
-    }
     if (route === "none") return;
-    // No membership work to run first, only the coalesced tail. Submitting an
-    // empty unit of work is how this reuses the existing window and burst
-    // ceiling rather than adding a second timer.
-    void this.onVaultChange(async () => undefined);
+    if (route === "picker-flush") {
+      // The same coalescer, NOT marked as a vault event, so a burst of only
+      // metadata events gets the notify-only flush.
+      void this.vaultChanges.submit(async () => undefined);
+    } else {
+      // No membership work to run first, only the coalesced tail. Submitting
+      // an empty unit of work is how this reuses the existing window and burst
+      // ceiling rather than adding a second timer.
+      void this.onVaultChange(async () => undefined);
+    }
+    // AFTER the submit, which for a vault-flush route clears it: the snapshot
+    // installed above postdates every vault event this burst has seen so far.
+    this.flushState.noteSnapshotInstalled();
   }
 
   private async cycle(delta: number): Promise<void> {

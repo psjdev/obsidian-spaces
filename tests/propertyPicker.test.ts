@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createVaultChangeCoalescer } from "../src/lifecycle/eventCoalescer";
 import {
   PropertyRefreshHub,
+  RefreshFlushState,
   installThenNotify,
   metadataNotifyRoute,
 } from "../src/visibility/PropertyRefreshHub";
@@ -47,33 +48,47 @@ const manualTimer = () => {
 const fakePlugin = (opts: { spaceWatchesMetadata?: boolean } = {}) => {
   const hub = new PropertyRefreshHub();
   const clock = manualTimer();
+  const state = new RefreshFlushState();
   const log: string[] = [];
-  const replace = () =>
+  const finish = (rebuild: boolean) =>
     installThenNotify(
-      () => log.push("install"),
+      () => {
+        if (rebuild) log.push("install");
+      },
       () => {
         log.push("notify");
         hub.notify();
       }
     );
-  const vaultChanges = createVaultChangeCoalescer({ timer: clock.timer, flush: replace });
-  const pickerRefreshes = createVaultChangeCoalescer({ timer: clock.timer, flush: replace });
+  const vaultChanges = createVaultChangeCoalescer({
+    timer: clock.timer,
+    flush: () => {
+      const { rebuild } = state.take();
+      finish(rebuild);
+    },
+  });
+  const vaultEvent = () => {
+    state.noteVaultEvent();
+    void vaultChanges.submit(async () => undefined);
+  };
   const metadataEvent = () => {
+    log.push("install"); // onMetadataEvent installs a fresh lazy snapshot per event
     const route = metadataNotifyRoute(opts.spaceWatchesMetadata ?? false, hub.size);
-    if (route === "picker-flush") void pickerRefreshes.submit(async () => undefined);
-    else if (route === "vault-flush") void vaultChanges.submit(async () => undefined);
+    if (route === "none") return;
+    if (route === "picker-flush") void vaultChanges.submit(async () => undefined);
+    else vaultEvent();
+    state.noteSnapshotInstalled();
   };
   return {
     log,
     subscribePropertyRefresh: (onChange: () => void) => hub.subscribe(onChange),
     emitMetadataChanged: metadataEvent,
     emitResolved: metadataEvent,
-    emitVaultEvent: () => void vaultChanges.submit(async () => undefined),
+    emitVaultEvent: vaultEvent,
     settle: () => clock.advance(10_000),
     unload: () => {
       hub.clear();
       vaultChanges.cancel();
-      pickerRefreshes.cancel();
     },
   };
 };
@@ -214,5 +229,44 @@ describe("PropertyRefreshHub", () => {
     expect(survivor).toHaveBeenCalledTimes(1);
     expect(err).toHaveBeenCalledTimes(1);
     err.mockRestore();
+  });
+});
+
+describe("a mixed burst", () => {
+  it("creating a note (vault event plus metadata event) notifies once and rebuilds once", async () => {
+    // No space watches metadata and a picker is open: the case that used to
+    // reach two coalescers, so two flushes, so two notifies and two walks.
+    const plugin = fakePlugin();
+    const onChange = vi.fn();
+    plugin.subscribePropertyRefresh(onChange);
+    plugin.emitVaultEvent(); // create
+    plugin.emitMetadataChanged(); // changed
+    await tick();
+    plugin.settle();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(plugin.log).toEqual(["install", "notify"]); // one rebuild, one generation bump
+  });
+});
+
+describe("RefreshFlushState", () => {
+  it("rebuilds on a full flush when no snapshot was installed after the vault event", () => {
+    const state = new RefreshFlushState();
+    state.noteSnapshotInstalled();
+    state.noteVaultEvent(); // arrived after the install: a picker may have read it
+    expect(state.take()).toEqual({ full: true, rebuild: true });
+  });
+  it("does not rebuild when the install postdates the vault event", () => {
+    const state = new RefreshFlushState();
+    state.noteVaultEvent();
+    state.noteSnapshotInstalled();
+    expect(state.take()).toEqual({ full: true, rebuild: false });
+  });
+  it("is not full for a metadata-only burst, and resets after take", () => {
+    const state = new RefreshFlushState();
+    state.noteSnapshotInstalled();
+    expect(state.take()).toEqual({ full: false, rebuild: false });
+    state.noteVaultEvent();
+    expect(state.take()).toEqual({ full: true, rebuild: true });
+    expect(state.take()).toEqual({ full: false, rebuild: false });
   });
 });

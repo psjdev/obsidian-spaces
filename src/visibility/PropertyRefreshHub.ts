@@ -70,8 +70,9 @@ export function installThenNotify(install: () => void, notify: () => void): void
  *   would walk the vault twice per event, the second walk discarding the
  *   first's snapshot.
  * - "picker-flush": nothing else will flush, but a picker is open, so a
- *   picker-only flush (rebuild and notify, no re-index or re-sort) is
- *   scheduled instead.
+ *   notify-only flush (no re-index, no re-sort; the snapshot is already
+ *   installed by the event handler) is scheduled on the shared coalescer
+ *   without marking a vault event.
  * - "none": no flush runs and nobody is listening.
  */
 export type MetadataNotifyRoute = "vault-flush" | "picker-flush" | "none";
@@ -79,4 +80,43 @@ export type MetadataNotifyRoute = "vault-flush" | "picker-flush" | "none";
 export function metadataNotifyRoute(spaceWatchesMetadata: boolean, pickers: number): MetadataNotifyRoute {
   if (spaceWatchesMetadata) return "vault-flush";
   return pickers > 0 ? "picker-flush" : "none";
+}
+
+/**
+ * What the next coalesced flush has to do, accumulated over one burst.
+ *
+ * ONE coalescer serves vault events and metadata events, because two timers
+ * mean a note creation (a vault `create` plus a metadata `changed`) flushes
+ * twice and notifies twice. This is the state that lets one flush express
+ * either shape.
+ *
+ * - `full`: a vault event happened, so the flush must re-index and refresh.
+ *   A metadata-only burst leaves it false and the flush only notifies.
+ * - `fresh`: a snapshot was installed AFTER the burst's last vault event, so
+ *   the flush need not install another. Sound because the snapshot is lazy and
+ *   is read from the metadata cache, not the vault index: one installed after
+ *   the vault event is built from state at least as new. A vault event that
+ *   arrives AFTER the install clears it, since a picker may have read the
+ *   snapshot in between.
+ */
+export class RefreshFlushState {
+  private full = false;
+  private fresh = false;
+
+  noteVaultEvent(): void {
+    this.full = true;
+    this.fresh = false;
+  }
+
+  noteSnapshotInstalled(): void {
+    this.fresh = true;
+  }
+
+  /** Reads and resets. `rebuild` is only ever true on a full flush. */
+  take(): { full: boolean; rebuild: boolean } {
+    const result = { full: this.full, rebuild: this.full && !this.fresh };
+    this.full = false;
+    this.fresh = false;
+    return result;
+  }
 }
