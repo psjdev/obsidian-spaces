@@ -90,22 +90,42 @@ export function metadataNotifyRoute(spaceWatchesMetadata: boolean, pickers: numb
  * twice and notifies twice. This is the state that lets one flush express
  * either shape.
  *
- * - `full`: a vault event happened, so the flush must re-index and refresh.
- *   A metadata-only burst leaves it false and the flush only notifies.
- * - `fresh`: a snapshot was installed AFTER the burst's last vault event, so
- *   the flush need not install another. Sound because the snapshot is lazy and
- *   is read from the metadata cache, not the vault index: one installed after
- *   the vault event is built from state at least as new. A vault event that
- *   arrives AFTER the install clears it, since a picker may have read the
- *   snapshot in between.
+ * - `full`: a vault event's work has finished, so the flush must re-index and
+ *   refresh. A metadata-only burst leaves it false and the flush only
+ *   notifies. It is set by `markFull`, which must run INSIDE the queued work,
+ *   after the work and before the coalescer schedules the flush (see
+ *   `submitVaultWork`). Setting it when the event ARRIVES is wrong: an earlier
+ *   burst's timer can fire while this event's work is still running, consume
+ *   the flag, and leave this event's own flush with nothing to do.
+ * - `fresh`: a snapshot was installed AFTER the burst's last vault event
+ *   arrived, so the flush need not install another. Sound because the
+ *   snapshot is lazy and is read from the metadata cache, not the vault index:
+ *   one installed after the vault event arrived is built from state at least
+ *   as new. A vault event arriving AFTER the install clears it, since a
+ *   picker may have read the snapshot in between. This one is set on arrival,
+ *   not in the work, because it is about ordering against the install.
+ *
+ * KNOWN LIMIT, accepted. When a metadata event arrives BEFORE a vault event in
+ * the same burst, `fresh` is cleared and the flush installs a second snapshot,
+ * so the generation is bumped twice. A create is vault-then-metadata and a
+ * save is metadata-only, so single actions do not do this; a multi-file sync
+ * or import interleaves the two and hits it regularly. It is accepted because
+ * the extra install is a lazy closure and a counter bump, not a vault walk:
+ * nothing walks until a picker or property member reads, and it reads once.
+ * Skipping it would be unsound, since a picker may have read in between.
  */
 export class RefreshFlushState {
   private full = false;
   private fresh = false;
 
+  /** A vault event has arrived. Clears `fresh` only; see `markFull`. */
   noteVaultEvent(): void {
-    this.full = true;
     this.fresh = false;
+  }
+
+  /** The flush must re-index and refresh. Call from inside queued work. */
+  markFull(): void {
+    this.full = true;
   }
 
   noteSnapshotInstalled(): void {
@@ -119,4 +139,26 @@ export class RefreshFlushState {
     this.fresh = false;
     return result;
   }
+}
+
+/**
+ * Queues vault work on the shared coalescer and arranges for the flush behind
+ * it to be a full one. `markFull` runs in the work's `finally`, so it lands
+ * after the work and before the coalescer's own `schedule()`, which only runs
+ * once the work settles. A failed repair still marks it: the vault changed
+ * whether or not the repair succeeded.
+ */
+export function submitVaultWork(
+  submit: (work: () => Promise<unknown>) => Promise<void>,
+  state: RefreshFlushState,
+  fn: () => Promise<unknown>
+): Promise<void> {
+  state.noteVaultEvent();
+  return submit(async () => {
+    try {
+      return await fn();
+    } finally {
+      state.markFull();
+    }
+  });
 }

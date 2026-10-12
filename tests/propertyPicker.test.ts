@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createVaultChangeCoalescer } from "../src/lifecycle/eventCoalescer";
+import { VAULT_COALESCE_WINDOW_MS, createVaultChangeCoalescer } from "../src/lifecycle/eventCoalescer";
 import {
   PropertyRefreshHub,
   RefreshFlushState,
   installThenNotify,
+  submitVaultWork,
   metadataNotifyRoute,
 } from "../src/visibility/PropertyRefreshHub";
 
@@ -68,8 +69,7 @@ const fakePlugin = (opts: { spaceWatchesMetadata?: boolean } = {}) => {
     },
   });
   const vaultEvent = () => {
-    state.noteVaultEvent();
-    void vaultChanges.submit(async () => undefined);
+    void submitVaultWork((w) => vaultChanges.submit(w), state, async () => undefined);
   };
   const metadataEvent = () => {
     log.push("install"); // onMetadataEvent installs a fresh lazy snapshot per event
@@ -253,11 +253,13 @@ describe("RefreshFlushState", () => {
     const state = new RefreshFlushState();
     state.noteSnapshotInstalled();
     state.noteVaultEvent(); // arrived after the install: a picker may have read it
+    state.markFull();
     expect(state.take()).toEqual({ full: true, rebuild: true });
   });
   it("does not rebuild when the install postdates the vault event", () => {
     const state = new RefreshFlushState();
     state.noteVaultEvent();
+    state.markFull();
     state.noteSnapshotInstalled();
     expect(state.take()).toEqual({ full: true, rebuild: false });
   });
@@ -266,7 +268,39 @@ describe("RefreshFlushState", () => {
     state.noteSnapshotInstalled();
     expect(state.take()).toEqual({ full: false, rebuild: false });
     state.noteVaultEvent();
+    state.markFull();
     expect(state.take()).toEqual({ full: true, rebuild: true });
     expect(state.take()).toEqual({ full: false, rebuild: false });
+  });
+});
+
+describe("a slow repair overlapping an earlier burst's timer", () => {
+  it("still gets its own full flush", async () => {
+    const clock = manualTimer();
+    const state = new RefreshFlushState();
+    const flushes: boolean[] = [];
+    const coalescer = createVaultChangeCoalescer({
+      timer: clock.timer,
+      flush: () => flushes.push(state.take().full),
+    });
+    const submit = (w: () => Promise<unknown>) => coalescer.submit(w);
+
+    void submitVaultWork(submit, state, async () => undefined); // event A at t0
+    await tick();
+    clock.advance(VAULT_COALESCE_WINDOW_MS - 10); // t40
+    let finish = () => {};
+    const slow = submitVaultWork(
+      submit,
+      state,
+      () => new Promise<void>((resolve) => (finish = resolve))
+    ); // event B: a slow repair still running
+    await tick(); // B's work has started
+    clock.advance(10); // A's timer fires while B's work is in flight
+    expect(flushes).toEqual([true]);
+    finish();
+    await slow;
+    clock.advance(10_000);
+    // B's own flush must also be a full one, not an empty leftover.
+    expect(flushes).toEqual([true, true]);
   });
 });

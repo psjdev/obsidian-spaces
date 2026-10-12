@@ -29,7 +29,7 @@ import {
   createLazyPropertySnapshot,
   createObsidianPropertySnapshot,
 } from "./visibility/ObsidianPropertyIndex";
-import { PropertyRefreshHub, RefreshFlushState, installThenNotify, metadataNotifyRoute } from "./visibility/PropertyRefreshHub";
+import { PropertyRefreshHub, RefreshFlushState, installThenNotify, metadataNotifyRoute, submitVaultWork } from "./visibility/PropertyRefreshHub";
 import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
@@ -1526,10 +1526,10 @@ export default class SpacesPlugin extends Plugin {
   }
 
   private async onVaultChange(fn: () => Promise<unknown>): Promise<void> {
-    // Synchronously, before the first await: the flush that follows must know
-    // this burst held a vault event, whatever else it also held.
-    this.flushState.noteVaultEvent();
-    await this.vaultChanges.submit(fn);
+    // `submitVaultWork` marks the burst full INSIDE the queued work, which is
+    // what makes it safe against an earlier burst's timer firing while this
+    // work is still running. See `RefreshFlushState`.
+    await submitVaultWork((work) => this.vaultChanges.submit(work), this.flushState, fn);
   }
 
   /**
@@ -1590,7 +1590,9 @@ export default class SpacesPlugin extends Plugin {
     } else {
       // No membership work to run first, only the coalesced tail. Submitting
       // an empty unit of work is how this reuses the existing window and burst
-      // ceiling rather than adding a second timer.
+      // ceiling rather than adding a second timer. `onVaultChange` clears
+      // `fresh` synchronously, and the install below sets it again straight
+      // after, which is the order that lets the flush skip a second rebuild.
       void this.onVaultChange(async () => undefined);
     }
     // AFTER the submit, which for a vault-flush route clears it: the snapshot
