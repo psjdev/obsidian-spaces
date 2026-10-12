@@ -62,7 +62,9 @@ export function createPropertyIndex(
       }
       paths.push(path);
       // The raw value is copied one level: an array is re-sliced so a later
-      // push cannot reach it, and a scalar is already a value.
+      // push cannot reach it, and a scalar is already a value. One level is
+      // sound only while non-scalar entries (objects, nested arrays) offer no
+      // values: they are held by reference here and never read.
       const raw = frontmatter[key];
       captured.get(key)!.push({ path, raw: Array.isArray(raw) ? [...(raw as unknown[])] : raw });
     }
@@ -89,7 +91,11 @@ export function createPropertyIndex(
           bucket = { value: spelling, paths: [] };
           found.set(normalized, bucket);
         }
-        if (!bucket.paths.includes(path)) bucket.paths.push(path);
+        // Entries are walked in sorted path order and one note's spellings are
+        // consecutive, so a repeat of this note can only be the path pushed
+        // last. Comparing against it is O(1); do not replace it with
+        // `includes`, which is quadratic in the bucket size.
+        if (bucket.paths[bucket.paths.length - 1] !== path) bucket.paths.push(path);
       }
     }
     buckets.set(key, found);

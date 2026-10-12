@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPropertyIndex } from "../src/visibility/PropertyIndex";
+import { normalizeValue } from "../src/visibility/propertyValues";
+
+// Counts normalization so the tests below can tell when value buckets are built.
+vi.mock("../src/visibility/propertyValues", async () => {
+  const actual = await vi.importActual<typeof import("../src/visibility/propertyValues")>(
+    "../src/visibility/propertyValues"
+  );
+  return { ...actual, normalizeValue: vi.fn(actual.normalizeValue) };
+});
 
 const entry = (path: string, frontmatter: Record<string, unknown>) => ({ path, frontmatter });
 
@@ -70,6 +79,35 @@ describe("the pure property index", () => {
     const index = createPropertyIndex([entry("a.md", { x: "" })], 1);
     expect(index.pathsMatching("x", "")).toEqual(["a.md"]);
     expect(index.listValues("x")).toEqual([{ value: "", normalized: "", count: 1 }]);
+  });
+
+  it("builds value buckets only when a key is asked about", () => {
+    const calls = vi.mocked(normalizeValue);
+    calls.mockClear();
+    const index = sample();
+    expect(calls).not.toHaveBeenCalled();
+    index.listKeys();
+    index.pathsWithKey("status");
+    expect(calls).not.toHaveBeenCalled();
+    index.listValues("topics");
+    expect(calls).toHaveBeenCalled();
+  });
+
+  it("memoizes a key's buckets after the first ask", () => {
+    const calls = vi.mocked(normalizeValue);
+    const index = sample();
+    index.listValues("status");
+    calls.mockClear();
+    index.listValues("status");
+    expect(calls).not.toHaveBeenCalled();
+    // Only the query value is normalized, never a rebuild of the bucket.
+    index.pathsMatching("status", "done");
+    expect(calls).toHaveBeenCalledTimes(1);
+  });
+
+  it("files a note once in a bucket it offers twice", () => {
+    const index = createPropertyIndex([entry("a.md", { t: ["x", "X"] }), entry("b.md", { t: "x" })], 1);
+    expect(index.pathsMatching("t", "x")).toEqual(["a.md", "b.md"]);
   });
 
   it("does not answer for an inherited key", () => {
