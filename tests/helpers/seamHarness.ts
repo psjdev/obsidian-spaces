@@ -139,6 +139,15 @@ export interface SeamHarness {
   sortRootThroughSeam(): FolderItemLike[];
   /** What the seam falls back to on a rejection: the raw, unfiltered rows. */
   rawRootItems(): FolderItemLike[];
+  /**
+   * `ensureOrderingPatched()` and nothing else.
+   *
+   * `displayedPaths` reads a folder's rows by calling the view's own
+   * `getSortedFolderItems`, so it sees compaction only once the override is
+   * installed. The drag tests need that install without also sorting the vault
+   * root, which `sortRootThroughSeam` does.
+   */
+  patchSeam(): void;
   /** The plugin and its one explorer view, for tests that drive the re-sort memo. */
   plugin: SpacesPlugin;
   view: { sort(): void };
@@ -190,7 +199,18 @@ function buildVaultNodes(tree: Record<string, string[]>): Map<string, TFolder | 
     const node = nodes.get(folder) as TFolder;
     node.children = kids.flatMap((kid) => {
       const child = nodes.get(kid);
-      return child ? [child] : [];
+      if (!child) return [];
+      // The `parent` BACK-POINTER, which Obsidian maintains on every
+      // `TAbstractFile` and which `describeRow` is the one reader of here. The
+      // stub defaults it to null, so a fixture without this line answers ""
+      // for every row's parent - the vault root - and a translation that got
+      // the parent wrong would look identical to one that got it right.
+      //
+      // Distinct from the `parent` on `SeamItem`: that one is the TREE item's
+      // pointer, written by Obsidian's `sort()`, and is what C2 corrupts. This
+      // one is the VAULT's, which `src/` only ever reads.
+      child.parent = node;
+      return [child];
     });
   }
   return nodes;
@@ -350,6 +370,7 @@ export function makePluginForSeam(opts: SeamHarnessOptions): SeamHarness {
       return view.getSortedFolderItems(rootNode ?? null);
     },
     rawRootItems,
+    patchSeam: () => plugin["ensureOrderingPatched"](),
     plugin,
     view,
   };

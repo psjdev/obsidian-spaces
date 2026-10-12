@@ -83,6 +83,7 @@ import {
   type ChainTree,
   type Run,
 } from "./visibility/compactChains";
+import { displayParentOf, displayToStored } from "./visibility/compactCoords";
 import type { CompactLabelOptions } from "./ui/compactLabel";
 import type { VisibilitySnapshot } from "./visibility/VisibilityEngine";
 import {
@@ -3151,15 +3152,48 @@ export default class SpacesPlugin extends Plugin {
       describeRow: (path) => {
         const f = this.app.vault.getAbstractFileByPath(path);
         if (!f) return null;
-        // Obsidian's root folder path is "/"; storage uses "".
-        const parent = f.parent?.path ?? "";
-        return { parent: parent === "/" ? "" : parent, isFolder: f instanceof TFolder };
+        // DISPLAY space, not vault space. A compacted row carries its run's
+        // TIP as its path, but it is drawn where the run's HEAD was, so the
+        // folder it sits inside is the head's parent. Answering the tip's
+        // real parent names a folder with no row at all, and `sameParent`
+        // then compares the user's gesture against something they cannot see.
+        //
+        // With no chain index this is `vaultParentOf(path)` and nothing else
+        // -- see `compactCoords.ts` on why identity there is load bearing.
+        //
+        // `?? ""` is unreachable: `f` resolved above, so the lookup for
+        // `path` cannot answer null, and that lookup is the fallback every
+        // branch of `displayParentOf` ends at. It is here because the shared
+        // signature is nullable for callers whose path may not resolve.
+        const parent = displayParentOf(this.chainIndexNow, path, (p) => this.vaultParentOf(p));
+        return { parent: parent ?? "", isFolder: f instanceof TFolder };
       },
+      /**
+       * The folder's children as they are on screen, SPELLED THE WAY STORAGE
+       * SPELLS THEM.
+       *
+       * `displayedPaths` reads through the patched seam, which is the right
+       * source -- "displayed" has to mean what is on screen -- but it hands
+       * back a compacted chain as its TIP, because that is the row. A stored
+       * order holds the HEAD, because an order lists a folder's own children
+       * and the head is the child.
+       *
+       * `computeDrop` merges this list with `storedOrder`'s, so handing it two
+       * spellings of the same chain loses both: the head falls out of the
+       * baseline for not being displayed, and `writeOrderFor`'s
+       * `compact(order, live)` then strikes the tip for not being a child of
+       * this folder. A drag elsewhere in that folder -- one that never went
+       * near the chain -- is enough to delete the arrangement from
+       * `data.json`, and nothing on screen says so. Mapping
+       * here, at the single point where the two lists meet, is what keeps the
+       * merge in one coordinate system.
+       */
       displayedOrder: (folderPath) => {
         const view = this.explorerView();
         const folder = this.folderFor(folderPath);
         if (!view || !folder) return [];
-        return displayedPaths(view, folder) ?? [];
+        const shown = displayedPaths(view, folder) ?? [];
+        return shown.map((p) => displayToStored(this.chainIndexNow, p));
       },
       storedOrder: (folderPath) => {
         const map = this.orderMapFor();
@@ -3307,6 +3341,24 @@ export default class SpacesPlugin extends Plugin {
     };
   }
 
+  /**
+   * The folder a path lives in, in STORAGE's spelling, or null when the path
+   * is not in the vault.
+   *
+   * Obsidian's root folder has path `"/"`; every order map, membership list
+   * and stored path in this plugin spells the root `""`. Named rather than
+   * inlined so `describeRow` and the lookup it hands `displayParentOf` are the
+   * same answer -- a translation layer that resolved the head through a
+   * second, differently normalised lookup would answer `"/"` for a top-level
+   * chain and match nothing in storage.
+   */
+  private vaultParentOf(path: string): string | null {
+    const f = this.app.vault.getAbstractFileByPath(path);
+    if (!f) return null;
+    const parent = f.parent?.path ?? "";
+    return parent === "/" ? "" : parent;
+  }
+
   /** "" is the vault root, which Obsidian addresses as "/". */
   private folderFor(folderPath: string): unknown {
     return this.app.vault.getAbstractFileByPath(folderPath === "" ? "/" : folderPath);
@@ -3407,12 +3459,17 @@ export default class SpacesPlugin extends Plugin {
     }
     if (moved.length === 0) return;
 
-    const view = this.explorerView();
-    const folder = this.folderFor(targetFolder);
-    const displayed = view && folder ? displayedPaths(view, folder) ?? [] : [];
+    // BOTH lists out of `dragDeps`, which is the point rather than a tidy-up.
+    // This is the second place a displayed list and a stored one are merged,
+    // and it used to build its own `displayed` from `displayedPaths` while
+    // taking `order` from `dragDeps` -- so a drop into a destination folder
+    // that contains a compacted chain lost that chain's saved position,
+    // exactly as the drag path did (DS-4). One source for the pair is what
+    // makes the two halves share a coordinate system by construction.
+    const deps = this.dragDeps();
     const next = computeDrop({
-      order: this.dragDeps().storedOrder(targetFolder),
-      displayed,
+      order: deps.storedOrder(targetFolder),
+      displayed: deps.displayedOrder(targetFolder),
       dragged: moved,
       targetPath,
       edge,
