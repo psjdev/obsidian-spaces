@@ -72,7 +72,8 @@ export function buildPreview(
         }
         continue;
       }
-      add(m.path, canonicalPath(m.path));
+      // A property member names no path, so it contributes no seed here.
+      if (m.kind === "file" || m.kind === "folder") add(m.path, canonicalPath(m.path));
     }
     const { included } = includedPaths(vault, seeds, ignore, excluded);
     let notes = 0;

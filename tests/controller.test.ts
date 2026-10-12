@@ -742,7 +742,7 @@ describe("SpaceController", () => {
 
     await store.mutate((d) => {
       d.spaces[0].members = d.spaces[0].members.filter(
-        (m) => m.kind === "tag" || m.path !== "Recipes.md"
+        (m) => (m.kind !== "file" && m.kind !== "folder") || m.path !== "Recipes.md"
       );
     });
     controller.refresh();
@@ -947,7 +947,7 @@ describe("SpaceController", () => {
     controller.refresh();
     await store.mutate((d) => {
       d.spaces[0].members = d.spaces[0].members.filter(
-        (m) => m.kind === "tag" || m.path !== "Recipes.md"
+        (m) => (m.kind !== "file" && m.kind !== "folder") || m.path !== "Recipes.md"
       );
     });
     controller.refresh();

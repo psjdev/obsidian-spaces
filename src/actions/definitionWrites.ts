@@ -62,16 +62,16 @@ export async function removeMembers(
     const exclude = new Set(target.exclude ?? []);
     for (const wanted of paths) {
       const exact = target.members.find(
-        (m) => m.kind !== "tag" && m.path === wanted
+        (m) => (m.kind === "file" || m.kind === "folder") && m.path === wanted
       );
-      if (exact && exact.kind !== "tag") {
+      if (exact && (exact.kind === "file" || exact.kind === "folder")) {
         drop.add(exact.path);
         continue;
       }
       const folded = canonicalPath(wanted);
       let matched = false;
       for (const m of target.members) {
-        if (m.kind === "tag") continue;
+        if (m.kind !== "file" && m.kind !== "folder") continue;
         if (canonicalPath(m.path) === folded) {
           drop.add(m.path);
           matched = true;
@@ -86,7 +86,7 @@ export async function removeMembers(
       }
     }
     target.members = target.members.filter(
-      (m) => m.kind === "tag" || !drop.has(m.path)
+      (m) => (m.kind !== "file" && m.kind !== "folder") || !drop.has(m.path)
     );
     // Absent rather than empty, matching what the schema stores.
     if (exclude.size > 0) target.exclude = [...exclude];

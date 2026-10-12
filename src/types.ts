@@ -23,7 +23,8 @@ export type MemberKind = "file" | "folder";
 export type MemberEntry =
   | { kind: "file"; path: string }
   | { kind: "folder"; path: string }
-  | { kind: "tag"; tag: string };
+  | { kind: "tag"; tag: string }
+  | { kind: "property"; key: string; value?: string };
 
 /** The members that name a vault path. See `pathMembers`. */
 export type PathMember = Extract<MemberEntry, { path: string }>;

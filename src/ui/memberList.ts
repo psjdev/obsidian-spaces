@@ -87,29 +87,36 @@ export function memberRows(
   exists: (path: string) => boolean,
   matchCount?: (tag: string) => number
 ): MemberRow[] {
-  return space.members.map((m): MemberRow => {
+  return space.members.flatMap((m): MemberRow[] => {
+    // A property member carries no path and has no row type yet. Task 8 adds
+    // `PropertyMemberRow` and replaces this skip.
+    if (m.kind === "property") return [];
     if (m.kind === "tag") {
       const count = matchCount === undefined ? null : matchCount(m.tag);
-      return {
-        kind: "tag",
-        tag: m.tag,
-        status: count === 0 ? "matches-nothing" : "present",
-        matchCount: count,
-      };
+      return [
+        {
+          kind: "tag",
+          tag: m.tag,
+          status: count === 0 ? "matches-nothing" : "present",
+          matchCount: count,
+        },
+      ];
     }
     // Missing wins over redundant. A file that is gone AND sat under a member
     // folder is still gone, and reporting it as merely redundant would hide
     // the only fact worth acting on.
     if (!exists(m.path)) {
-      return { path: m.path, kind: m.kind, status: "missing" as const, coveredBy: null };
+      return [{ path: m.path, kind: m.kind, status: "missing" as const, coveredBy: null }];
     }
     const coveredBy = inheritedFromFolder(space, m.path);
-    return {
-      path: m.path,
-      kind: m.kind,
-      status: coveredBy === null ? ("present" as const) : ("redundant" as const),
-      coveredBy,
-    };
+    return [
+      {
+        path: m.path,
+        kind: m.kind,
+        status: coveredBy === null ? ("present" as const) : ("redundant" as const),
+        coveredBy,
+      },
+    ];
   });
 }
 
@@ -171,7 +178,7 @@ export function missingCount(rows: readonly MemberRow[]): number {
  * this layer.
  */
 export function withoutMember(members: readonly MemberEntry[], path: string): MemberEntry[] {
-  return members.filter((m) => m.kind === "tag" || m.path !== path);
+  return members.filter((m) => (m.kind !== "file" && m.kind !== "folder") || m.path !== path);
 }
 
 /**

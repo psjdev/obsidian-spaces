@@ -1276,7 +1276,7 @@ export class CreateSpacePanel {
     // `onlyKind`.
     const selected = this.state.folderMode
       ? new Set(this.state.root === "" ? [] : [this.state.root])
-      : new Set(this.state.items.flatMap((i) => (i.kind === "tag" ? [] : [i.path])));
+      : new Set(this.state.items.flatMap((i) => (i.kind === "file" || i.kind === "folder" ? [i.path] : [])));
 
     const rows = visibleRows(tree, {
       expanded: this.expandedFolders,

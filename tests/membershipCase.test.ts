@@ -159,14 +159,14 @@ describe("removal matches the way visibility matches", () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Inbox"]);
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []))).toEqual(["Inbox"]);
   });
 
   it("removes a case-mismatched FOLDER member too", async () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("inbox")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Notes/A.md"]);
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []))).toEqual(["Notes/A.md"]);
   });
 
   it("prefers the exact stored entry when the vault holds both casings", async () => {
@@ -213,14 +213,14 @@ describe("removal matches the way visibility matches", () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx2, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs2.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toEqual(["Notes/A.md"]);
+    expect(defs2.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []))).toEqual(["Notes/A.md"]);
   });
 
   it("does not remove an unrelated member", async () => {
     const { menu, rows } = fakeMenu();
     decorate(menu, ctx, [file("notes/a.md")]);
     await clickRow(rows, "Remove from Research");
-    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]))).toContain("Inbox");
+    expect(defs.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []))).toContain("Inbox");
   });
 });
 
@@ -248,7 +248,7 @@ describe("adding does not duplicate a member the space already holds", () => {
     expect(rows.filter((r) => r.title.startsWith("Add ")).map((r) => r.title)).toEqual([]);
     // And nothing was written, which is the point: the old behaviour added a
     // redundant exact member for the inherited row.
-    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
     expect(paths).toEqual(["Notes/A.md", "Inbox"]);
   });
 
@@ -288,7 +288,7 @@ describe("adding does not duplicate a member the space already holds", () => {
     decorate(menu, ctx, [file("notes/a.md"), file("notes/b.md"), file("inbox/today.md")]);
     // Singular, because one of the three rows is addable.
     await clickRow(rows, "Add to Research");
-    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    const paths = defs.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
     // The exact list is the assertion. A `filter(...).toHaveLength(1)` on the
     // casing used to sit here as well, carried over from when this test drove
     // `addAll` directly; once the menu stopped offering the already-held row

@@ -229,6 +229,11 @@ function sameEntry(a: MemberEntry, b: MemberEntry): boolean {
   if (a.kind === "tag" || b.kind === "tag") {
     return a.kind === "tag" && b.kind === "tag" && a.tag === b.tag;
   }
+  if (a.kind === "property" || b.kind === "property") {
+    return (
+      a.kind === "property" && b.kind === "property" && a.key === b.key && a.value === b.value
+    );
+  }
   return a.path === b.path;
 }
 
@@ -237,7 +242,7 @@ function covers(outer: MemberEntry, inner: MemberEntry): boolean {
   if (outer.kind === "tag") {
     return inner.kind === "tag" && tagMatches(normalizeTag(outer.tag), normalizeTag(inner.tag));
   }
-  if (outer.kind !== "folder" || inner.kind === "tag") return false;
+  if (outer.kind !== "folder" || (inner.kind !== "file" && inner.kind !== "folder")) return false;
   // Compared exactly, not folded: both were picked out of the live tree, so
   // both are live spellings, and the panel draws a row covered only on an exact
   // match. Folding here made `Docs` swallow `docs/b.md` on a case-sensitive

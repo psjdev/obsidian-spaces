@@ -176,7 +176,14 @@ export function coveringTagIn(
  * of the eighteen call sites.
  */
 export function pathMembers(space: SpaceDefinition): PathMember[] {
-  return space.members.filter((m): m is PathMember => m.kind !== "tag");
+  // POSITIVE, not `kind !== "tag"`. TypeScript does not verify the body of a
+  // user-supplied type predicate, so the exclusive form admits every kind
+  // added later as a `PathMember` with no `path`, silently, and in eighteen
+  // call sites. Listing what a path member IS makes the next kind a compile
+  // error here instead of a TypeError in `renameTouchesDefs`.
+  return space.members.filter(
+    (m): m is PathMember => m.kind === "file" || m.kind === "folder"
+  );
 }
 
 /**

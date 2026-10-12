@@ -63,17 +63,22 @@ export function resolveMembers(
   };
 
   for (const m of space.members) {
-    if (m.kind !== "tag") {
+    if (m.kind === "file" || m.kind === "folder") {
       // A hand picked member is never dropped by an exclusion. Removing one
       // removes the member.
       add(m, canonicalPath(m.path));
       continue;
     }
-    for (const path of tags.pathsMatching(m.tag)) {
-      const key = canonicalPath(path);
-      if (excluded !== null && excluded.has(key)) continue;
-      add({ kind: "file", path }, key);
+    if (m.kind === "tag") {
+      for (const path of tags.pathsMatching(m.tag)) {
+        const key = canonicalPath(path);
+        if (excluded !== null && excluded.has(key)) continue;
+        add({ kind: "file", path }, key);
+      }
+      continue;
     }
+    // Every other kind is expanded by a later branch. Falling through here
+    // rather than treating the member as a path is the whole point.
   }
   return out;
 }
