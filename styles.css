@@ -20,39 +20,57 @@
    dimmed") and was previously absent — visitors carried only italics and
    merely inherited the dimming of any scaffold ancestor above them, so a
    visitor at the vault root looked identical to a member. */
+/* The visitor shade, named because a compacted row borrows it below and the
+   two must not drift apart. A theme can move both by setting this one
+   property, which is the only reason it is on `:root` rather than inline. */
+:root {
+  --spaces-dim-visitor: 0.62;
+}
+
 .spaces-scaffold > .tree-item-self { opacity: 0.45; }
-.spaces-visitor > .tree-item-self { opacity: 0.62; font-style: italic; }
+.spaces-visitor > .tree-item-self {
+  opacity: var(--spaces-dim-visitor);
+  font-style: italic;
+}
 
-/* A compacted row carries more ink than a plain scaffold row: 0.75 where the
-   scaffold rule above says 0.45. A compacted row is ALSO a scaffold row, so
-   its parts' own opacities multiply with this one, and measured in a running
-   Obsidian the lead and separators landed at 0.45 x 0.6 = 0.27, which is
-   1.76:1 -- text a reader has to READ. Every ratio here is a WCAG contrast
-   ratio of text #b3b3b3 against the pane background #282828, on the default
-   dark theme only. At 0.75 the tip reads 4.6:1, the lead 2.6:1 (what a plain scaffold
-   folder reads at today) and the `..` gap 2.0:1. The part opacities below are
-   left alone.
+/* A compacted row draws at ONE shade, and it is the visitor shade.
 
-   What it costs: the row is still dimmer than a member (4.6 against 7.0), so
-   the scaffold signal survives, but it is no longer as faint as the scaffold
-   rows around it. It is the one scaffold row that earns that, because it is
-   what a reader clicks to reach their notes and it carries a whole path
-   rather than one name. Full opacity was considered and refused: it makes a
-   compacted row indistinguishable from a member folder.
+   WHY ONE SHADE. The row reads as a single path, so every part of it is the
+   same row and has to look like it. The first version drew the parts at
+   different weights -- the tip at the row's own opacity, the leads and
+   separators multiplied down by 0.6, the `..` gap by 0.45 -- on the argument
+   that the folders a chain only passed through should step back from the
+   folder the row actually IS. Looked at in a real vault that reads as the
+   last folder being a different color from the rest of its own path, which is
+   a distinction the row does not have to make: the tip is already the last
+   thing on the line, and Obsidian's own text element holds it.
 
-   The class has a second job. A real folder cannot contain `/`, but one named
-   with a lookalike such as U+2044 (fraction slash) can imitate a compacted
-   row. A genuinely compacted row is drawn at a different weight from a plain
-   scaffold row, so a plain scaffold folder that merely looks like a path is
-   not mistakable for one. It does NOT help against a lookalike name sitting
-   inside a genuinely compacted row: that row is compacted, so it looks the
-   same.
+   WHY THE VISITOR SHADE. A compacted row is scaffold, but it is the one
+   scaffold row a reader clicks to reach their notes, and at the plain
+   scaffold 0.45 a whole path of it reads at 2.6:1. The visitor shade is the
+   dimming this plugin already uses for "present, but not a member", which is
+   exactly what a compacted chain is, and it is defined once as
+   `--spaces-dim-visitor` so the two cannot drift. `tests/stylesCoupling`
+   pins that they resolve to the same declaration.
+
+   WHAT IT MEASURES. Folder text is #b3b3b3 on #282828 (default dark theme),
+   so every part of the row now lands at 3.6:1 against the pane. Before this,
+   one part of the row was at 4.6:1 and the other two at 2.6:1 and 2.0:1, so
+   the uniform shade raises the floor of the row while lowering only its
+   brightest part. A member note stays at 7.0:1 and a plain scaffold folder at
+   2.6:1, so a compacted row is still visibly neither.
 
    `.spaces-compacted.spaces-scaffold` rather than `.spaces-compacted` alone:
    `.spaces-scaffold > .tree-item-self` has the same specificity as
-   `.spaces-compacted > .tree-item-self`, and then source order would decide.
+   `.spaces-compacted > .tree-item-self`, so source order would decide it.
    The extra class outranks it. A compacted row is always scaffold, since a
    run is a chain of scaffold folders, so this is accurate and not a hedge.
+
+   It also answers a lookalike: a real folder cannot contain `/`, but one
+   named with a slash lookalike such as U+2044 can imitate a compacted row.
+   This rule does not tell those apart inside a compacted row, where both are
+   drawn by it, but a lookalike sitting in an ORDINARY row is drawn at the
+   scaffold shade and a compacted row is not.
 
    `.is-cut` is OBSIDIAN's class, not ours (it marks a row the user has cut;
    we never set it, so do not look for where we do). Obsidian dims it to 0.5 at
@@ -62,28 +80,16 @@
    dimmer than Obsidian's 0.5, exactly as a cut plain scaffold row already
    reads). The class may not exist on every Obsidian version, which costs
    nothing. */
-.spaces-compacted.spaces-scaffold > .tree-item-self:not(.is-cut) { opacity: 0.75; }
-
-/* A compacted row reads as one path. The folders it only passed through step
-   back so the folder the row actually IS stays legible at a glance. Targeting
-   the roles rather than the whole row is what lets a presentation variant be
-   a style change: `compactLabel` returns a part per piece with a role, and
-   `applyCompactLabels` draws each one as its own span classed
-   `spaces-compact-<role>`. */
-.spaces-compact-lead,
-.spaces-compact-sep {
-  opacity: 0.6;
+.spaces-compacted.spaces-scaffold > .tree-item-self:not(.is-cut) {
+  opacity: var(--spaces-dim-visitor);
 }
 
-/* The stand-in for the folders a shortened label left out. Drawn FAINTER than
-   the lead beside it, because it is not a folder name at all: a reader should
-   see "there was more above this" without mistaking `..` for a folder that is
-   actually called that. A separate rule rather than another selector on the
-   pair above is the whole reason `gap` is its own role -- the parts are
-   already addressable, so this is a style change and nothing else. */
-.spaces-compact-gap {
-  opacity: 0.45;
-}
+/* NO PART OF THE LABEL CARRIES AN OPACITY OF ITS OWN, and that is the rule
+   rather than an omission. An opacity on a role span multiplies with the
+   row's, so any value here draws that part at a different shade from the rest
+   of the path. The roles stay addressable -- a presentation variant is still
+   a style change, and the bidi isolation below is one -- but weight is not
+   what they vary. */
 
 /* Isolate each role span from the text around it. A right-to-left folder name
    beside a `/` reorders visually without isolation, and the row then reads as

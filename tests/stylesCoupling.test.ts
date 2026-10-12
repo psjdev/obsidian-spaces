@@ -418,7 +418,7 @@ describe("compacted row label roles", () => {
     expect(textEl.children.length).toBe(0);
   });
 
-  it("the dimmed spans are reachable from inside the owned prefix", () => {
+  it("the role spans are reachable from inside the owned prefix", () => {
     // The rules are written unscoped, so they must match a span wherever the
     // adapter puts it. Asserted against the REAL nesting rather than a bare
     // span, which is what would silently stop being true if the rules ever
@@ -427,8 +427,7 @@ describe("compacted row label roles", () => {
     for (const cls of dimmed) {
       const span = title.querySelector<HTMLElement>(`.${cls}`);
       expect(span, cls).not.toBeNull();
-      const matching = rules.filter((r) => span!.matches(r.selector));
-      expect(matching.some((r) => r.style.getPropertyValue("opacity") !== ""), cls).toBe(true);
+      expect(rules.some((r) => span!.matches(r.selector)), cls).toBe(true);
     }
   });
 
@@ -443,33 +442,34 @@ describe("compacted row label roles", () => {
     const span = title.querySelector<HTMLElement>(".spaces-compact-gap");
     expect(span).not.toBeNull();
     expect(span!.textContent).toBe("..");
-    const matching = rules.filter((r) => span!.matches(r.selector));
-    expect(matching.some((r) => r.style.getPropertyValue("opacity") !== "")).toBe(true);
+    expect(rules.some((r) => span!.matches(r.selector))).toBe(true);
   });
 
-  it("the stylesheet draws the gap fainter than the lead beside it", () => {
-    const opacityOf = (cls: string): number => {
+  /**
+   * ONE SHADE FOR THE WHOLE PATH, which is a rule about what the stylesheet
+   * must NOT say.
+   *
+   * Opacity on a role span multiplies with the row's, so any value on any
+   * part draws that part at a different shade from the rest of its own path.
+   * The parts used to carry 0.6 and 0.45, and in a real vault that read as
+   * the last folder of a chain being a different color from the folders above
+   * it. Nothing here forbids a variant from styling the roles -- the bidi
+   * isolation below is one, and a variant could add weight or case -- but a
+   * part-level opacity is how the shade splits, so it is the one declaration
+   * these spans may not carry.
+   */
+  it("no part of a compacted label carries an opacity of its own", () => {
+    for (const cls of [...dimmed, "spaces-compact-tip", "spaces-compact-prefix"]) {
       const span = document.createElement("span");
       span.className = cls;
-      const values = rules
-        .filter((r) => span.matches(r.selector))
-        .map((r) => r.style.getPropertyValue("opacity"))
-        .filter(Boolean);
-      return Number(values[values.length - 1]);
-    };
-    expect(opacityOf("spaces-compact-gap")).toBeLessThan(opacityOf("spaces-compact-lead"));
-  });
-
-  it("the stylesheet steps back the lead and the separator, and leaves the tip alone", () => {
-    for (const cls of dimmed) {
-      const span = document.createElement("span");
-      span.className = cls;
-      const matching = rules.filter((r) => span.matches(r.selector));
-      expect(matching.some((r) => r.style.getPropertyValue("opacity") !== ""), cls).toBe(true);
+      const withOpacity = rules.filter(
+        (r) => span.matches(r.selector) && r.style.getPropertyValue("opacity") !== ""
+      );
+      expect(
+        withOpacity.map((r) => r.selector),
+        `${cls} must take the row's shade, not one of its own`
+      ).toEqual([]);
     }
-    const tip = document.createElement("span");
-    tip.className = "spaces-compact-tip";
-    expect(rules.filter((r) => tip.matches(r.selector))).toHaveLength(0);
   });
 
   /**
@@ -515,8 +515,26 @@ describe("compacted row label roles", () => {
       expect(winningOpacity(scaffoldRow(false)).value).toBe("0.45");
     });
 
-    it("a compacted scaffold row is at 0.75", () => {
-      expect(winningOpacity(scaffoldRow(true)).value).toBe("0.75");
+    it("a compacted scaffold row draws at the visitor shade", () => {
+      // The coupling the stylesheet states and cannot enforce: a compacted
+      // row borrows the dimming this plugin already uses for "present, but
+      // not a member". Both rules name the same custom property, so a change
+      // to the visitor shade moves the compacted row with it -- and a future
+      // edit that inlines a number into either one fails here.
+      const visitor = rules.find((r) => r.selector === ".spaces-visitor > .tree-item-self");
+      expect(visitor, "the visitor rule").toBeDefined();
+      const shade = visitor!.style.getPropertyValue("opacity");
+      expect(shade).toBe("var(--spaces-dim-visitor)");
+      expect(winningOpacity(scaffoldRow(true)).value).toBe(shade);
+    });
+
+    it("the borrowed shade resolves to a real number on :root", () => {
+      // A `var()` with nothing behind it renders as full opacity, which would
+      // make a compacted row indistinguishable from a member folder.
+      const root = rules.find((r) => r.selector === ":root");
+      expect(root, ":root").toBeDefined();
+      expect(Number(root!.style.getPropertyValue("--spaces-dim-visitor"))).toBeGreaterThan(0);
+      expect(Number(root!.style.getPropertyValue("--spaces-dim-visitor"))).toBeLessThan(1);
     });
 
     it("wins by specificity, so source order cannot decide it", () => {
