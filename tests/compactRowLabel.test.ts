@@ -28,26 +28,34 @@
 import { describe, expect, it } from "vitest";
 import { ExplorerAdapter, applyCompactLabels } from "../src/explorer/ExplorerAdapter";
 import { CLS, CLS_COMPACT_PREFIX, SEL } from "../src/explorer/selectors";
-import type { CompactLabelOptions } from "../src/ui/compactLabel";
+import type { CompactLabelPolicy } from "../src/ui/compactLabel";
 import type { VisibilitySnapshot } from "../src/visibility/VisibilityEngine";
 import { buildChainIndex, type ChainIndex } from "../src/visibility/compactChains";
 
-/** The label the feature shipped with: the whole joined path, never shortened. */
-const PLAIN: CompactLabelOptions = { abbreviate: false, threshold: 3 };
-/** Shortening on at the shipped default. */
-const ABBREV: CompactLabelOptions = { abbreviate: true, threshold: 3 };
+/** Shortening turned off: the whole joined path, whatever it costs. */
+const PLAIN: CompactLabelPolicy = { abbreviateWhenOverflowing: false };
+/** Shortening left on, the shipped default. */
+const ABBREV: CompactLabelPolicy = { abbreviateWhenOverflowing: true };
 
 /**
- * `applyCompactLabels` with the shipped label, so every assertion below about
- * the prefix, the text element and restoration reads the way it did before
+ * `applyCompactLabels` with shortening OFF, so every assertion below about the
+ * prefix, the text element and restoration reads the way it did before
  * shortening existed. The shortening block passes `ABBREV` explicitly.
+ *
+ * THE PANE IS NARROW BY DEFAULT HERE. Whether a row shortens is a measurement,
+ * and jsdom lays nothing out -- every element reports a width of 0, so the
+ * real probe answers "it fits" for every row a test can build. The default
+ * below says "nothing fits", which is the condition the shortening block is
+ * about; with `PLAIN` it changes nothing, because a policy of off never
+ * measures at all.
  */
 const label = (
   titles: readonly HTMLElement[],
   index: ChainIndex | null,
-  opts: CompactLabelOptions = PLAIN
+  opts: CompactLabelPolicy = PLAIN,
+  overflows: () => boolean = () => true
 ): void => {
-  applyCompactLabels(titles, index, opts);
+  applyCompactLabels(titles, index, opts, { overflows });
 };
 
 interface Row {
@@ -504,8 +512,9 @@ describe("applyCompactLabels, shortened", () => {
     expect(r.title.querySelector(".spaces-compact-gap")).toBeNull();
   });
 
-  it("leaves a run at the threshold in full", () => {
-    // Three folders, the run the design names, at the default threshold of 3.
+  it("leaves a run that FITS in full, and gives it no tooltip", () => {
+    // Three folders, the run the design names. Under the old folder count it
+    // was the default threshold that left this whole; now it is the pane.
     const host = document.createElement("div");
     const tree = {
       visibleChildrenOf: (p: string) =>
@@ -523,10 +532,35 @@ describe("applyCompactLabels, shortened", () => {
     };
     const index = buildChainIndex(["Clients"], tree);
     const r = row(host, "Clients/Northwind/Meetings", "Meetings");
-    label([r.title], index, ABBREV);
+    label([r.title], index, ABBREV, () => false);
     expect(r.title.textContent).toBe("Clients/Northwind/Meetings");
     expect(r.title.querySelector(".spaces-compact-gap")).toBeNull();
     expect(r.title.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("shortens the same three folder run once it stops fitting", () => {
+    // The pair above and this one are the whole of D-B: one run, two pane
+    // widths, two labels. A folder count could not tell them apart.
+    const host = document.createElement("div");
+    const tree = {
+      visibleChildrenOf: (p: string) =>
+        p === "Clients"
+          ? ["Clients/Northwind"]
+          : p === "Clients/Northwind"
+            ? ["Clients/Northwind/Meetings"]
+            : p === "Clients/Northwind/Meetings"
+              ? ["Clients/Northwind/Meetings/a.md"]
+              : [],
+      isFolder: (p: string) => !p.endsWith(".md"),
+      isScaffold: (p: string) => !p.endsWith(".md"),
+      parentOf: DEEP_TREE.parentOf,
+      nameOf: DEEP_TREE.nameOf,
+    };
+    const index = buildChainIndex(["Clients"], tree);
+    const r = row(host, "Clients/Northwind/Meetings", "Meetings");
+    label([r.title], index, ABBREV, () => true);
+    expect(r.title.textContent).toBe("../Northwind/Meetings");
+    expect(r.title.getAttribute("aria-label")).toBe("Clients/Northwind/Meetings");
   });
 
   it("carries the full path in aria-label when it shortened the label", () => {
@@ -614,7 +648,9 @@ describe("applyCompactLabels, shortened", () => {
 
     it("applyNow shortens and tooltips from the options it was handed", () => {
       const { container, title } = mountDeep();
-      const a = new ExplorerAdapter();
+      // The pane is too narrow for this label. See `label` above for why that
+      // has to be said rather than laid out.
+      const a = new ExplorerAdapter(() => true);
       a.bind(container);
       a.setChainIndex(DEEP, ABBREV);
       a.apply(SNAP);
@@ -626,7 +662,7 @@ describe("applyCompactLabels, shortened", () => {
 
     it("draws the whole path, and no tooltip, with shortening off", () => {
       const { container, title } = mountDeep();
-      const a = new ExplorerAdapter();
+      const a = new ExplorerAdapter(() => true);
       a.bind(container);
       a.setChainIndex(DEEP, PLAIN);
       a.apply(SNAP);
@@ -637,7 +673,7 @@ describe("applyCompactLabels, shortened", () => {
 
     it("unbind takes the tooltip off with the prefix", () => {
       const { container, title } = mountDeep();
-      const a = new ExplorerAdapter();
+      const a = new ExplorerAdapter(() => true);
       a.bind(container);
       a.setChainIndex(DEEP, ABBREV);
       a.apply(SNAP);

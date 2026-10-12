@@ -42,6 +42,18 @@
   opacity: 0.45;
 }
 
+/* The prefix element, which is what the measurement measures.
+
+   `white-space: nowrap` is load-bearing, not cosmetic. Whether a compacted
+   label is shortened is decided by comparing the row's content width with its
+   box (`rowOverflows`), and a prefix free to wrap would answer that question
+   by stacking `Research/2026/` onto a second line instead of overflowing --
+   so the row would measure as fitting while reading as a two line folder
+   name. One line, then overflow, then the decision. */
+.spaces-compact-prefix {
+  white-space: nowrap;
+}
+
 /* The elsewhere group's boundary (folder-space design §5). A border on the
    first row rather than a separator element: the tree is Obsidian's, and a
    row we already class costs nothing to draw on. Unlike the de-emphasis pair

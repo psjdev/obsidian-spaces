@@ -296,30 +296,10 @@ export class SpacesSettingTab extends PluginSettingTab {
         // `showPinnedFolder` above. A greyed row invites the question "why
         // can I not change this"; a sentence answers it.
         desc:
-          "When Compact folder chains is on, a long run of folders reads as two " +
-          "dots and the last two folder names. Without it the path runs past the " +
-          "edge of a narrow pane and the folder's own name is the part cut off.",
+          "When Compact folder chains is on, a compacted row whose path is too " +
+          "wide for the file explorer reads as two dots and the last two folder " +
+          "names. Hover the row to see the whole path.",
         control: { type: "toggle", key: "abbreviateCompactedPaths" },
-      },
-      {
-        name: "Shorten runs longer than",
-        desc:
-          "How many folders a run may have before the setting above shortens it. " +
-          "Shorter runs are shown in full.",
-        control: {
-          type: "dropdown",
-          key: "compactPathThreshold",
-          // One short label each, all the same length. A native select sizes
-          // to its selected option, so uneven labels make the settings row
-          // jump on every change, the same reasoning as the two dropdowns
-          // below.
-          options: {
-            3: "3 folders",
-            4: "4 folders",
-            5: "5 folders",
-            6: "6 folders",
-          },
-        },
       },
       {
         // Led by "All" rather than "Pin All …": sentence case is linted,

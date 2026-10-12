@@ -1,7 +1,12 @@
 import { ALL_OWNED_CLASSES, CLS, CLS_COMPACT_PREFIX, CLS_ELSEWHERE, SEL } from "./selectors";
 import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
-import { compactLabel, isAbbreviated, type CompactLabelOptions } from "../ui/compactLabel";
-import type { ChainIndex } from "../visibility/compactChains";
+import {
+  compactLabel,
+  isAbbreviated,
+  type CompactLabelPolicy,
+  type LabelPart,
+} from "../ui/compactLabel";
+import type { ChainIndex, Run } from "../visibility/compactChains";
 
 /**
  * The attribute a compacted-and-shortened row carries the full path in.
@@ -14,6 +19,80 @@ import type { ChainIndex } from "../visibility/compactChains";
  * `title`, no `data-tooltip-position`.
  */
 const ARIA_LABEL = "aria-label";
+
+/**
+ * How long the pane must stop moving before the labels are measured again.
+ *
+ * A sidebar drag fires the observer on nearly every pointer move, and each
+ * re-measurement forces a synchronous layout over a window of rows. Settling
+ * first means one measurement per drag instead of one per frame, and the user
+ * cannot read a label mid-drag anyway.
+ */
+const RESIZE_SETTLE_MS = 120;
+
+/**
+ * How much wider than its box a row's content may measure and still count as
+ * fitting.
+ *
+ * ONE pixel, because both numbers compared below are integers rounded from a
+ * fractional layout, and two roundings of nearly equal quantities can land a
+ * pixel apart. A row whose text fits exactly can therefore report one pixel
+ * more content than box, and without this slack a label that fits would be
+ * shortened on a rounding.
+ */
+const OVERFLOW_SLACK = 1;
+
+/**
+ * "Does this row's label fail to fit the pane it is drawn in?"
+ *
+ * A SEAM, and the reason it is one is jsdom. No test environment this suite
+ * runs in performs layout: every element reports `scrollWidth` and
+ * `clientWidth` as 0, so the real probe below answers "it fits" for every row
+ * a test can build, and a test depending on real layout could only ever
+ * assert one branch. Tests substitute this function instead, and the real one
+ * is measured in a running Obsidian by `e2e/deep-compact.mjs`.
+ */
+export type OverflowProbe = (title: HTMLElement) => boolean;
+
+/**
+ * The production probe: TWO comparisons, because the overflow this feature
+ * exists for is not visible on one of them alone.
+ *
+ * Measured in a real vault at a 246px pane, with
+ * `Research/2026/Q4/Projects/Atlas/Design/Decisions` compacted onto one row:
+ * the row's own content was 263px of a 222px box, AND Obsidian's
+ * `.tree-item-inner` -- the tip, the one segment naming the row -- was laid
+ * out at a client width of ZERO. The row is a flex container, so a prefix
+ * wide enough squeezes the tip to nothing without the row itself reporting any
+ * overflow at all. Asking only the row would miss exactly the case that
+ * matters most, since the squeezed element is the part the reader needs.
+ */
+/**
+ * What one label pass is told beyond the index and the policy.
+ *
+ * Both are optional and both default to production: an ordinary caller writes
+ * `applyCompactLabels(titles, index, policy)` and gets the real probe and the
+ * kept decision.
+ */
+export interface LabelPassOptions {
+  /**
+   * Decide every row again, including the ones already drawn short.
+   *
+   * Set by a settled pane resize, which is the event the adapter hears that
+   * can turn a row which did not fit into one that does. See
+   * `applyCompactLabels` for why an ordinary pass must NOT do this.
+   */
+  remeasure?: boolean;
+  /** The measuring step. Defaults to `rowOverflows`. */
+  overflows?: OverflowProbe;
+}
+
+export function rowOverflows(title: HTMLElement): boolean {
+  if (title.scrollWidth > title.clientWidth + OVERFLOW_SLACK) return true;
+  const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
+  if (!textEl) return false;
+  return textEl.scrollWidth > textEl.clientWidth + OVERFLOW_SLACK;
+}
 
 /**
  * The only module that WRITES to Obsidian's explorer tree.
@@ -38,6 +117,10 @@ const ARIA_LABEL = "aria-label";
 export class ExplorerAdapter {
   private containers: HTMLElement[] = [];
   private observers: MutationObserver[] = [];
+  /** One per bound container, disconnected in `unbind()` with the rest. */
+  private resizeObservers: ResizeObserver[] = [];
+  /** The settle timer armed by `onPaneResize`, cleared in `unbind()`. */
+  private resizeTimer = 0;
   private snapshot: VisibilitySnapshot | null = null;
   /**
    * `apply()` takes only a snapshot, and a snapshot carries no order — there
@@ -53,27 +136,48 @@ export class ExplorerAdapter {
   private elsewhereFirst: string | null = null;
   private chainIndex: ChainIndex | null = null;
   /**
-   * Seeded to the shipped defaults rather than to "no abbreviation".
+   * Seeded to the shipped default rather than to "never shorten".
    *
    * It is only ever read with a non-null `chainIndex`, which cannot exist
    * before `setChainIndex` has supplied both — so this value is unreachable in
    * practice. It matches `DEFAULT_DEFINITIONS` anyway, so the failure mode if
-   * that ever stops being true is the default label rather than a silently
+   * that ever stops being true is the shipped behaviour rather than a silently
    * disabled setting.
    */
-  private labelOptions: CompactLabelOptions = { abbreviate: true, threshold: 3 };
+  private labelPolicy: CompactLabelPolicy = { abbreviateWhenOverflowing: true };
+  /**
+   * Set by a settled pane resize, consumed by the next label pass.
+   *
+   * A row already drawn short is normally left alone: deciding again means
+   * drawing the full label to measure it, and a pass that rewrote the prefix
+   * every time would be seen by this class's own MutationObserver and schedule
+   * the next pass forever. A pane resize is the event this class hears that
+   * can turn a row which did not fit into one that does, so it is the one that
+   * asks for the decision to be retaken.
+   */
+  private remeasure = false;
+
+  /**
+   * The measuring step, substitutable for the reason `OverflowProbe`
+   * documents: no test environment lays anything out.
+   *
+   * A defaulted constructor argument rather than a setter, so production
+   * constructs this class exactly as it always did and no branch exists that
+   * only a test can take.
+   */
+  constructor(private readonly overflows: OverflowProbe = rowOverflows) {}
 
   /**
    * Set with the snapshot, because the runs are a function of it.
    *
-   * The options are a REQUIRED second argument, not a separate setter with a
-   * default, so a caller cannot hand over an index and forget them — which
-   * would silently draw every row with the shipped label whatever the user had
-   * chosen, and pass the whole suite.
+   * The policy is a REQUIRED second argument, not a separate setter with a
+   * default, so a caller cannot hand over an index and forget it — which
+   * would silently draw every row with the shipped behaviour whatever the
+   * user had chosen, and pass the whole suite.
    */
-  setChainIndex(index: ChainIndex | null, options: CompactLabelOptions): void {
+  setChainIndex(index: ChainIndex | null, policy: CompactLabelPolicy): void {
     this.chainIndex = index;
-    this.labelOptions = options;
+    this.labelPolicy = policy;
   }
 
   private frame = 0;
@@ -113,12 +217,57 @@ export class ExplorerAdapter {
       const observer = new MutationObserver(() => this.schedule());
       observer.observe(container, { childList: true, subtree: true });
       this.observers.push(observer);
+      // Whether a compacted label fits is a fact about the PANE, and nothing
+      // else in the plugin hears a sidebar being dragged: no mutation, no
+      // snapshot, no setting write. Without this, a row shortened in a narrow
+      // pane stays shortened once the pane is widened, and a row that fitted
+      // goes on overflowing a pane the user just narrowed.
+      //
+      // `defaultView`, not Obsidian's `win`: the same cross-window handle
+      // `SwitcherView` uses, and the one the DOM lib types constructors on. It
+      // is null for a container no document owns, which is a tree with no
+      // width to measure anyway.
+      const view = container.ownerDocument.defaultView;
+      if (!view) continue;
+      const resize = new view.ResizeObserver(() => this.onPaneResize());
+      resize.observe(container);
+      this.resizeObservers.push(resize);
     }
+  }
+
+  /**
+   * A settled resize, then one ordinary pass with the decision retaken.
+   *
+   * Debounced rather than coalesced into a frame like `schedule()`: a sidebar
+   * drag fires the observer on nearly every pointer move, each pass re-reads
+   * the layout of a window of rows, and a label nobody can read mid-drag is
+   * worth nothing. One measurement per drag, taken where it stops.
+   */
+  private onPaneResize(): void {
+    if (this.resizeTimer) window.clearTimeout(this.resizeTimer);
+    this.resizeTimer = window.setTimeout(() => {
+      this.resizeTimer = 0;
+      this.remeasure = true;
+      this.applyNow();
+    }, RESIZE_SETTLE_MS);
   }
 
   unbind(): void {
     for (const observer of this.observers) observer.disconnect();
     this.observers = [];
+    // A ResizeObserver holds the element it watches and its callback holds
+    // this adapter, so one left connected outlives the plugin's unload and
+    // goes on labelling a torn-down tree every time the user drags the
+    // sidebar. Disconnected here, beside the MutationObservers, because this
+    // is where the rest of the teardown lives and a second place to remember
+    // is a place to forget.
+    for (const resize of this.resizeObservers) resize.disconnect();
+    this.resizeObservers = [];
+    if (this.resizeTimer) {
+      window.clearTimeout(this.resizeTimer);
+      this.resizeTimer = 0;
+    }
+    this.remeasure = false;
     if (this.frame) {
       window.cancelAnimationFrame(this.frame);
       this.frame = 0;
@@ -159,10 +308,11 @@ export class ExplorerAdapter {
       // reading `Work/Clients` with nothing left to say it should not.
       const titles: HTMLElement[] = [];
       c.querySelectorAll<HTMLElement>(SEL.titleWithPath).forEach((t) => titles.push(t));
-      // The options are never read on this path — a null index labels nothing
-      // — but they are passed rather than defaulted, so this call stays the
-      // same shape as the one in `applyNow`.
-      applyCompactLabels(titles, null, this.labelOptions);
+      // The policy is never read on this path — a null index labels nothing,
+      // so nothing is drawn and nothing is measured — but it is passed rather
+      // than defaulted, so this call stays the same shape as the one in
+      // `applyNow`.
+      applyCompactLabels(titles, null, this.labelPolicy);
     }
   }
 
@@ -274,7 +424,15 @@ export class ExplorerAdapter {
         }
       }
     }
-    applyCompactLabels(titles, this.chainIndex, this.labelOptions);
+    // The flag is consumed HERE rather than read in place, so a pass that
+    // returned early above cannot swallow a resize: it stays set until a pass
+    // actually reaches the labels.
+    const remeasure = this.remeasure;
+    this.remeasure = false;
+    applyCompactLabels(titles, this.chainIndex, this.labelPolicy, {
+      remeasure,
+      overflows: this.overflows,
+    });
     return changed;
   }
 }
@@ -287,13 +445,30 @@ export class ExplorerAdapter {
  * belongs to Obsidian, which also uses it for inline rename, so restoring it
  * exactly matters more than the labelling does.
  *
+ * THREE PASSES, AND THAT IS THE POINT. Whether a compacted label fits is
+ * something only the laid-out pane knows, so the row is drawn in full,
+ * measured, and redrawn short if it did not fit. Done row by row that is
+ * write-read-write-read down a window of about fifty rows, and every read
+ * after a write forces the browser to lay the tree out again. So: every row is
+ * drawn first, then every row is measured, then every row that overflowed is
+ * redrawn. One layout instead of fifty.
+ *
+ * WHY A ROW ALREADY DRAWN SHORT IS LEFT ALONE. The first pass would have to
+ * put the full label back to measure it, and the third would shorten it again
+ * -- rewriting the prefix on every pass, forever. `ExplorerAdapter` watches
+ * the very container this writes into with a MutationObserver, so those writes
+ * would schedule the next pass, which would write again: the explorer would
+ * redraw every frame for as long as the plugin was loaded. The decision is
+ * therefore kept until something that could change it happens, which is a pane
+ * resize, and `remeasure` is how the adapter says so.
+ *
  * WHAT IS WRITTEN, AND WHAT IS NOT. `titles` are `[data-path]` elements, which
- * in Obsidian are `.tree-item-self` — the ROW, whose children are the collapse
+ * in Obsidian are `.tree-item-self` -- the ROW, whose children are the collapse
  * chevron and `.tree-item-inner`. NEITHER is written. `.tree-item-inner`
  * especially: Obsidian seeds its inline-rename editor from that element's
  * text, so a joined label written there offered `Clients/Meetings` for a
  * folder named `Meetings` and the commit failed with ENOENT against
- * `Clients/Clients/Meetings` — a compacted folder could not be renamed at all.
+ * `Clients/Clients/Meetings` -- a compacted folder could not be renamed at all.
  * `SEL.rowText` documents that in full.
  *
  * Instead ONE element of our own (`CLS_COMPACT_PREFIX`) carries the lead and
@@ -301,7 +476,7 @@ export class ExplorerAdapter {
  * The row reads `Clients/` + `Meetings` exactly as it did, and the inner still
  * holds only `Meetings`.
  *
- * FAILS OPEN PER ROW. A row with no text element is skipped entirely — no
+ * FAILS OPEN PER ROW. A row with no text element is skipped entirely -- no
  * prefix, and not even classed. There is nothing to anchor the prefix to, and
  * a class with no label is a style on a row that reads as an ordinary folder.
  *
@@ -314,7 +489,7 @@ export class ExplorerAdapter {
  * THE TOOLTIP. A row whose label was SHORTENED no longer shows the folders it
  * passed through, so the full joined path goes on the row as `aria-label`,
  * which Obsidian renders as its own tooltip on hover (verified in the running
- * app — see `ARIA_LABEL`). It is set only while the label is abbreviated: a
+ * app -- see `ARIA_LABEL`). It is set only while the label is abbreviated: a
  * row drawing its whole path has nothing a tooltip could add, and a stale one
  * would claim a shortening that is no longer happening.
  *
@@ -326,13 +501,17 @@ export class ExplorerAdapter {
 export function applyCompactLabels(
   titles: readonly HTMLElement[],
   index: ChainIndex | null,
-  opts: CompactLabelOptions
+  policy: CompactLabelPolicy,
+  pass: LabelPassOptions = {}
 ): void {
+  const overflows = pass.overflows ?? rowOverflows;
+  /** The rows drawn in full that still need a verdict. */
+  const undecided: { title: HTMLElement; run: Run }[] = [];
+
+  // PASS ONE: writes only.
   for (const title of titles) {
     const path = title.getAttribute("data-path");
     if (!path) continue;
-    const run = index?.runByTip.get(path);
-    const wrapper = title.parentElement;
     // `:scope >` is deliberate: a collapsed folder still holds its
     // `.tree-item-children` subtree in the DOM, and a plain descendant query
     // from the WRAPPER would find a child row's text element first. Searching
@@ -340,68 +519,135 @@ export function applyCompactLabels(
     // form says so. The same reasoning applies to the prefix below.
     const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
     if (!textEl) continue;
-    const existing = title.querySelector<HTMLElement>(`:scope > .${CLS_COMPACT_PREFIX}`);
-    if (run) {
-      // The TIP part is dropped, and that is not an oversight. `compactLabel`
-      // still returns it because it describes the whole label; the element it
-      // would be drawn into already contains it, as the folder's real name,
-      // and writing that element is the defect this shape exists to avoid.
-      // A run is two segments or more (`runFrom`), so what is left is never
-      // empty.
-      const label = compactLabel(run.segments, opts);
-      const parts = label.filter((p) => p.role !== "tip");
-      const text = parts.map((p) => p.text).join("");
-      let prefix = existing;
-      if (!prefix) {
-        // Created on the row's own window: a popout explorer is not this
-        // one's document.
-        prefix = textEl.ownerDocument.win.createSpan({ cls: CLS_COMPACT_PREFIX });
-        title.insertBefore(prefix, textEl);
-      }
-      // Compared on the concatenated text, not on the parts: it is what
-      // changes when a run changes, and `textContent` already reads through
-      // the spans. Rebuilding them every pass would churn the DOM on every
-      // mutation the observer sees — and REUSING the prefix rather than
-      // appending a second one is what keeps a repeated pass idempotent.
-      if (prefix.textContent !== text) {
-        prefix.replaceChildren(
-          ...parts.map((p) =>
-            textEl.ownerDocument.win.createSpan({
-              cls: `spaces-compact-${p.role}`,
-              text: p.text,
-            })
-          )
-        );
-      }
-      // Asked of the PARTS, not recomputed from `opts`, so one rule decides
-      // both what is drawn and whether anything was left out. A later variant
-      // that elides differently gets the tooltip without touching this line.
-      if (isAbbreviated(label)) {
-        // The whole label, which is what the row would have read. Joined from
-        // the run's own segments rather than from `run.tip`: a run that starts
-        // below the vault root has a tip path with ancestors the label never
-        // claimed, and the tooltip must say what was hidden, not more.
-        title.setAttribute(ARIA_LABEL, run.segments.join("/"));
-      } else {
-        title.removeAttribute(ARIA_LABEL);
-      }
-      wrapper?.classList.add(CLS.compacted);
-    } else {
-      // Unconditional, and cheap: both are no-ops on a row that was never
-      // compacted. Gating them on the class would make the class the record
-      // of what to undo, which is the kind of stashed state this pass does
-      // not keep.
-      //
-      // The tooltip is the one exception, and it is gated on our own ELEMENT
-      // rather than on a class we might have left behind: `aria-label` is a
-      // DOM attribute anyone may use, and a blanket removal here would strip
-      // one Obsidian had put on a row this plugin never labelled. Our prefix
-      // being present is the honest record that the attribute is ours.
-      if (existing) {
-        existing.remove();
-        title.removeAttribute(ARIA_LABEL);
-      }
-      wrapper?.classList.remove(CLS.compacted);
+    const run = index?.runByTip.get(path);
+    if (!run) {
+      restoreRow(title);
+      continue;
     }
+    // Turned off means never measured. The answer could not change the label,
+    // and reading a width forces a layout.
+    if (!policy.abbreviateWhenOverflowing) {
+      drawRow(title, textEl, run, false);
+      continue;
+    }
+    // Already showing what a "yes" would draw. For a long run that is the
+    // decision taken at the last measurement, kept for the reason above; for a
+    // two-segment run, which `compactLabel` refuses to shorten at any width,
+    // it is the only label there is, so measuring it is work with one possible
+    // outcome.
+    if (!pass.remeasure && textOf(run, true) === prefixTextOn(title)) {
+      drawRow(title, textEl, run, true);
+      continue;
+    }
+    drawRow(title, textEl, run, false);
+    undecided.push({ title, run });
   }
+
+  // PASS TWO: reads only. Nothing in this loop writes, so the layout the first
+  // read forces is the only one, and every later read is served from it.
+  const tooLong = undecided.filter((row) => overflows(row.title));
+
+  // PASS THREE: writes only.
+  for (const { title, run } of tooLong) {
+    const textEl = title.querySelector<HTMLElement>(`:scope > ${SEL.rowText}`);
+    if (textEl) drawRow(title, textEl, run, true);
+  }
+}
+
+/** What this module would write into the prefix for a run, drawn either way. */
+function textOf(run: Run, abbreviate: boolean): string {
+  return partsFor(run, abbreviate)
+    .map((p) => p.text)
+    .join("");
+}
+
+/**
+ * The parts that are actually DRAWN, which is the label minus its tip.
+ *
+ * The TIP part is dropped, and that is not an oversight. `compactLabel` still
+ * returns it because it describes the whole label; the element it would be
+ * drawn into already contains it, as the folder's real name, and writing that
+ * element is the defect this shape exists to avoid. A run is two segments or
+ * more (`runFrom`), so what is left is never empty.
+ */
+function partsFor(run: Run, abbreviate: boolean): readonly LabelPart[] {
+  return compactLabel(run.segments, { abbreviate }).filter((p) => p.role !== "tip");
+}
+
+/** The text our prefix element currently carries, or null if there is none. */
+function prefixTextOn(title: HTMLElement): string | null {
+  const prefix = title.querySelector<HTMLElement>(`:scope > .${CLS_COMPACT_PREFIX}`);
+  return prefix ? prefix.textContent : null;
+}
+
+/**
+ * Draw one compacted row, long or short.
+ *
+ * Idempotent on purpose: called again with the same run and the same decision
+ * it touches nothing at all, which is what keeps the adapter's own
+ * MutationObserver from scheduling an endless chain of passes.
+ */
+function drawRow(
+  title: HTMLElement,
+  textEl: HTMLElement,
+  run: Run,
+  abbreviate: boolean
+): void {
+  const label = compactLabel(run.segments, { abbreviate });
+  const parts = partsFor(run, abbreviate);
+  const text = parts.map((p) => p.text).join("");
+  let prefix = title.querySelector<HTMLElement>(`:scope > .${CLS_COMPACT_PREFIX}`);
+  if (!prefix) {
+    // Created on the row's own window: a popout explorer is not this one's
+    // document.
+    prefix = textEl.ownerDocument.win.createSpan({ cls: CLS_COMPACT_PREFIX });
+    title.insertBefore(prefix, textEl);
+  }
+  // Compared on the concatenated text, not on the parts: it is what changes
+  // when a run or a decision changes, and `textContent` already reads through
+  // the spans. Rebuilding them every pass would churn the DOM on every
+  // mutation the observer sees -- and REUSING the prefix rather than appending
+  // a second one is what keeps a repeated pass idempotent.
+  if (prefix.textContent !== text) {
+    prefix.replaceChildren(
+      ...parts.map((p) =>
+        textEl.ownerDocument.win.createSpan({ cls: `spaces-compact-${p.role}`, text: p.text })
+      )
+    );
+  }
+  // Asked of the PARTS, not recomputed from the decision, so one rule decides
+  // both what is drawn and whether anything was left out. A later variant that
+  // elides differently gets the tooltip without touching this line.
+  if (isAbbreviated(label)) {
+    // The whole label, which is what the row would have read. Joined from the
+    // run's own segments rather than from `run.tip`: a run that starts below
+    // the vault root has a tip path with ancestors the label never claimed,
+    // and the tooltip must say what was hidden, not more.
+    title.setAttribute(ARIA_LABEL, run.segments.join("/"));
+  } else {
+    title.removeAttribute(ARIA_LABEL);
+  }
+  title.parentElement?.classList.add(CLS.compacted);
+}
+
+/**
+ * Give a row that is not a compacted tip back to Obsidian.
+ *
+ * Unconditional, and cheap: both removals are no-ops on a row that was never
+ * compacted. Gating them on the class would make the class the record of what
+ * to undo, which is the kind of stashed state this pass does not keep.
+ *
+ * The tooltip is the one exception, and it is gated on our own ELEMENT rather
+ * than on a class we might have left behind: `aria-label` is a DOM attribute
+ * anyone may use, and a blanket removal here would strip one Obsidian had put
+ * on a row this plugin never labelled. Our prefix being present is the honest
+ * record that the attribute is ours.
+ */
+function restoreRow(title: HTMLElement): void {
+  const prefix = title.querySelector<HTMLElement>(`:scope > .${CLS_COMPACT_PREFIX}`);
+  if (prefix) {
+    prefix.remove();
+    title.removeAttribute(ARIA_LABEL);
+  }
+  title.parentElement?.classList.remove(CLS.compacted);
 }

@@ -29,6 +29,14 @@
  * with the tip's element squeezed to a client width of ZERO. Collapsing
  * everything above the tip's immediate parent to `..` is a change of parts and
  * a change of roles, and nothing outside this file and its stylesheet moved.
+ *
+ * WHICH ROWS abbreviate is not decided here and never was decided well. It
+ * was a count of folders, and a count of folders answers the wrong question:
+ * two long names overflow a narrow pane just as a seven folder run does, and
+ * under a count that row never shortened and so never carried the tooltip
+ * either. The pane is the only thing that knows, so the ADAPTER draws the full
+ * label, measures it, and calls this module again with `abbreviate` set when
+ * it did not fit. This module is handed the decision; it does not make it.
  */
 
 /**
@@ -49,17 +57,34 @@ export interface LabelPart {
 }
 
 /**
- * Whether to shorten a long run, and how long is long.
+ * The decision for ONE row: draw this run short, or draw it whole.
  *
- * `threshold` is a NUMBER here, while the setting stores a string: the
- * settings tab offers only `toggle` and `dropdown`, and a dropdown's value is
- * a string. The conversion happens once, where the setting is read, so this
- * module never has to care that a control shaped it.
+ * `abbreviate` is an instruction, not a permission. The caller has already
+ * drawn this row's full label and measured it against the pane, so by the time
+ * it reaches here the question "does it fit" is answered. The only judgement
+ * left in this module is the structural one below, which no measurement can
+ * override.
  */
 export interface CompactLabelOptions {
+  /** Shorten this run, subject to the two-segment guard below. */
   abbreviate: boolean;
-  /** Abbreviate when the run has MORE THAN this many folders. */
-  threshold: number;
+}
+
+/**
+ * What the USER chose, which is a different thing from the decision above.
+ *
+ * One setting, `abbreviateCompactedPaths`, and it now reads as "shorten a row
+ * that does not fit". Someone who wants the whole path on every row whatever
+ * it costs them turns it off, and then nothing is measured at all.
+ *
+ * Kept separate from `CompactLabelOptions` deliberately: one object meaning
+ * "the user allows this" in one layer and "do this to this row" in the next is
+ * how a permission gets applied as an instruction. They are two types, and
+ * `applyCompactLabels` is the one place that turns one into the other.
+ */
+export interface CompactLabelPolicy {
+  /** Whether a row whose label does not fit its pane may be shortened. */
+  abbreviateWhenOverflowing: boolean;
 }
 
 /** What stands in for the folders that were left out. */
@@ -68,20 +93,19 @@ export const GAP = "..";
 /**
  * Whether this run abbreviates.
  *
- * TWO segments never do, whatever the threshold, and that is structural rather
- * than a consequence of the dropdown's lowest option. `Work/Shared` would
+ * TWO segments never do, however badly the row overflows, and that is
+ * structural rather than a consequence of any measurement. `Work/Shared` would
  * become `../Shared`, which is no shorter to read and trades a folder name the
- * reader can use for a glyph saying only "there was something here". Guarded
- * here so a threshold reached any other way -- a hand-edited document, a later
- * control, a caller of this module -- cannot produce it.
+ * reader can use for a glyph saying only "there was something here". A pane
+ * narrow enough to clip `Work/Shared` is narrow enough to clip `../Shared`
+ * too, so shortening buys that row nothing and costs it a name.
  *
- * MORE THAN, not at least: a run of exactly `threshold` folders is left in
- * full, so the number a user picks reads as "runs longer than this".
+ * Guarded HERE rather than at the call site so a decision reached any other
+ * way -- a later variant, a second caller of this module -- cannot produce it.
  */
 function abbreviates(segments: readonly string[], opts: CompactLabelOptions): boolean {
   if (!opts.abbreviate) return false;
-  if (segments.length <= 2) return false;
-  return segments.length > opts.threshold;
+  return segments.length > 2;
 }
 
 export function compactLabel(

@@ -11,10 +11,10 @@
 import { describe, expect, it } from "vitest";
 import { compactLabel, type CompactLabelOptions } from "../src/ui/compactLabel";
 
-/** No abbreviation at all: the label the feature shipped with. */
-const PLAIN: CompactLabelOptions = { abbreviate: false, threshold: 3 };
-/** Abbreviation on at the default threshold. */
-const ABBREV: CompactLabelOptions = { abbreviate: true, threshold: 3 };
+/** Draw the whole joined path: what a row that FITS its pane is told. */
+const PLAIN: CompactLabelOptions = { abbreviate: false };
+/** Shorten this run: what a row that does NOT fit is told. */
+const ABBREV: CompactLabelOptions = { abbreviate: true };
 
 const text = (segments: readonly string[], opts: CompactLabelOptions): string =>
   compactLabel(segments, opts)
@@ -68,9 +68,11 @@ describe("compactLabel", () => {
  * IMMEDIATE PARENT collapses to `..` instead, and the two segments a reader
  * needs survive.
  *
- * Applied unconditionally this would turn `Work/Shared` into `../Shared`,
- * which is worse than leaving it alone. Hence the threshold, and hence the
- * boundary tests below.
+ * The DECISION is not taken here. The caller draws the full label, measures it
+ * against the pane and passes `abbreviate: true` only when it did not fit, so
+ * these tests assert what each answer DRAWS. The one judgement this module
+ * keeps is the two-segment guard: `Work/Shared` would become `../Shared`,
+ * which is worse than leaving it alone at any pane width.
  */
 describe("compactLabel abbreviation", () => {
   const DEEP = ["Research", "2026", "Q4", "Projects", "Atlas", "Design", "Decisions"];
@@ -101,58 +103,50 @@ describe("compactLabel abbreviation", () => {
     expect(parts.filter((p) => p.role === "lead").map((p) => p.text)).toEqual(["Design"]);
   });
 
-  it("does nothing when abbreviation is off, however deep the run", () => {
-    expect(text(DEEP, { abbreviate: false, threshold: 3 })).toBe(
-      "Research/2026/Q4/Projects/Atlas/Design/Decisions"
-    );
+  it("does nothing when it is told not to, however deep the run", () => {
+    expect(text(DEEP, PLAIN)).toBe("Research/2026/Q4/Projects/Atlas/Design/Decisions");
     expect(compactLabel(DEEP, PLAIN).some((p) => p.role === "gap")).toBe(false);
   });
 
   /**
-   * THE BOUNDARY IS EXACT. "More than this many folders", so a run of exactly
-   * N is left alone and N+1 abbreviates. Asserted at every value the dropdown
-   * offers, because an off-by-one here is invisible until someone picks the
-   * threshold that happens to sit on their deepest chain.
+   * THREE SEGMENTS IS THE SHORTEST RUN THAT SHORTENS, and the only boundary
+   * left in this module. There is no folder count any more: a run of any
+   * length above two draws short when the pane says it does not fit and whole
+   * when it does. The dropdown's four thresholds, asserted here until now,
+   * were a boundary in a number nobody could see; the real boundary is a pane
+   * width, and `e2e/deep-compact.mjs` is where it is measured.
    */
-  for (const threshold of [3, 4, 5, 6]) {
-    const atEdge = Array.from({ length: threshold }, (_, i) => `f${i}`);
-    const overEdge = [...atEdge, "tip"];
+  for (const length of [3, 4, 7, 12]) {
+    const run = [...Array.from({ length: length - 1 }, (_, i) => `f${i}`), "tip"];
 
-    it(`leaves a run of exactly ${threshold} folders in full`, () => {
-      expect(text(atEdge, { abbreviate: true, threshold })).toBe(atEdge.join("/"));
-      expect(compactLabel(atEdge, { abbreviate: true, threshold }).some((p) => p.role === "gap")).toBe(
-        false
-      );
+    it(`shortens a run of ${length} folders to ../parent/tip`, () => {
+      expect(text(run, ABBREV)).toBe(`../${run[run.length - 2]}/tip`);
     });
 
-    it(`abbreviates a run of ${threshold + 1} folders`, () => {
-      expect(text(overEdge, { abbreviate: true, threshold })).toBe(
-        `../${overEdge[overEdge.length - 2]}/tip`
-      );
+    it(`draws the same run of ${length} folders whole when it is not told to`, () => {
+      expect(text(run, PLAIN)).toBe(run.join("/"));
     });
   }
 
-  it("leaves the three segment run the design names alone at the default", () => {
-    expect(text(["Clients", "Northwind", "Meetings"], ABBREV)).toBe(
-      "Clients/Northwind/Meetings"
-    );
+  it("shortens the three segment run the design names, when it is told to", () => {
+    // Under the old folder count this row was left whole by the default
+    // threshold whether or not it fitted its pane. The pane decides now.
+    expect(text(["Clients", "Northwind", "Meetings"], ABBREV)).toBe("../Northwind/Meetings");
+    expect(text(["Clients", "Northwind", "Meetings"], PLAIN)).toBe("Clients/Northwind/Meetings");
   });
 
-  it("never abbreviates a two segment run, whatever the threshold", () => {
+  it("never abbreviates a two segment run, even when it is told to", () => {
     // `../Shared` is strictly worse than `Work/Shared`: it is no shorter to
     // read, and it trades a folder name the reader can use for a glyph that
-    // says only "there was something here". Guarded structurally rather than
-    // left to the dropdown's lowest option, so a threshold reached any other
-    // way cannot produce it.
-    for (const threshold of [0, 1, 2, 3, 6]) {
-      expect(text(["Work", "Shared"], { abbreviate: true, threshold })).toBe("Work/Shared");
-    }
+    // says only "there was something here". A pane narrow enough to clip one
+    // is narrow enough to clip the other, so the guard is structural and no
+    // measurement overrides it.
+    expect(text(["Work", "Shared"], ABBREV)).toBe("Work/Shared");
+    expect(compactLabel(["Work", "Shared"], ABBREV).some((p) => p.role === "gap")).toBe(false);
   });
 
   it("never abbreviates one segment or none", () => {
-    expect(compactLabel(["Work"], { abbreviate: true, threshold: 0 })).toEqual([
-      { text: "Work", role: "tip" },
-    ]);
-    expect(compactLabel([], { abbreviate: true, threshold: 0 })).toEqual([]);
+    expect(compactLabel(["Work"], ABBREV)).toEqual([{ text: "Work", role: "tip" }]);
+    expect(compactLabel([], ABBREV)).toEqual([]);
   });
 });

@@ -39,7 +39,7 @@ const COMPACT_TREE = {
 };
 const INDEX = buildChainIndex(["Work"], COMPACT_TREE);
 /** The whole joined path, which is what a two-folder run always draws. */
-const PLAIN_LABEL = { abbreviate: false, threshold: 3 };
+const PLAIN_LABEL = { abbreviateWhenOverflowing: false };
 
 /**
  * A run long enough to be SHORTENED at the default threshold, so the `gap`
@@ -366,7 +366,8 @@ describe("compacted row label roles", () => {
     path = "Work/Clients",
     name = "Clients",
     index = INDEX,
-    opts = PLAIN_LABEL
+    opts = PLAIN_LABEL,
+    overflows: () => boolean = () => false
   ): { title: HTMLElement; textEl: HTMLElement } {
     const wrapper = document.createElement("div");
     wrapper.className = "tree-item";
@@ -381,13 +382,19 @@ describe("compacted row label roles", () => {
     title.appendChild(chevron);
     title.appendChild(textEl);
     wrapper.appendChild(title);
-    applyCompactLabels([title], index, opts);
+    applyCompactLabels([title], index, opts, { overflows });
     return { title, textEl };
   }
 
-  /** The same row, from a run long enough that the label is shortened. */
+  /**
+   * The same row, shortened.
+   *
+   * The pass shortens a row only when it MEASURES as overflowing, and jsdom
+   * lays nothing out, so the measurement is substituted here. See
+   * `OverflowProbe` for why that seam exists at all.
+   */
   const shortenedRow = (): { title: HTMLElement; textEl: HTMLElement } =>
-    compactedRow("A/B/C/D", "D", DEEP_INDEX, { abbreviate: true, threshold: 3 });
+    compactedRow("A/B/C/D", "D", DEEP_INDEX, { abbreviateWhenOverflowing: true }, () => true);
 
   // `applyCompactLabels` classes each span `spaces-compact-<role>` from
   // `compactLabel`'s roles. The stylesheet cannot import them, so a role

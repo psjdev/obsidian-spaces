@@ -8,7 +8,6 @@ import {
   type StripPlacement,
   type ActiveSpaceStyle,
   type DropIndicatorStyle,
-  type CompactPathThreshold,
 } from "../types";
 import { normalizeTag } from "../visibility/tagMatch";
 import { canonicalPath } from "../visibility/glob";
@@ -20,12 +19,6 @@ export type ValidationResult =
 const COLOR = /^#[0-9a-f]{6}$/i;
 const STRIP_PLACEMENTS = new Set(["bottom", "top", "left", "right"]);
 const DROP_INDICATOR_STYLES = new Set(["box", "line"]);
-/**
- * Compared as STRINGS, so a hand-edited `compactPathThreshold: 4` falls back
- * rather than being accepted as a second spelling of the same setting. See
- * `CompactPathThreshold` for why the stored value is a string at all.
- */
-const COMPACT_PATH_THRESHOLDS = new Set(["3", "4", "5", "6"]);
 /**
  * Each stored value and the style it means. `box` and `bold` were the names
  * up to 0.6.0: `box` drew the theme's shading and nothing else by then, which
@@ -425,14 +418,13 @@ export function validateDefinitions(raw: unknown): ValidationResult {
         // leave a document holding any unrecognised value on the broken label,
         // which is the failure this setting exists to remove.
         abbreviateCompactedPaths: st.abbreviateCompactedPaths !== false,
-        // Degrades rather than rejects, like `stripPlacement` and
-        // `dropIndicatorStyle` above: an unusable threshold is a cosmetic
-        // complaint and must never cost someone their spaces.
-        compactPathThreshold:
-          typeof st.compactPathThreshold === "string" &&
-          COMPACT_PATH_THRESHOLDS.has(st.compactPathThreshold)
-            ? (st.compactPathThreshold as CompactPathThreshold)
-            : "3",
+        // `compactPathThreshold` was read here and is read nowhere now:
+        // shortening triggers on a measured overflow instead of on a folder
+        // count. Removing it is a READ-SIDE change and nothing else. Every
+        // settings key is listed by name in this object, so a document still
+        // carrying the old one is simply not asked for it -- it is not
+        // migrated, nothing is written back on load, and no stored value this
+        // build does not understand can cost someone their spaces.
         // Defaults to FALSE for the same reason as the two above, and because
         // it changes how every existing install looks. Nothing here touches a
         // space's stored color: this key governs drawing alone.

@@ -213,14 +213,13 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Allow reordering outside spaces | On | The same, for **All** |
 | Restore tabs when switching spaces | Off | Whether each space restores its own tabs. On, switching also rearranges your panes; off changes nothing about which rows are visible |
 | Compact folder chains | Off | Draws a run of folders that leads to a single folder as one row named for the whole path (see below) |
-| Shorten long compacted paths | On | Draws a long compacted path as two dots and the last two folder names, so the folder's own name is not cut off at the edge of a narrow pane |
-| Shorten runs longer than | 3 folders | How many folders a run may have before the setting above shortens it |
+| Shorten long compacted paths | On | Draws a compacted path that is too wide for the file explorer as two dots and the last two folder names, so the folder's own name is not cut off at the edge of a narrow pane |
 
 A space that gathers notes from across your vault shows the folders they live in, so one note several folders deep costs several rows. Turn on **Compact folder chains** under Settings → Appearance, and a run of folders that leads to a single folder draws as one row named for the whole path, such as `Work/Clients/Northwind`. Folders you added to the space yourself always keep their own row.
 
 The compacted row is the deepest folder with a longer label, so collapsing it, its context menu and dropping onto it all act on that folder. The setting is vault-wide.
 
-A long path does not fit a narrow file explorer, and what the pane cuts off is the end of it: the folder the row actually is. So a run longer than the threshold draws as `../Design/Decisions` instead, and the row names the full path when you hover it. Turn **Shorten long compacted paths** off to always draw the whole path.
+A long path does not fit a narrow file explorer, and what the pane cuts off is the end of it: the folder the row actually is. So a row whose path is wider than the pane draws as `../Design/Decisions` instead, and the row names the full path when you hover it. Widen the file explorer and the row goes back to the whole path as soon as it fits. Turn **Shorten long compacted paths** off to always draw the whole path.
 
 ## Your files and your data
 
