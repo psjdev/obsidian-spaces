@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { byKey, makeHarness, panelEl, resetPanelDom, type Harness } from "./helpers/createPanel";
+import { noticeLog } from "./helpers/obsidian-stub";
+import { validateDefinitions } from "../src/definitions/schema";
+import { isPickableKey, holdsProperty } from "../src/ui/propertyRows";
+import { createPropertyIndex, type PropertyIndex } from "../src/visibility/PropertyIndex";
 import { VAULT_COALESCE_WINDOW_MS, createVaultChangeCoalescer } from "../src/lifecycle/eventCoalescer";
 import {
   PropertyRefreshHub,
@@ -311,5 +317,387 @@ describe("a slow repair overlapping an earlier burst's timer", () => {
     clock.advance(10_000);
     // B's own flush must also be a full one, not an empty leftover.
     expect(flushes).toEqual([true, true]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The Properties body of the create panel.
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  resetPanelDom();
+  noticeLog.length = 0;
+});
+
+type Notes = Record<string, Record<string, unknown>>;
+
+const indexOf = (notes: Notes): PropertyIndex =>
+  createPropertyIndex(
+    Object.entries(notes).map(([path, frontmatter]) => ({ path, frontmatter })),
+    1
+  );
+
+/** An index that records every key `listValues` was asked about. */
+function counting(index: PropertyIndex): { index: PropertyIndex; asked: string[] } {
+  const asked: string[] = [];
+  return {
+    asked,
+    index: {
+      ...index,
+      listValues: (key) => {
+        asked.push(key);
+        return index.listValues(key);
+      },
+    },
+  };
+}
+
+const ready = (index: PropertyIndex) => () => ({ status: "ready" as const, index });
+
+function openProperties(over: Parameters<typeof makeHarness>[0] = {}): Harness {
+  const h = makeHarness(over);
+  byKey("mode-curate").click();
+  byKey("body-properties").click();
+  return h;
+}
+
+const keyRows = (): HTMLElement[] =>
+  Array.from(panelEl().querySelectorAll<HTMLElement>("[data-property-key]"));
+const offered = (): Array<string | undefined> => keyRows().map((r) => r.dataset.propertyKey);
+const keyRow = (key: string): HTMLElement => {
+  const row = keyRows().find((r) => r.dataset.propertyKey === key);
+  if (!row) throw new Error(`no row for key ${JSON.stringify(key)}; have ${JSON.stringify(offered())}`);
+  return row;
+};
+const expandBtn = (key: string): HTMLElement =>
+  keyRow(key).querySelector<HTMLElement>(".spaces-create-property-disclose")!;
+const selectBtn = (key: string): HTMLElement =>
+  keyRow(key).querySelector<HTMLElement>(".spaces-create-property-select")!;
+const valueBtns = (): HTMLElement[] =>
+  Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-property-value"));
+const labelOf = (b: HTMLElement): string =>
+  b.querySelector(".spaces-create-tree-name")?.textContent ?? "";
+const valueLabels = (): string[] => valueBtns().map(labelOf);
+const valueBtn = (label: string): HTMLElement => {
+  const b = valueBtns().find((x) => labelOf(x) === label);
+  if (!b) throw new Error(`no value row ${JSON.stringify(label)}; have ${JSON.stringify(valueLabels())}`);
+  return b;
+};
+const summary = (): string => panelEl().querySelector(".spaces-create-summary")?.textContent ?? "";
+const emptyMessage = (): string =>
+  panelEl().querySelector(".spaces-create-tree-empty")?.textContent ?? "";
+
+/** What Create would store, read from the real submit rather than from state. */
+async function storedMembers(h: Harness): Promise<unknown> {
+  const input = byKey("name") as HTMLInputElement;
+  input.value = "S";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  byKey("create").click();
+  await vi.waitFor(() => expect(h.submitted).toHaveLength(1));
+  return h.submitted[0].opts.members;
+}
+
+describe("which keys the properties body offers", () => {
+  it("never offers tags or tag, and offers the rest by name", () => {
+    const index = indexOf({
+      "a.md": { status: "x", tags: ["t"], tag: "t", due: "d" },
+    });
+    openProperties({ properties: ready(index) });
+    expect(offered()).toEqual(["due", "status"]);
+  });
+
+  it("never offers a key the schema would reject, and offers a padded one as spelled", () => {
+    const index = indexOf({ "a.md": { "": 1, "   ": 2, " status ": 3 } });
+    openProperties({ properties: ready(index) });
+    expect(offered()).toEqual([" status "]);
+  });
+
+  it("agrees with the loader: nothing the loader rejects is pickable", () => {
+    const doc = (key: string): unknown => ({
+      schemaVersion: 3,
+      spaces: [
+        { id: "s", name: "S", icon: "box", color: "#808080", members: [{ kind: "property", key }] },
+      ],
+      settings: {},
+    });
+    for (const key of ["", " ", "   ", "\t", " status ", "a=b", "tags", "tag"]) {
+      const loads = validateDefinitions(doc(key)).ok;
+      if (!loads) expect(isPickableKey(key), JSON.stringify(key)).toBe(false);
+    }
+    // The two hidden aliases DO load. The matcher stays honest about a stored
+    // member naming them; hiding them is the picker's decision alone.
+    expect(validateDefinitions(doc("tags")).ok).toBe(true);
+    expect(validateDefinitions(doc("tag")).ok).toBe(true);
+    expect(isPickableKey("tags")).toBe(false);
+    expect(isPickableKey("tag")).toBe(false);
+  });
+
+  it("narrows by key name only", () => {
+    const index = indexOf({ "a.md": { status: "start", due: "x", owner: "stan" } });
+    openProperties({ properties: ready(index) });
+    const filter = byKey("item-filter") as HTMLInputElement;
+    filter.value = "st";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    // `owner` has the value "stan" and does not match: values are not searched.
+    expect(offered()).toEqual(["status"]);
+  });
+});
+
+describe("expanding and selecting are separate actions", () => {
+  const notes: Notes = { "a.md": { status: "active" }, "b.md": { status: "done" } };
+
+  it("expanding a key shows its values and selects nothing", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    expect(valueLabels()).toEqual(["active", "done"]);
+    expect(summary()).toBe("Nothing selected");
+    // Read back from the redraw, which draws held members as pressed.
+    expect(selectBtn("status").getAttribute("aria-pressed")).toBe("false");
+    expect(valueBtns().map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "false"]);
+  });
+
+  it("selecting a key adds the existence shape and expands nothing", async () => {
+    const h = openProperties({ properties: ready(indexOf(notes)) });
+    selectBtn("status").click();
+    expect(valueBtns()).toHaveLength(0);
+    expect(expandBtn("status").getAttribute("aria-expanded")).toBe("false");
+    expect(await storedMembers(h)).toEqual([{ kind: "property", key: "status" }]);
+  });
+
+  it("each control is its own button inside the key row", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expect(expandBtn("status").tagName).toBe("BUTTON");
+    expect(selectBtn("status").tagName).toBe("BUTTON");
+    expect(expandBtn("status")).not.toBe(selectBtn("status"));
+    expect(keyRow("status").contains(expandBtn("status"))).toBe(true);
+    expect(keyRow("status").contains(selectBtn("status"))).toBe(true);
+  });
+
+  it("the key select control reads Has property", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expect(selectBtn("status").textContent).toBe("Has property");
+  });
+
+  it("selecting a value adds the equality shape in the authored spelling", async () => {
+    const h = openProperties({
+      properties: ready(indexOf({ "a.md": { status: " active " } })),
+    });
+    expandBtn("status").click();
+    valueBtn(" active ").click();
+    expect(await storedMembers(h)).toEqual([
+      { kind: "property", key: "status", value: " active " },
+    ]);
+  });
+
+  it("labels the empty-string value so it is not an empty row", async () => {
+    const h = openProperties({ properties: ready(indexOf({ "a.md": { x: "" } })) });
+    expandBtn("x").click();
+    expect(valueLabels()).toEqual(["Empty string"]);
+    expect(selectBtn("x").textContent).toBe("Has property");
+    valueBtn("Empty string").click();
+    expect(await storedMembers(h)).toEqual([{ kind: "property", key: "x", value: "" }]);
+  });
+
+  it("a value with a slash is one row", () => {
+    const index = indexOf({ "a.md": { path: "Work/Notes" }, "b.md": { path: "a/b/c" } });
+    openProperties({ properties: ready(index) });
+    expandBtn("path").click();
+    expect(valueLabels().sort()).toEqual(["Work/Notes", "a/b/c"]);
+  });
+});
+
+describe("a member already held", () => {
+  it("is a no-op that says so, for a key", async () => {
+    const h = openProperties({ properties: ready(indexOf({ "a.md": { status: "x" } })) });
+    selectBtn("status").click();
+    expect(noticeLog).toHaveLength(0);
+    expect(selectBtn("status").getAttribute("aria-pressed")).toBe("true");
+    selectBtn("status").click();
+    expect(noticeLog.map((n) => n.messageEl.textContent)).toEqual(["Spaces: already selected."]);
+    expect(await storedMembers(h)).toEqual([{ kind: "property", key: "status" }]);
+  });
+
+  it("is a no-op that says so, for a value", async () => {
+    const h = openProperties({ properties: ready(indexOf({ "a.md": { status: "x" } })) });
+    expandBtn("status").click();
+    valueBtn("x").click();
+    valueBtn("x").click();
+    expect(noticeLog).toHaveLength(1);
+    expect(await storedMembers(h)).toEqual([{ kind: "property", key: "status", value: "x" }]);
+  });
+
+  it("is judged by memberIdentity, so the spelling of a value does not make a second member", () => {
+    const held = [{ kind: "property", key: "status", value: "Active" }] as const;
+    expect(holdsProperty(held, { kind: "property", key: "status", value: " active " })).toBe(true);
+    // The existence shape and the equality shape are different members.
+    expect(holdsProperty(held, { kind: "property", key: "status" })).toBe(false);
+    // A key is exact, unlike a value.
+    expect(holdsProperty(held, { kind: "property", key: "Status", value: "Active" })).toBe(false);
+  });
+});
+
+describe("what the body says while it has no rows", () => {
+  it("says properties are loading, not absent, while the snapshot is unavailable", () => {
+    openProperties({ properties: () => ({ status: "unavailable" }) });
+    expect(emptyMessage()).toBe("Loading this vault's properties…");
+    expect(keyRows()).toHaveLength(0);
+  });
+
+  it("says there are none once the snapshot is ready and empty", () => {
+    openProperties({ properties: ready(indexOf({})) });
+    expect(emptyMessage()).toBe("No properties in this vault yet");
+  });
+});
+
+describe("the counts on picker rows", () => {
+  it("are the index's own bucket counts, with nothing taken off", () => {
+    const index = indexOf({
+      "a.md": { status: "active" },
+      "Ignored/b.md": { status: "active" },
+      "c.md": { status: "done" },
+    });
+    openProperties({ properties: ready(index) });
+    expect(keyRow("status").textContent).toContain("3 notes");
+    expandBtn("status").click();
+    expect(valueBtn("active").textContent).toContain("2 notes");
+    expect(valueBtn("done").textContent).toContain("1 note");
+  });
+});
+
+describe("the work budget of the picker", () => {
+  const notes: Notes = {
+    "a.md": { status: "active", due: "2026-01-01", owner: "me" },
+    "b.md": { status: "done", due: "2026-02-01" },
+  };
+
+  it("opening the body calls listValues zero times", () => {
+    const spy = counting(indexOf(notes));
+    openProperties({ properties: ready(spy.index) });
+    expect(offered()).toEqual(["due", "owner", "status"]);
+    expect(spy.asked).toEqual([]);
+  });
+
+  it("filtering and choosing a key still list no values", () => {
+    const spy = counting(indexOf(notes));
+    openProperties({ properties: ready(spy.index) });
+    const filter = byKey("item-filter") as HTMLInputElement;
+    filter.value = "s";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    selectBtn("status").click();
+    expect(spy.asked).toEqual([]);
+  });
+
+  it("expanding one key lists the values of that key and no other", () => {
+    const spy = counting(indexOf(notes));
+    openProperties({ properties: ready(spy.index) });
+    expandBtn("status").click();
+    selectBtn("owner").click(); // a redraw with status still open
+    expect(new Set(spy.asked)).toEqual(new Set(["status"]));
+  });
+});
+
+describe("the picker owns a metadata subscription", () => {
+  /** A source that counts live subscriptions and keeps every callback it handed out. */
+  function source() {
+    const callbacks: Array<() => void> = [];
+    let active = 0;
+    return {
+      subscribe: (onChange: () => void) => {
+        callbacks.push(onChange);
+        active += 1;
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          active -= 1;
+        };
+      },
+      callbacks,
+      get active() {
+        return active;
+      },
+    };
+  }
+
+  it("subscribes when the picker opens and not before", () => {
+    const s = source();
+    makeHarness({ subscribePropertyRefresh: s.subscribe });
+    expect(s.active).toBe(0);
+    byKey("mode-curate").click();
+    expect(s.active).toBe(1);
+    // A redraw while it stays open does not stack a second one.
+    byKey("body-properties").click();
+    expect(s.active).toBe(1);
+  });
+
+  it("releases when the picker is closed", () => {
+    const s = source();
+    makeHarness({ subscribePropertyRefresh: s.subscribe });
+    byKey("mode-curate").click();
+    expect(s.active).toBe(1);
+    byKey("mode-curate").click(); // the same button collapses the picker
+    expect(s.active).toBe(0);
+  });
+
+  it("releases when the panel closes", () => {
+    const s = source();
+    const h = makeHarness({ subscribePropertyRefresh: s.subscribe });
+    byKey("mode-curate").click();
+    byKey("cancel").click();
+    expect(h.closes).toBe(1);
+    expect(s.active).toBe(0);
+  });
+
+  it("releases when the panel is destroyed", () => {
+    const s = source();
+    const h = makeHarness({ subscribePropertyRefresh: s.subscribe });
+    byKey("mode-curate").click();
+    h.panel.destroy();
+    expect(s.active).toBe(0);
+  });
+
+  it("redraws the key list when told the snapshot changed", () => {
+    const s = source();
+    let snapshot: ReturnType<ReturnType<typeof ready>> | { status: "unavailable" } = {
+      status: "unavailable",
+    };
+    openProperties({ properties: () => snapshot, subscribePropertyRefresh: s.subscribe });
+    expect(keyRows()).toHaveLength(0);
+    snapshot = { status: "ready", index: indexOf({ "a.md": { status: "x" } }) };
+    s.callbacks[0]();
+    expect(offered()).toEqual(["status"]);
+  });
+
+  it("keeps a key open across a refresh", () => {
+    const s = source();
+    openProperties({
+      properties: ready(indexOf({ "a.md": { status: "x" } })),
+      subscribePropertyRefresh: s.subscribe,
+    });
+    expandBtn("status").click();
+    s.callbacks[0]();
+    expect(valueLabels()).toEqual(["x"]);
+  });
+
+  it("ignores a notification from a subscription it has released", () => {
+    const s = source();
+    let asks = 0;
+    const index = indexOf({ "a.md": { status: "x" } });
+    openProperties({
+      properties: () => {
+        asks += 1;
+        return { status: "ready", index };
+      },
+      subscribePropertyRefresh: s.subscribe,
+    });
+    byKey("mode-curate").click(); // close: releases the first subscription
+    byKey("mode-curate").click(); // reopen: a second one
+    byKey("body-properties").click();
+    expect(s.callbacks).toHaveLength(2);
+    const before = asks;
+    s.callbacks[0](); // the released one, delivered late by a careless source
+    expect(asks).toBe(before);
+    s.callbacks[1]();
+    expect(asks).toBe(before + 1);
   });
 });

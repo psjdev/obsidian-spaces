@@ -103,6 +103,20 @@ export function memberIdentity(m: MemberEntry): string {
   }
 }
 
+/**
+ * Whether a property key can be stored in a member at all. The ONE rule: the
+ * loader below rejects the whole document for a key that fails it, and the
+ * create panel's picker filters what it offers through it, so the picker
+ * cannot produce a member that stops the document from loading.
+ *
+ * Only an empty or whitespace-only key fails. Surrounding whitespace on a key
+ * with text in it is eligible and stored exactly as spelled, because keys
+ * match exactly.
+ */
+export function isEligiblePropertyKey(key: string): boolean {
+  return key.trim().length > 0;
+}
+
 function validateMembers(raw: unknown): MemberEntry[] | null {
   if (!Array.isArray(raw)) return null;
   const seen = new Set<string>();
@@ -133,7 +147,7 @@ function validateMembers(raw: unknown): MemberEntry[] | null {
     }
     if (kind === "property") {
       const { key, value } = m as Record<string, unknown>;
-      if (typeof key !== "string" || key.trim().length === 0) return null;
+      if (typeof key !== "string" || !isEligiblePropertyKey(key)) return null;
       if (value !== undefined && typeof value !== "string") return null;
       // Stored exactly as spelled. Keys match exactly, so repairing one here
       // produces a member that matches a different property or nothing.

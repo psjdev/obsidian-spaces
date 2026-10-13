@@ -2,7 +2,7 @@
  * What the create panel's filter box says about which body the explorer
  * window is showing.
  *
- * The window now carries two buttons above it, Items and Tags, so the text in
+ * The window carries buttons above it, one per body (Vault, Tags, Properties), so the text in
  * the box no longer has to encode the mode. What the box offers instead is a
  * SHORTCUT to those buttons: `/` or `#` typed as the first character of an
  * empty box presses one of them, and the character is consumed rather than
@@ -30,8 +30,11 @@ export const ITEMS_SIGIL = "/";
 /** The character that asks for the vault's tags. */
 export const TAG_SIGIL = "#";
 
+/** The character that asks for the vault's properties. */
+export const PROPERTY_SIGIL = "@";
+
 /** Which body the explorer window is showing. */
-export type PickerMode = "items" | "tags";
+export type PickerMode = "items" | "tags" | "properties";
 
 /** What the window opens on, and what any mode change resets it to. */
 export const DEFAULT_PICKER_MODE: PickerMode = "items";
@@ -44,6 +47,7 @@ export const DEFAULT_PICKER_MODE: PickerMode = "items";
 const MODE_SIGILS: ReadonlyMap<string, PickerMode> = new Map<string, PickerMode>([
   [ITEMS_SIGIL, "items"],
   [TAG_SIGIL, "tags"],
+  [PROPERTY_SIGIL, "properties"],
 ]);
 
 /** One keystroke arriving at the filter box, in the terms the rule needs. */

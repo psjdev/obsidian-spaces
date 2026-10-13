@@ -64,6 +64,7 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
     },
     tags: { knownTags: () => [...VAULT_TAGS] },
     properties: () => ({ status: "unavailable" }),
+    subscribePropertyRefresh: () => () => undefined,
     tagIndex: () => {
       reached += 1;
       return {

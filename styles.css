@@ -1649,3 +1649,37 @@ body.spaces-claims-drop .drag-ghost-action {
 .spaces-strip-drop-zone.is-active {
   opacity: 0.35;
 }
+
+/* The properties body. A key row is the tree row's own layout with a
+   disclosure button in the caret slot and a "Has property" button at the right
+   edge; a value row is one button across the row. Both buttons are bare so the
+   row's hover and selected marks are what show. */
+.spaces-create-property-row .spaces-create-property-disclose,
+.spaces-create-property-row .spaces-create-property-select,
+.spaces-create-property-row .spaces-create-property-value {
+  background: none;
+  box-shadow: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.spaces-create-property-row .spaces-create-property-disclose { padding: 0; height: auto; }
+.spaces-create-property-row .spaces-create-property-select {
+  flex: 0 0 auto;
+  height: auto;
+  padding: 0 6px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+.spaces-create-property-row .spaces-create-property-select:hover { color: var(--text-normal); }
+.spaces-create-property-row .spaces-create-property-value {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  text-align: left;
+}
+.spaces-create-property-row.is-note { cursor: default; color: var(--text-muted); }
+.spaces-create-tree-name.is-empty-label { font-style: italic; color: var(--text-muted); }

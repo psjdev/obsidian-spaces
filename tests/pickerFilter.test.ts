@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PICKER_MODE,
   ITEMS_SIGIL,
+  PROPERTY_SIGIL,
   readModeSigil,
   TAG_SIGIL,
 } from "../src/ui/pickerFilter";
@@ -24,6 +25,11 @@ describe("readModeSigil", () => {
 
   it("switches to tags on a hash into an empty box", () => {
     expect(readModeSigil({ box: "", key: TAG_SIGIL })).toBe("tags");
+  });
+
+  it("switches to properties on an at sign into an empty box", () => {
+    expect(readModeSigil({ box: "", key: PROPERTY_SIGIL })).toBe("properties");
+    expect(readModeSigil({ box: "x", key: PROPERTY_SIGIL })).toBeNull();
   });
 
   it("leaves every other character alone", () => {

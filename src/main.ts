@@ -1917,6 +1917,8 @@ export default class SpacesPlugin extends Plugin {
       tagIndex: () => this.controller.tagIndex(),
       // The property snapshot, reached rather than built, as `tagIndex` is.
       properties: () => this.controller.propertySnapshot(),
+      // Released by the panel when its picker closes, so nothing here outlives it.
+      subscribePropertyRefresh: (onChange) => this.subscribePropertyRefresh(onChange),
       // What the space would hold, from the engine rather than from the panel.
       // Rebuilt per call so the vault, the ignore rules and the tag index are
       // all read fresh; the panel can stay open across any of them changing.

@@ -34,6 +34,7 @@ import {
 import {
   DEFAULT_PICKER_MODE,
   ITEMS_SIGIL,
+  PROPERTY_SIGIL,
   readModeSigil,
   TAG_SIGIL,
   type PickerMode,
@@ -52,6 +53,14 @@ import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertySnapshot } from "../visibility/PropertyIndex";
 import type { MemberEntry } from "../types";
+import {
+  equalsMember,
+  existsMember,
+  holdsProperty,
+  pickableKeys,
+  valueLabel,
+} from "./propertyRows";
+import { memberIdentity } from "../definitions/schema";
 
 import {
   isStillCovering as isStillCoveringPure,
@@ -142,10 +151,22 @@ export interface CreateSpacePanelDeps {
   /**
    * The property snapshot, reached rather than built, for the reason
    * `tagIndex` is. A function because a snapshot is replaced when a note's
-   * metadata changes. The panel does not read it yet; it is here so the
-   * preview and the picker take their property data from the same place.
+   * metadata changes. The Properties body reads it for keys and values, and
+   * `unavailable` means the vault is still being read, never that it holds no
+   * properties.
    */
   properties: () => PropertySnapshot;
+  /**
+   * Asks to be told when the property snapshot has been replaced, and returns
+   * the way to stop. The panel subscribes while its picker window is open and
+   * releases when the window closes or the panel is destroyed, so a
+   * subscription never outlives the view it would redraw.
+   *
+   * Needed because a space that holds no property member does not watch
+   * metadata at all, so without this the key list would be a picture of the
+   * vault as it was when the picker opened.
+   */
+  subscribePropertyRefresh: (onChange: () => void) => () => void;
   /**
    * What the space would contain if created now, answered by the engine
    * rather than by this panel.
@@ -430,6 +451,20 @@ export class CreateSpacePanel {
   private expandedTags = new Set<string>();
 
   /**
+   * The property keys the user has opened. Panel state like the two sets
+   * beside it, and the only thing that causes a key's values to be listed:
+   * the body asks the index for values of these keys and no others.
+   */
+  private expandedProperties = new Set<string>();
+
+  /**
+   * The live metadata subscription, or null. One object per subscription so a
+   * notification from a released one can recognize itself as stale and do
+   * nothing, whatever the source does after being told to stop.
+   */
+  private propertySub: { release: () => void } | null = null;
+
+  /**
    * Re-aligns when the window changes size, because the panel's top edge moves
    * with the workspace layout above it. Raw `addEventListener` with an
    * explicit removal in `destroy()`: this class is not a `Component`, so it
@@ -506,6 +541,7 @@ export class CreateSpacePanel {
     this.itemFilter = "";
     this.expandedFolders = new Set<string>();
     this.expandedTags = new Set<string>();
+    this.expandedProperties = new Set<string>();
     // Arriving from "Create space from this folder": the root is already set,
     // so open the branch containing it rather than showing a collapsed tree
     // with the selection hidden inside it...
@@ -639,6 +675,7 @@ export class CreateSpacePanel {
     // A handle left running would reach for a filter box that is no longer
     // in any document.
     this.cancelSigilFlash();
+    this.releasePropertySubscription();
     // After `el.remove()`, not before: this call is unguarded, and a throw
     // here must not leave our own element still attached, contradicting this
     // method's own "teardown comes off first" ordering above. Nothing above
@@ -1038,6 +1075,9 @@ export class CreateSpacePanel {
         bodies.setAttribute("aria-label", "What the window below shows");
         bodies.appendChild(this.bodyBtn(doc, "items", "Vault", "folder-tree", ITEMS_SIGIL));
         bodies.appendChild(this.bodyBtn(doc, "tags", "Tags", "tag", TAG_SIGIL));
+        bodies.appendChild(
+          this.bodyBtn(doc, "properties", "Properties", "list", PROPERTY_SIGIL)
+        );
       }
 
       const windowEl = doc.win.createDiv();
@@ -1128,6 +1168,9 @@ export class CreateSpacePanel {
       this.filterEl = null;
       this.pickerModeEls.clear();
     }
+    // After the window is built or dropped, from the one flag that says which:
+    // the subscription lives exactly as long as the picker window does.
+    this.syncPropertySubscription();
 
 
     // --- Actions, pinned to the bottom ---
@@ -1188,8 +1231,13 @@ export class CreateSpacePanel {
     // Every draw starts with no message, so a body that has rows never inherits
     // the previous draw's "No match". A body with nothing to show sets its own.
     this.setEmptyMessage(host, null);
-    if (readPickerBody(this.pickerMode, this.state.folderMode) === "tags") {
+    const body = readPickerBody(this.pickerMode, this.state.folderMode);
+    if (body === "tags") {
       this.renderTagBody(host, this.itemFilter);
+      return;
+    }
+    if (body === "properties") {
+      this.renderPropertyBody(host);
       return;
     }
     this.renderItemBody(host, revealSelection);
@@ -1573,7 +1621,7 @@ export class CreateSpacePanel {
     const btn = doc.win.createEl("button");
     btn.type = "button";
     btn.className = "spaces-create-body";
-    btn.dataset.focusKey = mode === "tags" ? "body-tags" : "body-items";
+    btn.dataset.focusKey = `body-${mode}`;
     btn.title = `${label}. Type ${sigil} in an empty filter box.`;
     const ic = doc.win.createSpan();
     ic.className = "spaces-create-theme-icon";
@@ -1692,7 +1740,12 @@ export class CreateSpacePanel {
       filter.placeholder = "Filter folders…";
       return;
     }
-    filter.placeholder = this.pickerMode === "tags" ? "Filter tags…" : "Filter notes and folders…";
+    filter.placeholder =
+      this.pickerMode === "tags"
+        ? "Filter tags…"
+        : this.pickerMode === "properties"
+          ? "Filter properties…"
+          : "Filter notes and folders…";
   }
 
   /**
@@ -1735,6 +1788,220 @@ export class CreateSpacePanel {
   private pickedMembers(): readonly MemberEntry[] {
     if (!this.state.folderMode) return this.state.items;
     return this.state.root === "" ? [] : [{ kind: "folder", path: this.state.root }];
+  }
+
+  /** Starts listening for property changes if the picker is open and nothing is yet. */
+  private syncPropertySubscription(): void {
+    if (!this.itemsOpen) {
+      this.releasePropertySubscription();
+      return;
+    }
+    if (this.propertySub !== null) return;
+    const sub: { release: () => void } = { release: () => undefined };
+    this.propertySub = sub;
+    sub.release = this.deps.subscribePropertyRefresh(() => {
+      if (this.propertySub !== sub) return;
+      this.onPropertiesChanged();
+    });
+  }
+
+  /** Stops listening. Idempotent: `destroy()` and every closed-picker render call it. */
+  private releasePropertySubscription(): void {
+    const sub = this.propertySub;
+    this.propertySub = null;
+    sub?.release();
+  }
+
+  /**
+   * The snapshot was replaced. Only the Properties body reads it, so any
+   * other body has nothing to redraw; the next draw of this one asks again.
+   */
+  private onPropertiesChanged(): void {
+    if (this.el === null || this.treeEl === null) return;
+    if (readPickerBody(this.pickerMode, this.state.folderMode) !== "properties") return;
+    this.redrawProperties();
+  }
+
+  /** Redraws the Properties body and puts focus back on the control that held it. */
+  private redrawProperties(focusControl?: string): void {
+    const host = this.treeEl;
+    if (!host) return;
+    const active = this.doc?.activeElement;
+    const control =
+      focusControl ??
+      (active && host.contains(active) && active.instanceOf(HTMLElement)
+        ? active.dataset.control
+        : undefined);
+    this.renderPickerBody();
+    if (control === undefined) return;
+    // Compared as values, not through a selector: the control names embed
+    // vault text, which must never be interpolated into one.
+    for (const el of Array.from(host.querySelectorAll<HTMLElement>("[data-control]"))) {
+      if (el.dataset.control === control) {
+        el.focus();
+        return;
+      }
+    }
+  }
+
+  /**
+   * The properties body: every key the vault holds, each openable to its
+   * values.
+   *
+   * Opening and choosing are different controls on purpose. A key row has a
+   * disclosure button that only expands, and a separate "Has property" button
+   * that only adds the existence member, so a person can look inside a key
+   * without choosing it and choose it without opening it. Neither does the
+   * other's job, which is also what keeps expanding from ever changing
+   * membership.
+   *
+   * Keys are listed from the index, which is cheap. A key's values are asked
+   * for only while that key is open: drawing the body lists NO values, and the
+   * filter reads key names only for the same reason. Not split on `/`, unlike
+   * the tag tree: keys and values do not nest, so a value with a slash in it
+   * is one row.
+   *
+   * The counts on these rows are the raw bucket: distinct notes whose
+   * frontmatter matches, before any space's exclusions and before the global
+   * ignore. A row here is choosing a property, not previewing a space. The
+   * member row in a space's contents counts after exclusions.
+   */
+  private renderPropertyBody(host: HTMLElement): void {
+    const doc = host.ownerDocument;
+    host.setAttribute("role", "list");
+    host.removeAttribute("aria-multiselectable");
+    host.setAttribute("aria-label", "Choose a property");
+    host.replaceChildren();
+    const message = (text: string): void => this.setEmptyMessage(host, text);
+
+    const snapshot = this.deps.properties();
+    if (snapshot.status === "unavailable") {
+      // Still reading, not empty: the cache is cold, and a vault with no
+      // properties is a different sentence.
+      message("Loading this vault's properties…");
+      return;
+    }
+    const index = snapshot.index;
+    const keys = pickableKeys(index.listKeys(), this.itemFilter);
+    if (keys.length === 0) {
+      message(
+        this.itemFilter.trim() === "" ? "No properties in this vault yet" : "No matching property"
+      );
+      return;
+    }
+
+    const held = this.state.folderMode ? [] : this.state.items;
+    const row = (depth: number, extra: string): HTMLElement => {
+      const el = doc.win.createDiv();
+      el.className = `spaces-create-tree-row spaces-create-property-row ${extra}`.trim();
+      el.setAttribute("role", "listitem");
+      el.style.paddingLeft = `${depth * 14}px`;
+      return el;
+    };
+    const overflow = (depth: number, hidden: number, advice: string): void => {
+      const el = row(depth, "is-overflow");
+      el.setAttribute("aria-disabled", "true");
+      el.textContent = `${hidden === 1 ? "1 more" : `${hidden.toLocaleString()} more`}, ${advice}`;
+      host.appendChild(el);
+    };
+    const countSpan = (n: number): HTMLElement => {
+      const count = doc.win.createSpan();
+      count.className = "spaces-create-tag-count";
+      count.textContent = tagCountLabel(n);
+      return count;
+    };
+    const pick = (member: MemberEntry, focusControl: string): void => {
+      if (holdsProperty(held, member)) {
+        // Not a second identical row, and not a silent nothing either.
+        new Notice("Spaces: already selected.");
+        return;
+      }
+      this.state = { ...this.state, items: [...this.state.items, member] };
+      this.clearFault("root");
+      this.renderSummary();
+      this.redrawProperties(focusControl);
+      this.refreshCreateButton();
+    };
+
+    for (const { key, count } of keys.slice(0, MAX_PICKER_ROWS)) {
+      const keyMember = existsMember(key);
+      const id = memberIdentity(keyMember);
+      const open = this.expandedProperties.has(key);
+      const heldKey = holdsProperty(held, keyMember);
+
+      const el = row(0, heldKey ? "is-selected" : "");
+      el.dataset.propertyKey = key;
+
+      const disclose = doc.win.createEl("button");
+      disclose.type = "button";
+      disclose.className = "spaces-create-tree-caret spaces-create-property-disclose";
+      disclose.dataset.control = `expand:${id}`;
+      disclose.setAttribute("aria-expanded", String(open));
+      disclose.setAttribute("aria-label", `${open ? "Hide" : "Show"} values of ${key}`);
+      setIcon(disclose, open ? "chevron-down" : "chevron-right");
+      disclose.addEventListener("click", () => {
+        // Browsing only: nothing here touches `state`.
+        if (open) this.expandedProperties.delete(key);
+        else this.expandedProperties.add(key);
+        this.redrawProperties(`expand:${id}`);
+      });
+      el.appendChild(disclose);
+
+      const name = doc.win.createSpan();
+      name.className = "spaces-create-tree-name";
+      name.textContent = key;
+      el.appendChild(name);
+      el.appendChild(countSpan(count));
+
+      const select = doc.win.createEl("button");
+      select.type = "button";
+      select.className = "spaces-create-property-select";
+      select.dataset.control = `select:${id}`;
+      select.textContent = "Has property";
+      select.setAttribute("aria-label", `Has property ${key}`);
+      select.setAttribute("aria-pressed", String(heldKey));
+      if (heldKey) select.title = "Already selected";
+      select.addEventListener("click", () => pick(keyMember, `select:${id}`));
+      el.appendChild(select);
+      host.appendChild(el);
+
+      if (!open) continue;
+      // The one place values are asked for, once per open key per draw.
+      const values = index.listValues(key);
+      if (values.length === 0) {
+        const none = row(1, "is-note");
+        none.textContent = "No values to pick";
+        host.appendChild(none);
+        continue;
+      }
+      for (const v of values.slice(0, MAX_PICKER_ROWS)) {
+        const valueMember = equalsMember(key, v.value);
+        const valueId = memberIdentity(valueMember);
+        const heldValue = holdsProperty(held, valueMember);
+        const vr = row(1, heldValue ? "is-selected" : "");
+        const btn = doc.win.createEl("button");
+        btn.type = "button";
+        btn.className = "spaces-create-property-value";
+        btn.dataset.control = `select:${valueId}`;
+        btn.setAttribute("aria-pressed", String(heldValue));
+        if (heldValue) btn.title = "Already selected";
+        const label = doc.win.createSpan();
+        label.className = "spaces-create-tree-name";
+        label.classList.toggle("is-empty-label", v.value.trim() === "");
+        label.textContent = valueLabel(v.value);
+        btn.appendChild(label);
+        btn.appendChild(countSpan(v.count));
+        btn.addEventListener("click", () => pick(valueMember, `select:${valueId}`));
+        vr.appendChild(btn);
+        host.appendChild(vr);
+      }
+      if (values.length > MAX_PICKER_ROWS) {
+        overflow(1, values.length - MAX_PICKER_ROWS, "not shown");
+      }
+    }
+    if (keys.length > MAX_PICKER_ROWS) {
+      overflow(0, keys.length - MAX_PICKER_ROWS, "narrow the filter to see them");
+    }
   }
 
   /**
