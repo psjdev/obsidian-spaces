@@ -53,7 +53,14 @@ import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { MemberEntry } from "../types";
-import { equalsMember, existsMember, pickableKeys, valueLabel } from "./propertyRows";
+import {
+  equalsMember,
+  existsMember,
+  pickableKeys,
+  valueLabel,
+  valueMatches,
+  valueQuery,
+} from "./propertyRows";
 import { memberIdentity } from "../definitions/schema";
 
 import {
@@ -1911,9 +1918,26 @@ export class CreateSpacePanel {
    *
    * Keys are listed from the index, which is cheap. A key's values are asked
    * for only while that key is open: drawing the body lists NO values, and the
-   * filter reads key names only for the same reason. Not split on `/`, unlike
-   * the tag tree: keys and values do not nest, so a value with a slash in it
-   * is one row.
+   * filter does not read a CLOSED key's values for the same reason. Not split
+   * on `/`, unlike the tag tree: keys and values do not nest, so a value with
+   * a slash in it is one row.
+   *
+   * THE FILTER NARROWS AN OPEN KEY'S VALUES TOO, and an open key whose own
+   * name does not match is kept as long as one of its values does. Without
+   * that, a key with more values than `MAX_PICKER_ROWS` had no way to reach
+   * value 201 at all: the cap decided which values existed for the user, and
+   * on this branch's own 5,000-note fixture `created` holds about 4,035, so
+   * roughly 95% of them could not be picked. Typing a value must reach the
+   * value, not close the key it lives in. The cap stays as it is; 4,035 rows
+   * is unusable at any number, and the overflow row now says what to do.
+   *
+   * The deferral argument holds for a CLOSED key, whose buckets would have to
+   * be built to match a value, and not for an OPEN one, whose buckets are
+   * already built and whose value list is memoized by the index. So the work
+   * added per keystroke is one linear pass over an array that already exists,
+   * per open key: no sort, no copy, no second list. `valueQuery` is computed
+   * once per draw rather than once per row, and the draw loop counts the
+   * matches it skips instead of materializing them.
    *
    * The counts on these rows are the raw bucket: distinct notes whose
    * frontmatter matches, before any space's exclusions and before the global
@@ -1925,10 +1949,11 @@ export class CreateSpacePanel {
    * know by name is better served by a stable order than by counts that shift
    * as notes change, and the filter box narrows keys by name so the two agree.
    * Value rows are in count order (`listValues`), because a key's values are
-   * unknown until it is opened, there is nothing to type to narrow them, and
-   * only the first `MAX_PICKER_ROWS` are drawn — so busiest-first is what
-   * decides WHICH values a person can reach, and name order would hide the
-   * common ones behind the rare.
+   * unknown until it is opened and only the first `MAX_PICKER_ROWS` are drawn
+   * — so busiest-first is what decides which values a person sees FIRST, and
+   * name order would hide the common ones behind the rare. That order is the
+   * index's memo and the filter does not disturb it: narrowing drops rows, it
+   * never reorders them.
    */
   private renderPropertyBody(host: HTMLElement): void {
     const doc = host.ownerDocument;
@@ -1945,7 +1970,20 @@ export class CreateSpacePanel {
       message("Loading this vault's properties…");
       return;
     }
-    const keys = pickableKeys(index.listKeys(), this.itemFilter);
+    // Once per draw, not once per row: the box is read on every keystroke and
+    // the answer is the same for every value in the list.
+    const query = valueQuery(this.itemFilter);
+    // An open key whose name misses but whose values hit is kept. The
+    // expansion test comes FIRST, so a closed key never reaches `listValues`
+    // and the picker's deferral of bucket building is untouched; the
+    // predicate is only consulted at all for keys the name test rejected.
+    const keys = pickableKeys(
+      index.listKeys(),
+      this.itemFilter,
+      (key) =>
+        this.expandedProperties.has(key) &&
+        index.listValues(key).some((v) => valueMatches(v, query))
+    );
     if (keys.length === 0) {
       message(
         this.itemFilter.trim() === "" ? "No properties in this vault yet" : "No matching property"
@@ -2070,16 +2108,22 @@ export class CreateSpacePanel {
         owned.push(el.id);
         return el;
       };
-      // The one place values are asked for, once per open key per draw.
+      // The one place values are asked for, once per open key per draw. The
+      // array is the index's memo, already sorted; it is read, never sliced,
+      // sorted or copied here.
       const values = index.listValues(key);
-      if (values.length === 0) {
-        const none = own(row(1, "is-note"));
-        none.textContent = "No values to pick";
-        host.appendChild(none);
-        disclose.setAttribute("aria-controls", owned.join(" "));
-        continue;
-      }
-      for (const v of values.slice(0, MAX_PICKER_ROWS)) {
+      // Counted as the list is walked rather than by filtering it into a
+      // second array: the overflow row needs how many matched, and building a
+      // 4,035-entry copy on every keystroke to learn its length is the cost
+      // the memo exists to avoid. `drawn` stops at the cap; the walk does not,
+      // because the count has to be right.
+      let matched = 0;
+      let drawn = 0;
+      for (const v of values) {
+        if (!valueMatches(v, query)) continue;
+        matched += 1;
+        if (drawn >= MAX_PICKER_ROWS) continue;
+        drawn += 1;
         const valueMember = equalsMember(key, v.value);
         const valueId = memberIdentity(valueMember);
         const heldValue = heldIds.has(valueId);
@@ -2113,8 +2157,21 @@ export class CreateSpacePanel {
         vr.appendChild(btn);
         host.appendChild(vr);
       }
-      if (values.length > MAX_PICKER_ROWS) {
-        overflow(1, values.length - MAX_PICKER_ROWS, "not shown");
+      if (matched === 0) {
+        // Two different sentences. A key with no values at all has nothing to
+        // offer whatever is typed; a key whose values the filter hid has
+        // something to offer behind a different query, and saying "no values"
+        // there would be a lie about the vault.
+        const none = own(row(1, "is-note"));
+        none.textContent = values.length === 0 ? "No values to pick" : "No matching value";
+        host.appendChild(none);
+      }
+      if (matched > drawn) {
+        // The same advice the key overflow row gives, because it is now true
+        // of values too: the filter reaches them. It used to say "not shown",
+        // which named the problem and left the person with nothing to do
+        // about it.
+        overflow(1, matched - drawn, "narrow the filter to see them");
       }
       disclose.setAttribute("aria-controls", owned.join(" "));
     }

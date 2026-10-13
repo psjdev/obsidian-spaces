@@ -8,6 +8,7 @@
 
 import { isEligiblePropertyKey, memberIdentity } from "../definitions/schema";
 import type { MemberEntry, PropertyMember, SpaceDefinition } from "../types";
+import { normalizeValue } from "../visibility/propertyValues";
 
 /**
  * Keys the picker never offers although the vault holds them.
@@ -43,21 +44,64 @@ export function isPickableKey(key: string): boolean {
  * property they know by name is better served by a stable order than by
  * counts that shift as notes change. The order is the locale's, ignoring case
  * and accents (`Due` beside `due`, `Éa` beside `ea`), with the raw spelling
- * breaking ties so two keys that differ only in case never swap between draws. The filter reads key NAMES only. It must
- * not read values, because matching a value means building that key's value
- * buckets, which is the work the picker defers until a key is expanded.
+ * breaking ties so two keys that differ only in case never swap between draws.
+ *
+ * The query is matched against key NAMES. `keepUnmatched` is the one way a key
+ * whose name does not match is still drawn, and it exists for ONE caller: the
+ * create panel keeps an OPEN key whose own values match, so that typing a
+ * value reaches the value rather than closing the key it is in. It is asked
+ * only about keys the name test already rejected, and only while the query is
+ * non-empty, so a closed key is never a reason to build value buckets — that
+ * work stays deferred until a key is expanded, which is what the caller's
+ * predicate tests first.
  */
 export function pickableKeys(
   all: ReadonlyArray<{ key: string; count: number }>,
-  query: string
+  query: string,
+  keepUnmatched: (key: string) => boolean = () => false
 ): Array<{ key: string; count: number }> {
   const q = query.trim().toLowerCase();
   return all
-    .filter((k) => isPickableKey(k.key) && (q === "" || k.key.toLowerCase().includes(q)))
+    .filter(
+      (k) =>
+        isPickableKey(k.key) &&
+        (q === "" || k.key.toLowerCase().includes(q) || keepUnmatched(k.key))
+    )
     .sort(
       (a, b) =>
         NAME_ORDER.compare(a.key, b.key) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
     );
+}
+
+/**
+ * The filter box's text in the terms a VALUE is matched on.
+ *
+ * `normalizeValue`, not the key filter's `trim().toLowerCase()`: a value row
+ * is matched against the `normalized` field the index already computed, so the
+ * query has to be put through exactly the rule that produced it or an accented
+ * value typed in one Unicode form would miss the row drawn from the other.
+ * Keys are left alone; this is the value side only.
+ *
+ * Computed once per draw and handed to `valueMatches`, because the filter runs
+ * per keystroke against a list that can hold thousands of values.
+ */
+export function valueQuery(query: string): string {
+  return normalizeValue(query);
+}
+
+/**
+ * Whether a value row survives the filter, given `valueQuery`'s answer.
+ *
+ * Substring, case- and blank-insensitive, which is the key filter's rule so
+ * that one box means one thing in both halves of the list. An empty query
+ * keeps everything, which is the common case and is tested first.
+ *
+ * Reads `normalized` rather than `value`, so no per-keystroke lowercasing of
+ * the authored spelling happens: the index computed that field once, when the
+ * key's buckets were built.
+ */
+export function valueMatches(value: { readonly normalized: string }, query: string): boolean {
+  return query === "" || value.normalized.includes(query);
 }
 
 /**

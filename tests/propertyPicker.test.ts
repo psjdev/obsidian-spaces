@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { byKey, makeHarness, panelEl, resetPanelDom, type Harness } from "./helpers/createPanel";
 import { noticeLog } from "./helpers/obsidian-stub";
 import { validateDefinitions } from "../src/definitions/schema";
-import { isPickableKey, holdsProperty } from "../src/ui/propertyRows";
+import {
+  holdsProperty,
+  isPickableKey,
+  pickableKeys,
+  valueMatches,
+  valueQuery,
+} from "../src/ui/propertyRows";
 import {
   createPropertyIndex,
   type PropertyIndex,
@@ -461,14 +467,168 @@ describe("which keys the properties body offers", () => {
     expect(offered()).toEqual(["Alpha", "alpha", "Beta", "zeta"]);
   });
 
-  it("narrows by key name only", () => {
+  it("narrows a CLOSED key by its name only", () => {
     const index = indexOf({ "a.md": { status: "start", due: "x", owner: "stan" } });
     openProperties({ properties: ready(index) });
-    const filter = byKey("item-filter") as HTMLInputElement;
-    filter.value = "st";
-    filter.dispatchEvent(new Event("input", { bubbles: true }));
-    // `owner` has the value "stan" and does not match: values are not searched.
+    type("st");
+    // `owner` has the value "stan" and does not match: a closed key's values
+    // are never searched, because matching them would build its buckets.
     expect(offered()).toEqual(["status"]);
+  });
+});
+
+describe("the pure filter rules", () => {
+  const all = [
+    { key: "status", count: 2 },
+    { key: "due", count: 1 },
+  ];
+
+  it("asks keepUnmatched only about keys the NAME test rejected", () => {
+    const asked: string[] = [];
+    pickableKeys(all, "stat", (k) => {
+      asked.push(k);
+      return false;
+    });
+    expect(asked).toEqual(["due"]);
+  });
+
+  it("never asks keepUnmatched while the box is empty", () => {
+    const asked: string[] = [];
+    pickableKeys(all, "   ", (k) => {
+      asked.push(k);
+      return true;
+    });
+    expect(asked).toEqual([]);
+  });
+
+  it("puts a kept key in name order with the rest", () => {
+    expect(pickableKeys(all, "stat", (k) => k === "due").map((k) => k.key)).toEqual([
+      "due",
+      "status",
+    ]);
+  });
+
+  it("matches a value on the normalized text, blanks and case folded away", () => {
+    expect(valueMatches({ normalized: "in progress" }, valueQuery("  PROG  "))).toBe(true);
+    expect(valueMatches({ normalized: "in progress" }, valueQuery("done"))).toBe(false);
+    expect(valueMatches({ normalized: "anything" }, valueQuery("   "))).toBe(true);
+  });
+});
+
+/** Types into the filter box and lets the panel redraw. */
+function type(text: string): void {
+  const filter = byKey("item-filter") as HTMLInputElement;
+  filter.value = text;
+  filter.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+const overflowRows = (): HTMLElement[] =>
+  Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-property-row.is-overflow"));
+const overflowText = (): string[] => overflowRows().map((r) => r.textContent ?? "");
+
+describe("the filter reaches an open key's values", () => {
+  const notes: Notes = {
+    "a.md": { status: "active", owner: "stan" },
+    "b.md": { status: "archived" },
+    "c.md": { status: "done" },
+  };
+
+  it("narrows the open key's values while leaving a closed key's alone", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    expect(valueLabels()).toEqual(["active", "archived", "done"]);
+    type("arc");
+    expect(valueLabels()).toEqual(["archived"]);
+  });
+
+  it("keeps an open key whose own name misses but whose value hits", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    // Nothing is spelled "archived" among the key names. The decision: an open
+    // key stays while one of its values matches, so the value can be clicked.
+    type("archived");
+    expect(offered()).toEqual(["status"]);
+    expect(valueLabels()).toEqual(["archived"]);
+  });
+
+  it("drops an open key when neither its name nor any value matches", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    type("zzz");
+    expect(offered()).toEqual([]);
+    expect(emptyMessage()).toBe("No matching property");
+  });
+
+  it("says No matching value when the key matches and its values do not", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    type("status");
+    expect(offered()).toEqual(["status"]);
+    expect(valueLabels()).toEqual([]);
+    expect(panelEl().textContent).toContain("No matching value");
+    // Still a different sentence from a key that holds no value at all.
+    expect(panelEl().textContent).not.toContain("No values to pick");
+  });
+
+  it("reaches and picks a value sitting past the row cap", async () => {
+    // The case that was impossible: 250 values of one count each, so the list
+    // is in normalized order and `v-249` sits 50 rows past the 200-row cap.
+    const many: Notes = {};
+    for (let i = 0; i < 250; i += 1) {
+      many[`n-${String(i).padStart(3, "0")}.md`] = { created: `v-${String(i).padStart(3, "0")}` };
+    }
+    const h = openProperties({ properties: ready(indexOf(many)) });
+    expandBtn("created").click();
+    expect(valueLabels()).toHaveLength(200);
+    expect(valueLabels()).not.toContain("v-249");
+    // The dead end is now advice, in the key overflow row's own voice.
+    expect(overflowText()).toEqual(["50 more, narrow the filter to see them"]);
+
+    type("v-249");
+    expect(valueLabels()).toEqual(["v-249"]);
+    expect(overflowText()).toEqual([]);
+    valueBtn("v-249").click();
+    expect(await storedMembers(h)).toEqual([
+      { kind: "property", key: "created", value: "v-249" },
+    ]);
+  });
+
+  it("counts the matches it hid, not the values it skipped", () => {
+    const many: Notes = {};
+    for (let i = 0; i < 250; i += 1) {
+      many[`n-${String(i).padStart(3, "0")}.md`] = { created: `v-${String(i).padStart(3, "0")}` };
+    }
+    openProperties({ properties: ready(indexOf(many)) });
+    expandBtn("created").click();
+    // 100 of the 250 hold "v-1" and all of them fit, so no overflow row at all
+    // although the key holds 250 values.
+    type("v-1");
+    expect(valueLabels()).toHaveLength(100);
+    expect(overflowText()).toEqual([]);
+  });
+
+  it("matches a value case- and blank-insensitively, as the key filter does", () => {
+    openProperties({
+      properties: ready(indexOf({ "a.md": { status: "  In Progress  " } })),
+    });
+    expandBtn("status").click();
+    type(" PROGRESS ");
+    expect(valueLabels()).toEqual(["  In Progress  "]);
+  });
+
+  it("leaves the index's count order alone when it narrows", () => {
+    const index = indexOf({
+      "a.md": { k: "alpha" },
+      "b.md": { k: "beta" },
+      "c.md": { k: "beta" },
+    });
+    openProperties({ properties: ready(index) });
+    // Busiest first, which is not name order: `beta` has two notes.
+    expect(valueLabels()).toEqual([]);
+    expandBtn("k").click();
+    expect(valueLabels()).toEqual(["beta", "alpha"]);
+    type("a"); // both hold an "a"; the filter drops rows, it does not reorder
+    expect(valueLabels()).toEqual(["beta", "alpha"]);
   });
 });
 
@@ -806,6 +966,20 @@ describe("the work budget of the picker", () => {
     expandBtn("status").click();
     selectBtn("owner").click(); // a redraw with status still open
     expect(new Set(spy.asked)).toEqual(new Set(["status"]));
+  });
+
+  it("filtering with one key open still lists that key's values and no other", () => {
+    // The filter now reads values, and this is the line it must not cross: a
+    // key nobody opened is not searched, because searching it means building
+    // its buckets.
+    const spy = counting(indexOf(notes));
+    openProperties({ properties: ready(spy.index) });
+    expandBtn("status").click();
+    spy.asked.length = 0;
+    type("2026"); // matches no key name, and a value of `due` only
+    expect(new Set(spy.asked)).toEqual(new Set(["status"]));
+    // `due` was never asked, so its value matching the query cannot show it.
+    expect(offered()).toEqual([]);
   });
 });
 
