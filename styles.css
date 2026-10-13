@@ -448,11 +448,11 @@
 }
 .spaces-create-mode.is-active .spaces-create-theme-icon { color: inherit; }
 
-/* The two buttons that choose what the window below them shows, sitting under
-   the filter box they share a column with. The same segmented shape as the
-   Curated / Folder pinned pair above, but the active one is OUTLINED rather
-   than filled: two filled pairs on one pane read as one control with four
-   states, and the outline keeps them apart. The ring is an inset box-shadow
+/* The three buttons that choose what the window below them shows, sitting
+   under the filter box they share a column with. The same segmented shape as
+   the Curated / Folder pinned pair above, but the active one is OUTLINED
+   rather than filled: two filled groups on one pane read as one control with
+   five states, and the outline keeps them apart. The ring is an inset box-shadow
    so it takes no space (a border appearing on the active button would move its
    neighbour), and it replaces Obsidian's own button shadow, so the inactive
    button keeps the stock chrome and reads as inactive. Text takes
