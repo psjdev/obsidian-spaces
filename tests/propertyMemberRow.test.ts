@@ -245,6 +245,27 @@ describe("adding a property member to a space that already exists", () => {
     expect(readPropertyAdd([], "status ", "x", new Set(["status"])).outcome).toBe("spaced");
   });
 
+  it("says the keys are UNKNOWN rather than spaced when the vault has not been read", () => {
+    // An empty set says the vault holds no such key; null says nobody has
+    // looked, and the padded key could perfectly well exist. Refusing it as
+    // "spaced" told the person a fact about a vault nothing had read.
+    expect(readPropertyAdd([], " status ", "", null).outcome).toBe("unknown-keys");
+    expect(readPropertyAdd([], "status ", "x", null).outcome).toBe("unknown-keys");
+  });
+
+  it("decides everything else without the vault's keys at all", () => {
+    // Only a padded key needs them, so an unread vault must not hold up an
+    // ordinary add, a blank, a tag key or an already-held member.
+    expect(readPropertyAdd([], "status", "active", null)).toEqual({
+      outcome: "add",
+      member: { kind: "property", key: "status", value: "active" },
+    });
+    expect(readPropertyAdd([], "", "", null).outcome).toBe("blank");
+    expect(readPropertyAdd([], "tags", "", null).outcome).toBe("tags");
+    const held = addTyped(before, "status", "active");
+    expect(readPropertyAdd(held.members, "status", "active", null).outcome).toBe("held");
+  });
+
   it("trims the value, since a stray blank in it is never meant", () => {
     expect(readPropertyAdd([], "status", " active ", none)).toEqual({
       outcome: "add",

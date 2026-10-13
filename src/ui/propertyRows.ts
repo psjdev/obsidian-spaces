@@ -116,7 +116,8 @@ export type PropertyAdd =
   | { outcome: "held"; label: string }
   | { outcome: "blank" }
   | { outcome: "tags" }
-  | { outcome: "spaced" };
+  | { outcome: "spaced" }
+  | { outcome: "unknown-keys" };
 
 /**
  * Reads the adder's two fields.
@@ -129,6 +130,15 @@ export type PropertyAdd =
  * rather than stored, since it would match nothing and the person most likely
  * typed a stray blank. A key that is empty after trimming is "blank", the
  * schema's rule.
+ *
+ * `knownKeys` IS NULL WHEN THE VAULT HAS NOT BEEN READ, and that is not the
+ * empty set. An empty set says the vault holds no key of that spelling;
+ * `null` says nobody has looked. Only a padded key needs the difference, and
+ * it is the whole difference there: refusing one as "spaced" while the index
+ * is unavailable told the person "no property in the vault is spelled with
+ * spaces at the ends" about a vault nothing had read, and the key could
+ * perfectly well exist. "unknown-keys" is that case, for a caller to report
+ * as the wait it is.
  *
  * The VALUE is trimmed, and an empty one means "has this property" while text
  * means "equals it". "Equals the empty string" is therefore not addable here;
@@ -144,13 +154,16 @@ export function readPropertyAdd(
   members: readonly MemberEntry[],
   keyText: string,
   valueText: string,
-  knownKeys: ReadonlySet<string>
+  knownKeys: ReadonlySet<string> | null
 ): PropertyAdd {
   const key = keyText;
   const value = valueText.trim();
   if (!isEligiblePropertyKey(key)) return { outcome: "blank" };
   if (!isPickableKey(key)) return { outcome: "tags" };
-  if (key !== key.trim() && !knownKeys.has(key)) return { outcome: "spaced" };
+  if (key !== key.trim()) {
+    if (knownKeys === null) return { outcome: "unknown-keys" };
+    if (!knownKeys.has(key)) return { outcome: "spaced" };
+  }
   const member = value === "" ? existsMember(key) : equalsMember(key, value);
   if (holdsProperty(members, member)) {
     return { outcome: "held", label: value === "" ? key : `${key}: ${value}` };

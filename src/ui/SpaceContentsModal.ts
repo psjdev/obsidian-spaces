@@ -13,6 +13,7 @@ import {
   type TagMemberRow,
 } from "./memberList";
 import { memberIdentity } from "../definitions/schema";
+import { STILL_READING } from "../actions/membership";
 import { addPropertyMember, pickableKeys, readPropertyAdd } from "./propertyRows";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { normalizeTag } from "../visibility/tagMatch";
@@ -559,19 +560,32 @@ export class SpaceContentsModal extends Modal {
    * added in another window since the last render is still seen as held.
    * Nothing is written for a refusal or a held member: the person is told, and
    * what they typed stays in the fields.
+   *
+   * The index is asked for HERE and nowhere else on this path, which is a
+   * walk of the vault's frontmatter the first time after a metadata event.
+   * That is the user asking for it, which is the one thing allowed to pay.
    */
   private async addProperty(keyText: string, valueText: string): Promise<void> {
     const space = this.defs.get().spaces.find((s) => s.id === this.spaceId);
     if (!space) return;
-    const keys = this.propertyIndex()?.listKeys() ?? [];
+    const index = this.propertyIndex();
     const read = readPropertyAdd(
       space.members,
       keyText,
       valueText,
-      new Set(keys.map((k) => k.key))
+      // NULL, not an empty set: "nobody has read the vault" is not "the vault
+      // holds no keys", and only the second one can refuse a padded key.
+      index === null ? null : new Set(index.listKeys().map((k) => k.key))
     );
     if (read.outcome === "blank") {
       new Notice("Spaces: type a property name to add.");
+      return;
+    }
+    if (read.outcome === "unknown-keys") {
+      // A REFUSAL MUST NOT ASSERT A VAULT FACT THE CODE HAS NOT CHECKED. The
+      // spaced refusal below says the vault holds no such key; that is only
+      // sayable once the vault has been read.
+      new Notice(STILL_READING);
       return;
     }
     if (read.outcome === "spaced") {
