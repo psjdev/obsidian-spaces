@@ -77,7 +77,7 @@ describe("a note a property member shows is still held after the snapshot goes c
   it("answers from the last ready index: no notice about properties, no redundant member", async () => {
     const { defs, controller, set } = await realContext({ status: "ready", index });
     controller.drawnPropertyIndex();
-    set({ status: "unavailable" });
+    set({ status: "unavailable", unparsed: [] });
     const before = notices().length;
     await addToSpace({ defs, controller }, "p", [aFile]);
     expect(notices().slice(before)).toEqual(["a.md is already in Active"]);
@@ -87,13 +87,13 @@ describe("a note a property member shows is still held after the snapshot goes c
   it("offers nothing to add for that note either", async () => {
     const { controller, set } = await realContext({ status: "ready", index });
     controller.drawnPropertyIndex();
-    set({ status: "unavailable" });
+    set({ status: "unavailable", unparsed: [] });
     const [t] = spaceAddTargets([propertySpace], ["Work/a.md"], noTags, controller.drawnPropertyIndex());
     expect(t.label).toBe("Active (already added)");
   });
 
   it("still refuses when no index has ever been ready", async () => {
-    const { defs, controller } = await realContext({ status: "unavailable" });
+    const { defs, controller } = await realContext({ status: "unavailable", unparsed: [] });
     const before = notices().length;
     await addToSpace({ defs, controller }, "p", [aFile]);
     expect(notices().slice(before)).toEqual([

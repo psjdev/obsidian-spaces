@@ -196,7 +196,7 @@ describe("SpaceController with a property space", () => {
       1
     ),
   };
-  const unavailable: PropertySnapshot = { status: "unavailable" };
+  const unavailable: PropertySnapshot = { status: "unavailable", unparsed: [] };
 
   async function build(
     members: MemberEntry[],

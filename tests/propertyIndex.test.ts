@@ -138,7 +138,7 @@ describe("readiness", () => {
   });
 
   it("reports unavailable rather than an empty index", () => {
-    const lazy = createLazyPropertySnapshot(() => ({ status: "unavailable" }));
+    const lazy = createLazyPropertySnapshot(() => ({ status: "unavailable", unparsed: [] }));
     const snapshot = lazy();
     expect(snapshot.status).toBe("unavailable");
     // The caller cannot reach a query at all, which is the point: an empty
@@ -164,7 +164,7 @@ describe("readiness", () => {
     let built = 0;
     const lazy = createLazyPropertySnapshot((): PropertySnapshot => {
       built++;
-      return { status: "unavailable" };
+      return { status: "unavailable", unparsed: [] };
     });
     expect(lazy().status).toBe("unavailable");
     expect(lazy().status).toBe("unavailable");
@@ -178,7 +178,7 @@ describe("readiness", () => {
     const build = (): PropertySnapshot => {
       built++;
       return built === 1
-        ? { status: "unavailable" }
+        ? { status: "unavailable", unparsed: [] }
         : { status: "ready", index: createPropertyIndex([], 3) };
     };
     expect(createLazyPropertySnapshot(build)().status).toBe("unavailable");

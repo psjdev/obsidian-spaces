@@ -941,14 +941,14 @@ describe("the picker reads the drawn index, the same picture as the summary row"
     const { controller, set } = controllerAnswering({ status: "ready", index });
     const callbacks = openOver(controller);
     expect(offered()).toEqual(["status"]);
-    set({ status: "unavailable" }); // a metadata change replaced the snapshot with a cold one
+    set({ status: "unavailable", unparsed: [] }); // a metadata change replaced the snapshot with a cold one
     callbacks[0]();
     expect(offered()).toEqual(["status"]);
     expect(emptyMessage()).toBe("");
   });
 
   it("says loading on a genuine first start, and fills in when the first answer arrives", () => {
-    const { controller, set } = controllerAnswering({ status: "unavailable" });
+    const { controller, set } = controllerAnswering({ status: "unavailable", unparsed: [] });
     const callbacks = openOver(controller);
     expect(emptyMessage()).toBe("Loading this vault's properties…");
     set({ status: "ready", index });

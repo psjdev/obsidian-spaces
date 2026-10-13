@@ -51,7 +51,7 @@ async function build(spaces: SpaceDefinition[]) {
     buildFakeVault({}),
     { apply: vi.fn(), livePaths: () => new Set<string>() },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   const switcher = new SwitcherView(
     defs,

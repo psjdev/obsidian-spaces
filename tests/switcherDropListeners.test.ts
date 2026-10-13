@@ -79,7 +79,7 @@ async function build(): Promise<Harness> {
     buildFakeVault({}),
     { apply: vi.fn(), livePaths: () => new Set<string>() },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   const onDropped = vi.fn();
   const onRefused = vi.fn();

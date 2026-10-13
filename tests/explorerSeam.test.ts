@@ -144,7 +144,7 @@ async function makeHarness(
       livePaths: () => new Set(live),
     },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   plugin["switcher"] = {
     mount: () => undefined,

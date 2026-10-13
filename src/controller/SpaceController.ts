@@ -20,7 +20,7 @@ import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from
  * a flag so `drawnPropertyIndex` and the recompute arm keep their one way of
  * asking. See `dispose`.
  */
-const UNAVAILABLE_PROPERTIES = (): PropertySnapshot => ({ status: "unavailable" });
+const UNAVAILABLE_PROPERTIES = (): PropertySnapshot => ({ status: "unavailable", unparsed: [] });
 
 interface ControllerHost {
   apply(snapshot: VisibilitySnapshot | null): void;

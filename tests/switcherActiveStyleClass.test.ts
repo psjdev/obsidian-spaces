@@ -42,7 +42,7 @@ async function mount(style: ActiveSpaceStyle) {
       livePaths: () => new Set<string>(),
     },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   const switcher = new SwitcherView(
     defs,

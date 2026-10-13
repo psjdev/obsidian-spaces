@@ -54,7 +54,7 @@ async function harness(useThemeIconColor: boolean) {
       livePaths: () => new Set<string>(),
     },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   return { defs, runtime, controller };
 }

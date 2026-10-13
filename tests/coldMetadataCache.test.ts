@@ -72,7 +72,7 @@ async function build(
   let builds = 0;
   // Unavailable unless a case says otherwise, which is what a cache that has
   // not parsed every file reports.
-  let properties: PropertySnapshot = opts.properties ?? { status: "unavailable" };
+  let properties: PropertySnapshot = opts.properties ?? { status: "unavailable", unparsed: [] };
   let propertyAsks = 0;
   const controller = new SpaceController(
     store,
@@ -220,7 +220,7 @@ describe("a property space whose snapshot has never been ready", () => {
       properties: readyProperties(),
     });
     await controller.switchTo({ kind: "space", id: "research" });
-    setProperties({ status: "unavailable" });
+    setProperties({ status: "unavailable", unparsed: [] });
     controller.refresh();
     const snap = controller.currentSnapshot();
     expect(snap).not.toBeNull();
@@ -341,7 +341,7 @@ describe("a host that reports no readiness at all", () => {
       vault,
       { apply: vi.fn(), livePaths: () => new Set<string>() },
       tagIndexOf(WARM),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     expect(controller.currentSnapshot()?.decisionFor("Recipes.md").visible).toBe(true);

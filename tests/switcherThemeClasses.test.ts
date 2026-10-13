@@ -43,7 +43,7 @@ async function mount(): Promise<HTMLElement> {
       livePaths: () => new Set<string>(),
     },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   const switcher = new SwitcherView(
     defs,

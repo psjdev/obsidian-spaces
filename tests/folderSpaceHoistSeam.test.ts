@@ -196,7 +196,7 @@ async function makeHarness(leaves: { view: FakeView }[]): Promise<Harness> {
       livePaths: () => plugin["liveLeafPaths"](),
     },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   plugin["switcher"] = { mount: () => undefined, render: () => undefined } as unknown as SwitcherView;
   plugin["header"] = { mount: () => undefined, render: () => undefined } as unknown as SpaceHeaderView;

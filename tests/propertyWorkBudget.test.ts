@@ -365,10 +365,23 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     expect(plugin.counts.cacheReads).toBe(1000);
   });
 
-  it("a cold cache costs one listing and one cache read for the snapshot, however many events", async () => {
+  it("a cold cache costs ONE listing and one read PER FILE, however many events", async () => {
     // Startup. An unavailable snapshot is not kept, so every ask rebuilds; the
-    // walk stops at the first unparsed file, so it is cheap, and one recompute
-    // asks once.
+    // memo in `createLazyPropertySnapshot` is what holds a burst to one walk,
+    // and one recompute asks once.
+    //
+    // THE COUNT CHANGED, DELIBERATELY: one cache read became 500, and 501
+    // became 1,000. The walk used to abandon at the first null, so the cold
+    // case was the cheapest in this file — and that cheapness was the bug.
+    // Abandoning threw away WHICH files were unparsed, so a vault holding a
+    // file Obsidian cannot parse had property members off permanently with
+    // nothing to repair from; `ObsidianPropertyIndex.ts` carries the
+    // measurement and the trade. The budget this file states is "one metadata
+    // event costs at most ONE WALK per metadata-driven index", and that is
+    // still exactly what is asserted here: one listing and one read per file
+    // for fifty events, not fifty walks. What is gone is a short-circuit that
+    // made one SHAPE of walk cheaper, not the bound on how many walks an event
+    // may cause.
     const plugin = fakePlugin(500, space([{ kind: "property", key: "status" }]), { cold: true });
     for (let i = 0; i < 50; i++) plugin.metadataEvent();
     await tick();
@@ -377,7 +390,7 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     expect(plugin.members).toEqual([]);
     expect(plugin.counts.treeWalks).toBe(0);
     expect(plugin.counts.listings).toBe(1);
-    expect(plugin.counts.cacheReads).toBe(1);
+    expect(plugin.counts.cacheReads).toBe(500);
     // The cache finishes parsing; the next burst is ready and walks once more.
     plugin.warm();
     for (let i = 0; i < 50; i++) plugin.metadataEvent();
@@ -385,15 +398,23 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     plugin.settle();
     expect(plugin.members.length).toBe(500);
     expect(plugin.counts.listings).toBe(2);
-    expect(plugin.counts.cacheReads).toBe(501);
+    expect(plugin.counts.cacheReads).toBe(1000);
+  });
+
+  it("a cold cache names every unparsed file, which is what the repair is driven by", () => {
+    // What the extra 499 reads above are FOR, asserted rather than implied.
+    const { app } = countingApp(3, { cold: true });
+    const snap = createObsidianPropertySnapshot(app, 1);
+    if (snap.status !== "unavailable") throw new Error("expected unavailable");
+    expect([...snap.unparsed]).toEqual(["n00000.md", "n00001.md", "n00002.md"]);
   });
 
   it("a partially warm cache walks once across a burst that asks twice", async () => {
-    // The cold case above is the CHEAPEST cold case: every file is unparsed,
-    // so the walk stops at file 1 and a second walk costs one more read. This
-    // is the expensive one — 499 notes parsed and the last not — and the burst
-    // asks twice, because `runFlush` tells the open picker and then recomputes
-    // the space. Both asks must share one walk.
+    // Every cold shape now costs one full walk, so this no longer differs from
+    // the case above in PRICE — it differs in what it proves. 499 notes parsed
+    // and the last not, and the burst asks twice, because `runFlush` tells the
+    // open picker and then recomputes the space. Both asks must share one
+    // walk, and only the memo makes that true.
     const plugin = fakePlugin(500, space([{ kind: "property", key: "status" }]), { unparsed: 499 });
     let asks = 0;
     plugin.hub.subscribe(() => {
@@ -413,9 +434,9 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     // pinned; this asserts only what the mirror returns.
     expect(plugin.members).toEqual([]);
     expect(plugin.counts.listings).toBe(1);
-    // 500 reads: the walk reads up to the unparsed file and stops there. Two
-    // walks would be 2 listings and 1,000 reads, which is what asking twice
-    // cost while an unavailable answer was thrown away.
+    // 500 reads: one walk of 500 files. Two walks would be 2 listings and
+    // 1,000 reads, which is what asking twice cost while an unavailable answer
+    // was thrown away.
     expect(plugin.counts.cacheReads).toBe(500);
 
     // The note parses. The NEXT event installs a fresh accessor, which is what
@@ -441,7 +462,9 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     plugin.settle();
     expect(asks).toBe(1);
     expect(plugin.counts.listings).toBe(1);
-    expect(plugin.counts.cacheReads).toBe(1);
+    // 500, not 1, for the reason the cold case above gives: the walk runs to
+    // the end so it can name the unparsed files.
+    expect(plugin.counts.cacheReads).toBe(500);
   });
 
   it("a full flush installs a NEW tag index; a metadata-only burst installs none from the flush", async () => {

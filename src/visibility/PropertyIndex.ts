@@ -75,9 +75,17 @@ export interface PropertyValueCount {
 /**
  * Readiness as a SHAPE, so an empty array can never secretly mean "the cache
  * is cold". A caller that has not checked cannot query.
+ *
+ * UNAVAILABLE CARRIES ITS EVIDENCE. `unparsed` is every path the walk asked
+ * Obsidian about and got `null` for — the files it has not parsed. It is the
+ * difference between "the feature is off" and "these 3 files are why", and it
+ * is what the repair in `propertyRepair.ts` is handed. An unavailable snapshot
+ * with an EMPTY `unparsed` is legitimate and means "nobody walked": the
+ * controller's own placeholder before a snapshot has been installed, and the
+ * one `dispose()` leaves behind.
  */
 export type PropertySnapshot =
-  | { status: "unavailable" }
+  | { status: "unavailable"; unparsed: readonly string[] }
   | { status: "ready"; index: PropertyIndex };
 
 interface Bucket {

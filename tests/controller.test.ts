@@ -52,7 +52,7 @@ async function build() {
       livePaths: () => new Set<string>(),
     },
     createMapTagIndex(new Map()),
-    () => ({ status: "unavailable" })
+    () => ({ status: "unavailable", unparsed: [] })
   );
   return { controller, apply, store, runtime };
 }
@@ -145,7 +145,7 @@ describe("SpaceController", () => {
       vault,
       { apply: () => undefined, livePaths: () => new Set<string>() },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (from, to): Promise<SwitchOutcome> => {
           calls.push({ from, to });
@@ -177,7 +177,7 @@ describe("SpaceController", () => {
       vault,
       { apply: () => undefined, livePaths: () => new Set<string>() },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           seenDuring = rt.getSelection();
@@ -220,7 +220,7 @@ describe("SpaceController", () => {
         livePaths: () => new Set<string>(),
       },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
       }
@@ -260,7 +260,7 @@ describe("SpaceController", () => {
         livePaths: () => new Set<string>(),
       },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       { transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }) }
     );
 
@@ -297,7 +297,7 @@ describe("SpaceController", () => {
       vault,
       { apply, livePaths: () => new Set<string>() },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           throw new Error("boom");
@@ -331,7 +331,7 @@ describe("SpaceController", () => {
       vault,
       { apply, livePaths: () => new Set<string>() },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
         onOutcome: () => {
@@ -370,7 +370,7 @@ describe("SpaceController", () => {
       vault,
       { apply, livePaths: () => new Set<string>() },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           await gate;
@@ -424,7 +424,7 @@ describe("SpaceController", () => {
       vault,
       { apply, livePaths: () => new Set<string>() },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       { transition: () => gate }
     );
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -469,7 +469,7 @@ describe("SpaceController", () => {
       vault,
       { apply, livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           // changeLayout() replaced the workspace: the revealed file is gone
@@ -533,7 +533,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           // Simulates the restore reopening the dismissed path and main.ts's
@@ -576,7 +576,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           controller.onFileOpened("Recipes.md");
@@ -609,7 +609,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     expect(controller.currentSnapshot()!.decisionFor("Recipes.md").visible).toBe(true);
@@ -634,7 +634,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => new Set(["Recipes.md"]) },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     const snap = controller.currentSnapshot()!;
@@ -658,7 +658,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => new Set(["Recipes.md"]) },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     expect(controller.currentSnapshot()!.decisionFor("Recipes.md").visible).toBe(true);
@@ -699,7 +699,7 @@ describe("SpaceController", () => {
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Each restore replaces the workspace with the target's own tabs.
@@ -737,7 +737,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -824,7 +824,7 @@ describe("SpaceController", () => {
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Ledger's restore closes it; Research's keeps it.
@@ -896,7 +896,7 @@ describe("SpaceController", () => {
       vaultWithMember,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Research's restore keeps Recipes.md's tab (it is a member and
@@ -947,7 +947,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -1001,7 +1001,7 @@ describe("SpaceController", () => {
         vault,
         { apply: vi.fn(), livePaths: () => live },
         createMapTagIndex(new Map()),
-        () => ({ status: "unavailable" }),
+        () => ({ status: "unavailable", unparsed: [] }),
         withLayout
           ? {
               transition: async (): Promise<SwitchOutcome> => {
@@ -1049,7 +1049,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     controller.onActiveFileChanged("Recipes.md");
@@ -1093,7 +1093,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     controller.dismissRevealed("Recipes.md");
@@ -1129,7 +1129,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -1164,7 +1164,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           live = new Set<string>(["Papers/A.md"]);
@@ -1205,7 +1205,7 @@ describe("SpaceController", () => {
       vault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     await controller.switchTo({ kind: "space", id: "research" });
     controller.onActiveFileChanged("Recipes.md");
@@ -1258,7 +1258,7 @@ describe("SpaceController", () => {
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // Each space's OWN restore opens its own visitor tab — never via
@@ -1330,7 +1330,7 @@ describe("SpaceController", () => {
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (_from, to): Promise<SwitchOutcome> => {
           // NEITHER space's own restore ever opens Visitor1.md — each
@@ -1374,7 +1374,7 @@ describe("SpaceController", () => {
       twoSpaceVault,
       { apply: vi.fn(), livePaths: () => live },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" }),
+      () => ({ status: "unavailable", unparsed: [] }),
       {
         transition: async (): Promise<SwitchOutcome> => {
           // spaceA's own restore closes Deliberate.md's tab and opens its own.
@@ -1437,7 +1437,7 @@ describe("SpaceController", () => {
         livePaths: () => new Set<string>(),
       },
       createMapTagIndex(new Map()),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
 
     const id = await createSpace(store, "Projects Space", {
@@ -1662,7 +1662,7 @@ describe("SpaceController tag index laziness", () => {
         builds++;
         return tagIndexOf(new Map([["Recipes.md", ["project"]]]));
       }),
-      () => ({ status: "unavailable" })
+      () => ({ status: "unavailable", unparsed: [] })
     );
     return { controller, builds: () => builds };
   }
