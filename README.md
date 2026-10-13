@@ -28,6 +28,10 @@ Navigate spaces by either:
 
 **Curated spaces** hold notes and folders you pick by hand. Add a folder and everything inside it comes along; the parent folders needed to reach your files appear dimmed, as scaffolding rather than members.
 
+A curated space can also hold a property. Add `due` to collect every note whose frontmatter has that property, or `status: active` to collect every note where `status` is set to `active`. In the creation form, switch the picker to **Properties** and click **Has property** or one of a property's values. On an existing space, open Settings → Spaces, click **Contents…** beside the space, and fill in **Add a property**.
+
+Values match without regard to capitals or surrounding spaces, so a note with `status: Active` is collected by `status: active`. The property name has to match exactly: `Status` and `status` are different properties. A list property is collected by any of its entries, so a note with `topics: [atlas, billing]` is collected by `topics: atlas`. A property with no value still counts as having the property. A note joins the space when it gains a matching property and leaves when it no longer matches. Properties mix freely with notes, folders and tags in one space. For tags, use [Tags](#tags), which also finds tags written in a note's text.
+
 **Folder pinned spaces** are a live window onto a single folder. Its contents appear at the top level of the explorer, the folder itself is hidden, and anything you later add to that folder shows up without you doing anything. New notes created while you are in the space land in that folder.
 
 A space's type is fixed when you create it: a curated space can never become a folder pinned space, or the reverse.
