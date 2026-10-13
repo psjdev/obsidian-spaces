@@ -81,7 +81,15 @@ export type PropertySnapshot =
   | { status: "ready"; index: PropertyIndex };
 
 interface Bucket {
-  /** The spelling to draw, from the lexicographically first path. */
+  /**
+   * The spelling to draw, from the lexicographically first path.
+   *
+   * Which is also the answer for two notes writing one value in different
+   * Unicode forms: `normalizeValue` folds them into one bucket, and the form
+   * kept is the one on the first path, not the first form the walk happened
+   * to meet. The entries are sorted by path before the walk, so it is stable
+   * across rebuilds and does not depend on vault order.
+   */
   value: string;
   paths: string[];
 }

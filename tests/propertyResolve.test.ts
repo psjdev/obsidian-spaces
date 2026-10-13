@@ -60,6 +60,27 @@ describe("precedence", () => {
       .toEqual(["Work/a.md", "Work/b.md", "Work/tagged.md"]);
   });
 
+  it("collects notes that spell one value in different Unicode forms", () => {
+    // One member, one space. Before values were normalized to NFC these were
+    // two values: half the notes went to a value the member did not name, and
+    // the picker offered two rows a person could not tell apart.
+    const accented = createPropertyIndex(
+      [
+        { path: "Work/composed.md", frontmatter: { city: "Café" } },
+        { path: "Work/decomposed.md", frontmatter: { city: "café" } },
+      ],
+      1
+    );
+    const s = space({ members: [{ kind: "property", key: "city", value: "CAFÉ" }] });
+    expect(resolveMembers(s, tags, accented).map((m) => m.path).sort()).toEqual([
+      "Work/composed.md",
+      "Work/decomposed.md",
+    ]);
+    // A member stored in the other form finds the same two notes.
+    const other = space({ members: [{ kind: "property", key: "city", value: "café" }] });
+    expect(resolveMembers(other, tags, accented)).toHaveLength(2);
+  });
+
   it("contributes nothing when no property index is available", () => {
     const s = space({ members: [{ kind: "property", key: "status" }] });
     expect(resolveMembers(s, tags, null)).toEqual([]);

@@ -34,6 +34,23 @@ describe("normalizeValue", () => {
   it("turns a whitespace-only string into the empty string", () => {
     expect(normalizeValue("   ")).toBe("");
   });
+  it("folds the Unicode forms together, and answers in NFC", () => {
+    const precomposed = "café"; // café, with U+00E9
+    const decomposed = "café"; // café, with e + U+0301
+    expect(precomposed).not.toBe(decomposed);
+    expect(normalizeValue(precomposed)).toBe(normalizeValue(decomposed));
+    // NFC, not NFD: the answer is the composed form, four code points.
+    expect(normalizeValue(decomposed)).toBe(precomposed);
+    expect(normalizeValue(decomposed)).toHaveLength(4);
+  });
+  it("still folds case and blanks around an accent", () => {
+    expect(normalizeValue("  CAFÉ ")).toBe("café");
+  });
+  it("leaves KEYS alone: nothing here is reached from a key comparison", () => {
+    // Keys match exactly, by an explicit decision, so two keys differing only
+    // in Unicode form are still two keys.
+    expect(hasOwnKey({ "café": 1 }, "café")).toBe(false);
+  });
 });
 
 describe("the values a frontmatter entry offers", () => {
@@ -55,6 +72,9 @@ describe("the values a frontmatter entry offers", () => {
     ["text with a slash", "a/b", ["a/b"]],
     ["text with an equals", "a=b", ["a=b"]],
     ["text with a comma", "a,b", ["a,b"]],
+    ["an accented value already composed", "Café", ["café"]],
+    ["the same value decomposed", "Café", ["café"]],
+    ["a decomposed entry beside its composed twin", ["café", "café"], ["café"]],
   ])("handles %s", (_label, raw, expected) => {
     expect(offered(raw)).toEqual(expected);
   });
@@ -66,6 +86,38 @@ describe("the values a frontmatter entry offers", () => {
       { value: "Active", normalized: "active", count: 1 },
     ]);
     expect(indexOf("   ").listValues("k")).toEqual([{ value: "   ", normalized: "", count: 1 }]);
+  });
+
+  it("draws ONE row for a value written in two Unicode forms", () => {
+    // Two picker rows with identical labels, each collecting half the notes,
+    // was the bug. The spelling kept is the lexicographically first path's,
+    // which is `a.md`, whichever form the walk met first.
+    const index = createPropertyIndex(
+      [
+        { path: "a.md", frontmatter: { k: "Café" } }, // decomposed
+        { path: "b.md", frontmatter: { k: "Café" } }, // composed
+      ],
+      1
+    );
+    expect(index.listValues("k")).toEqual([
+      { value: "Café", normalized: "café", count: 2 },
+    ]);
+    // And the other way round, so the winner is the path and not the form.
+    const flipped = createPropertyIndex(
+      [
+        { path: "a.md", frontmatter: { k: "Café" } },
+        { path: "b.md", frontmatter: { k: "Café" } },
+      ],
+      1
+    );
+    expect(flipped.listValues("k")).toEqual([
+      { value: "Café", normalized: "café", count: 2 },
+    ]);
+  });
+
+  it("matches a value typed in either Unicode form", () => {
+    expect(matches("Café", "café")).toBe(true);
+    expect(matches("Café", "café")).toBe(true);
   });
 
   it("never stringifies a whole array", () => {
