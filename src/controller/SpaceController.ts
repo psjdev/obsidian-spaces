@@ -134,8 +134,10 @@ export class SpaceController {
    * than from a second one that may differ. Not the raw snapshot: while the
    * cache is cold that is `null`, which would make an add path refuse or
    * misjudge a note the tree is showing. Each call asks the accessor, which
-   * rebuilds on every ask while cold, so a caller that needs it for several
-   * spaces reads it ONCE and passes it down.
+   * answers from its own one build, so the cost of asking is a walk only for
+   * the FIRST caller after a metadata event. A caller that needs it for
+   * several spaces still reads it ONCE and passes it down, so every space it
+   * answers for describes one picture.
    */
   drawnPropertyIndex(): PropertyIndex | null {
     const snapshot = this.properties();

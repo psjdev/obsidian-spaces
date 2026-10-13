@@ -47,7 +47,7 @@ export function spaceAddTargets(
   paths: readonly string[],
   tags: TagIndex,
   // Read once by the caller and shared by every space here, never asked per
-  // space: while the cache is cold each ask rebuilds. `null` means not ready,
+  // space, so every space is judged against one picture. `null` means not ready,
   // which for a space holding a property member means UNKNOWN, not "holds
   // nothing": such a space is not offered, see below.
   properties: PropertyIndex | null

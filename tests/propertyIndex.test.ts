@@ -149,17 +149,34 @@ describe("readiness", () => {
     expect(built).toBe(1);
   });
 
-  it("asks again after unavailable, so a warming cache can become ready", () => {
+  it("keeps an unavailable answer too, so one burst never builds twice", () => {
+    // A burst asks twice: `runFlush` notifies the pickers and then recomputes
+    // the space. While any note is unparsed both asks used to walk the vault
+    // and both returned nothing.
     let built = 0;
     const lazy = createLazyPropertySnapshot((): PropertySnapshot => {
+      built++;
+      return { status: "unavailable" };
+    });
+    expect(lazy().status).toBe("unavailable");
+    expect(lazy().status).toBe("unavailable");
+    expect(built).toBe(1);
+  });
+
+  it("retries through a NEW accessor, so a warming cache is not unavailable forever", () => {
+    // What drops the kept answer is the next metadata event, which installs a
+    // fresh accessor (`main.ts`), never a second ask of this one.
+    let built = 0;
+    const build = (): PropertySnapshot => {
       built++;
       return built === 1
         ? { status: "unavailable" }
         : { status: "ready", index: createPropertyIndex([], 3) };
-    });
-    expect(lazy().status).toBe("unavailable");
-    expect(lazy().status).toBe("ready");
-    expect(lazy().status).toBe("ready");
+    };
+    expect(createLazyPropertySnapshot(build)().status).toBe("unavailable");
+    const warmed = createLazyPropertySnapshot(build);
+    expect(warmed().status).toBe("ready");
+    expect(warmed().status).toBe("ready");
     expect(built).toBe(2);
   });
 });

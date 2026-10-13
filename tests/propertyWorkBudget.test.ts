@@ -120,11 +120,16 @@ interface Counts {
  */
 function countingApp(
   notes: number,
-  opts: { cold?: boolean } = {}
+  opts: { cold?: boolean; unparsed?: number } = {}
 ): { app: App; counts: Counts; warm: () => void } {
   // A cold cache reports `null` for every file, as Obsidian does before it
   // has parsed them (startup, and the busiest moment).
   let cold = opts.cold === true;
+  // A PARTIALLY warm cache: every file parses but this one, which is what the
+  // cache looks like for most of the time it spends warming. Unlike the cold
+  // fixture it does not let the walk stop at file 1, so it is the shape that
+  // makes a second walk per burst expensive rather than free.
+  let unparsed = opts.unparsed;
   const counts: Counts = { listings: 0, treeWalks: 0, cacheReads: 0 };
   const root = new TFolder();
   root.path = "/";
@@ -158,11 +163,19 @@ function countingApp(
         counts.cacheReads++;
         if (cold) return null;
         const i = Number(f.path.slice(1, 6));
+        if (i === unparsed) return null;
         return { frontmatter: frontmatter(i), ...(i % 4 === 0 ? { tags: [{ tag: "#inbox" }] } : {}) };
       },
     },
   } as unknown as App;
-  return { app, counts, warm: () => void (cold = false) };
+  return {
+    app,
+    counts,
+    warm: () => {
+      cold = false;
+      unparsed = undefined;
+    },
+  };
 }
 
 const space = (members: SpaceDefinition["members"], root?: string): SpaceDefinition => ({
@@ -178,7 +191,11 @@ const space = (members: SpaceDefinition["members"], root?: string): SpaceDefinit
  * main.ts's handlers over the real coordination pieces, against a counting
  * vault. `flush` is what the shared coalescer runs.
  */
-function fakePlugin(notes: number, active: SpaceDefinition | null, opts: { cold?: boolean } = {}) {
+function fakePlugin(
+  notes: number,
+  active: SpaceDefinition | null,
+  opts: { cold?: boolean; unparsed?: number } = {}
+) {
   const { app, counts, warm } = countingApp(notes, opts);
   const hub = new PropertyRefreshHub();
   const clock = manualTimer();
@@ -369,6 +386,43 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     expect(plugin.members.length).toBe(500);
     expect(plugin.counts.listings).toBe(2);
     expect(plugin.counts.cacheReads).toBe(501);
+  });
+
+  it("a partially warm cache walks once across a burst that asks twice", async () => {
+    // The cold case above is the CHEAPEST cold case: every file is unparsed,
+    // so the walk stops at file 1 and a second walk costs one more read. This
+    // is the expensive one — 499 notes parsed and the last not — and the burst
+    // asks twice, because `runFlush` tells the open picker and then recomputes
+    // the space. Both asks must share one walk.
+    const plugin = fakePlugin(500, space([{ kind: "property", key: "status" }]), { unparsed: 499 });
+    let asks = 0;
+    plugin.hub.subscribe(() => {
+      asks++;
+      plugin.snapshot();
+    });
+    for (let i = 0; i < 50; i++) plugin.metadataEvent();
+    await tick();
+    plugin.settle();
+    expect(asks).toBe(1);
+    expect(plugin.recomputes).toBe(1);
+    // Unavailable is not empty: the space keeps nothing here, and the
+    // controller holds its previous answer rather than publishing this one.
+    expect(plugin.members).toEqual([]);
+    expect(plugin.counts.listings).toBe(1);
+    // 500 reads: the walk reads up to the unparsed file and stops there. Two
+    // walks would be 2 listings and 1,000 reads, which is what asking twice
+    // cost while an unavailable answer was thrown away.
+    expect(plugin.counts.cacheReads).toBe(500);
+
+    // The note parses. The NEXT event installs a fresh accessor, which is what
+    // drops the unavailable answer, so the burst after it is ready.
+    plugin.warm();
+    for (let i = 0; i < 50; i++) plugin.metadataEvent();
+    await tick();
+    plugin.settle();
+    expect(plugin.members.length).toBe(500);
+    expect(plugin.counts.listings).toBe(2);
+    expect(plugin.counts.cacheReads).toBe(1000);
   });
 
   it("a cold cache with a picker open builds once per burst, however many the picker asks", async () => {
