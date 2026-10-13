@@ -19,6 +19,7 @@ import {
 } from "../visibility/glob";
 import { isFolderSpace } from "../visibility/folderSpace";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { ConfirmModal } from "./ConfirmModal";
 import { SpaceContentsModal } from "./SpaceContentsModal";
 import {
@@ -122,7 +123,10 @@ export class SpacesSettingTab extends PluginSettingTab {
     // A callback, not the switcher itself: this tab is built before the
     // switcher exists, in `onload()`, and only ever needs the one thing on
     // it that a placement change must cancel first.
-    private cancelStripDrag?: () => void
+    private cancelStripDrag?: () => void,
+    // The property index the Contents dialog draws counts from, reached
+    // rather than built. This tab never asks it anything itself.
+    private getPropertyIndex?: () => PropertyIndex | null
   ) {
     super(app, plugin);
   }
@@ -633,7 +637,8 @@ export class SpacesSettingTab extends PluginSettingTab {
                     this.app,
                     this.defs,
                     space.id,
-                    this.getTagIndex
+                    this.getTagIndex,
+                    this.getPropertyIndex
                   ).open();
                 })
             );

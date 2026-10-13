@@ -575,7 +575,8 @@ export default class SpacesPlugin extends Plugin {
       // The switcher does not exist yet at this point in `onload()`; deferred
       // the same way the two accessors above are, so it is read when a
       // placement change actually happens rather than now.
-      () => this.switcher?.cancelDrag()
+      () => this.switcher?.cancelDrag(),
+      () => this.controller.drawnPropertyIndex()
     );
     this.addSettingTab(this.settingTab);
 

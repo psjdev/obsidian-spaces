@@ -13,7 +13,13 @@
 
 import { inheritedFromFolder } from "../actions/membershipMenu";
 import { isVaultRoot } from "../visibility/folderSpace";
+import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
+import { memberIdentity } from "../definitions/schema";
 import type { MemberEntry, MemberKind, SpaceDefinition } from "../types";
+
+/** A stored property member, as `memberRows` hands it to a counter. */
+export type PropertyMember = Extract<MemberEntry, { kind: "property" }>;
 
 type MemberStatus =
   /** Resolves to a real vault object and is the reason it is in the space. */
@@ -22,7 +28,7 @@ type MemberStatus =
   | "missing"
   /** Real, but a member FOLDER already covers it, so the entry adds nothing. */
   | "redundant"
-  /** A tag no note currently carries. Not the same as a missing file. */
+  /** A tag or property no note currently matches. Not the same as a missing file. */
   | "matches-nothing";
 
 /** A row for a member that names a vault path. */
@@ -57,7 +63,65 @@ export interface TagMemberRow {
   matchCount: number | null;
 }
 
-export type MemberRow = PathMemberRow | TagMemberRow;
+/**
+ * A row for a property member. It names no path, so like a tag row it can
+ * never be `missing`.
+ */
+export interface PropertyMemberRow {
+  kind: "property";
+  key: string;
+  /** Absent for the existence shape. In the spelling the user picked. */
+  value?: string;
+  /** What the row reads as: the key, or `key: value`. */
+  label: string;
+  status: "present" | "matches-nothing";
+  /**
+   * The distinct notes this member contributes to THIS space after the
+   * space's exclusions and the global ignore, counted whether or not another
+   * member also brings them in. Scaffold folders are never counted.
+   *
+   * NULL IS NOT ZERO and must never be drawn as one. It means the count is
+   * unavailable: the caller did not count, or no property index has ever been
+   * ready. A cold metadata cache must not read as "nothing matches", so a null
+   * count is always `status: "present"`.
+   */
+  matchCount: number | null;
+}
+
+export type MemberRow = PathMemberRow | TagMemberRow | PropertyMemberRow;
+
+/**
+ * How many notes a property member contributes to a space.
+ *
+ * Counts what THIS member brings in, so a note a hand-named file member also
+ * holds still counts, and a note this space excludes does not, even though
+ * the tree shows it through that file member. Both are true at once because
+ * the tree asks "is it in the space" and this asks "what does this member
+ * bring". The global ignore applies here, as the contract for a member count
+ * says, although the tree lets a member's own matches bypass it.
+ *
+ * Null when `index` is null, which is "unavailable", not zero.
+ */
+export function propertyMemberCount(
+  member: PropertyMember,
+  index: PropertyIndex | null,
+  exclude: readonly string[],
+  ignore: IgnoreMatcher
+): number | null {
+  if (index === null) return null;
+  const matched =
+    member.value === undefined
+      ? index.pathsWithKey(member.key)
+      : index.pathsMatching(member.key, member.value);
+  const excluded = new Set(exclude.map(canonicalPath));
+  const distinct = new Set<string>();
+  for (const path of matched) {
+    const key = canonicalPath(path);
+    if (excluded.has(key) || ignore.matches(path)) continue;
+    distinct.add(key);
+  }
+  return distinct.size;
+}
 
 /**
  * One row per stored member, in definition order.
@@ -81,16 +145,35 @@ export type MemberRow = PathMemberRow | TagMemberRow;
  * `status: "present"` — never `matches-nothing`, which would put a permanent
  * and false "needs attention" on every space holding a tag. The settings tab
  * omits it (see `TagMemberRow.matchCount`); the contents dialog supplies it.
+ *
+ * `propertyCount` is optional on the same terms and is called once per
+ * property row. It returns null for "unavailable", and omitting it is the same
+ * answer.
+ *
+ * The branches below narrow `m` in turn and the last one reads `m.path`, so
+ * a fifth member kind fails to compile here, as it does in `membership.ts`.
+ * Do not add a catch-all branch ahead of it.
  */
 export function memberRows(
   space: SpaceDefinition,
   exists: (path: string) => boolean,
-  matchCount?: (tag: string) => number
+  matchCount?: (tag: string) => number,
+  propertyCount?: (member: PropertyMember) => number | null
 ): MemberRow[] {
   return space.members.flatMap((m): MemberRow[] => {
-    // A property member carries no path and has no row type yet. Task 8 adds
-    // `PropertyMemberRow` and replaces this skip.
-    if (m.kind === "property") return [];
+    if (m.kind === "property") {
+      const count = propertyCount === undefined ? null : propertyCount(m);
+      return [
+        {
+          kind: "property",
+          key: m.key,
+          ...(m.value === undefined ? {} : { value: m.value }),
+          label: m.value === undefined ? m.key : `${m.key}: ${m.value}`,
+          status: count === 0 ? "matches-nothing" : "present",
+          matchCount: count,
+        },
+      ];
+    }
     if (m.kind === "tag") {
       const count = matchCount === undefined ? null : matchCount(m.tag);
       return [
@@ -195,6 +278,21 @@ export function withoutMember(members: readonly MemberEntry[], path: string): Me
  */
 export function withoutTagMember(members: readonly MemberEntry[], tag: string): MemberEntry[] {
   return members.filter((m) => m.kind !== "tag" || m.tag !== tag);
+}
+
+/**
+ * The members that remain after removing the stored property member whose
+ * `memberIdentity` is `identity`.
+ *
+ * By identity rather than by spelling: `a: b` and a key literally named
+ * `a=b` are different members. Only property members are compared, so a file,
+ * folder or tag member always survives, whatever it is spelled like.
+ */
+export function withoutPropertyMember(
+  members: readonly MemberEntry[],
+  identity: string
+): MemberEntry[] {
+  return members.filter((m) => m.kind !== "property" || memberIdentity(m) !== identity);
 }
 
 /**

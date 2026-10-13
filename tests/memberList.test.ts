@@ -39,6 +39,7 @@ const noTags = (): number => 0;
  */
 const pathRow = (r: MemberRow): PathMemberRow => {
   if (r.kind === "tag") throw new Error(`expected a path row, got #${r.tag}`);
+  if (r.kind === "property") throw new Error(`expected a path row, got property ${r.label}`);
   return r;
 };
 

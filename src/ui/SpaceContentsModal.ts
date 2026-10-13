@@ -5,10 +5,16 @@ import {
   exclusionRows,
   memberRows,
   withoutMember,
+  propertyMemberCount,
+  withoutPropertyMember,
   withoutTagMember,
   type PathMemberRow,
+  type PropertyMemberRow,
   type TagMemberRow,
 } from "./memberList";
+import { memberIdentity } from "../definitions/schema";
+import { compileIgnore } from "../visibility/glob";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { normalizeTag } from "../visibility/tagMatch";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -58,6 +64,19 @@ function tagRowDescription(row: TagMemberRow): string {
   return `Tag. ${row.matchCount} ${notes}, nested tags included.`;
 }
 
+/**
+ * What a property row says about its reach.
+ *
+ * Three cases, as for a tag row: an unavailable count (null) says less, never
+ * "no notes", because a cold metadata cache is not an empty vault.
+ */
+function propertyRowDescription(row: PropertyMemberRow): string {
+  if (row.matchCount === null) return "Property.";
+  if (row.status === "matches-nothing") return "Property. No notes match right now.";
+  const notes = row.matchCount === 1 ? "note" : "notes";
+  return `Property. ${row.matchCount} ${notes}.`;
+}
+
 export class SpaceContentsModal extends Modal {
   /**
    * The live tag suggester, retained for the same reason
@@ -88,7 +107,15 @@ export class SpaceContentsModal extends Modal {
      * in force is replaced under this dialog, which re-renders after every
      * write.
      */
-    private tagIndex: () => TagIndex
+    private tagIndex: () => TagIndex,
+    /**
+     * The property index to draw, reached rather than built: the ready one,
+     * the last ready one while the cache is cold, and null only when none was
+     * ever ready. Null is what makes a property row's count unavailable.
+     * Optional so a caller with no property members to draw can omit it, which
+     * reads as unavailable.
+     */
+    private propertyIndex: () => PropertyIndex | null = () => null
   ) {
     super(app);
   }
@@ -139,7 +166,16 @@ export class SpaceContentsModal extends Modal {
     const exists = (path: string): boolean =>
       this.app.vault.getAbstractFileByPath(path) !== null;
 
-    const rows = memberRows(space, exists, matchCount);
+    // Taken once per render, like the tag index above, and only asked of when
+    // a property row is counted.
+    const ignore = compileIgnore(this.defs.get().settings.globalIgnore);
+    let properties: PropertyIndex | null | undefined;
+    const propertyCount = (m: Parameters<typeof propertyMemberCount>[0]): number | null => {
+      properties = properties === undefined ? this.propertyIndex() : properties;
+      return propertyMemberCount(m, properties, space.exclude ?? [], ignore);
+    };
+
+    const rows = memberRows(space, exists, matchCount, propertyCount);
 
     // Above the list, so it is still reachable on a space with no members:
     // that is the space most in need of one.
@@ -150,6 +186,7 @@ export class SpaceContentsModal extends Modal {
     } else {
       for (const row of rows) {
         if (row.kind === "tag") this.renderTagRow(contentEl, space, row);
+        else if (row.kind === "property") this.renderPropertyRow(contentEl, space, row);
         else this.renderMemberRow(contentEl, space, row);
       }
     }
@@ -311,6 +348,37 @@ export class SpaceContentsModal extends Modal {
             void this.write((target) => {
               target.members = withoutTagMember(target.members, row.tag);
             }, `could not remove #${row.tag}`);
+          })
+      );
+    setting.settingEl.addClass("spaces-member-row");
+  }
+
+  /**
+   * A property member's row, drawn as the key or `key: value` and removed by
+   * its identity, which is how two spellings of one member are told apart from
+   * two members. It names no path, so it is never dimmed as missing.
+   */
+  private renderPropertyRow(
+    containerEl: HTMLElement,
+    space: SpaceDefinition,
+    row: PropertyMemberRow
+  ): void {
+    const identity = memberIdentity(
+      row.value === undefined
+        ? { kind: "property", key: row.key }
+        : { kind: "property", key: row.key, value: row.value }
+    );
+    const setting = new Setting(containerEl)
+      .setName(row.label)
+      .setDesc(propertyRowDescription(row))
+      .addButton((b) =>
+        b
+          .setButtonText("Remove")
+          .setTooltip(`Remove ${row.label} from ${space.name}`)
+          .onClick(() => {
+            void this.write((target) => {
+              target.members = withoutPropertyMember(target.members, identity);
+            }, `could not remove ${row.label}`);
           })
       );
     setting.settingEl.addClass("spaces-member-row");
