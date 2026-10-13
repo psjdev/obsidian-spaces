@@ -51,7 +51,7 @@ import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
-import type { PropertySnapshot } from "../visibility/PropertyIndex";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { MemberEntry } from "../types";
 import {
   equalsMember,
@@ -149,13 +149,22 @@ export interface CreateSpacePanelDeps {
    */
   tagIndex: () => TagIndex;
   /**
-   * The property snapshot, reached rather than built, for the reason
-   * `tagIndex` is. A function because a snapshot is replaced when a note's
-   * metadata changes. The Properties body reads it for keys and values, and
-   * `unavailable` means the vault is still being read, never that it holds no
-   * properties.
+   * The property index the tree and the summary row are drawn from, reached
+   * rather than built, for the reason `tagIndex` is. A function because the
+   * index is replaced when a note's metadata changes.
+   *
+   * It must be the DRAWN index (`drawnPropertyIndex`), which keeps the last
+   * ready one while the cache is cold, and not the raw snapshot: the summary
+   * row beneath the body is counted from the drawn index, so a body reading the
+   * raw snapshot would drop its rows to "Loading" while the summary still
+   * counted from the old picture. Asking it is also what records the last
+   * ready index, so the picker is its own populator in a vault with no
+   * property member.
+   *
+   * `null` means no ready index has ever existed, a genuine first start, and
+   * is drawn as "still reading", never as "no properties".
    */
-  properties: () => PropertySnapshot;
+  properties: () => PropertyIndex | null;
   /**
    * Asks to be told when the property snapshot has been replaced, and returns
    * the way to stop. The panel subscribes while its picker window is open and
@@ -263,11 +272,12 @@ const PLACEHOLDER_PATHS = [
 const isOverflowRow = (row: PickerRow<string>): row is OverflowRow => row.kind === "overflow";
 
 /**
- * What differs between the two picker bodies, handed to `renderTreeRow`.
+ * What differs between the two TREE bodies (Vault and Tags), handed to
+ * `renderTreeRow`. The Properties body draws its own rows and has no adapter.
  *
  * Everything not on this list is the same for both and lives in the renderer,
  * which is the point: a row-level fix is made once. Each member is here
- * because the two bodies genuinely disagree about it.
+ * because the two tree bodies genuinely disagree about it.
  *
  * Each adapter closes over what its own draw built (the covering set, the tag
  * counts, the query). It also reaches panel state that outlives a draw:
@@ -445,7 +455,7 @@ export class CreateSpacePanel {
    *
    * One set would collide on any tag that shares a spelling with a folder, and
    * would make a switch to Tags and back collapse whatever the user had opened
-   * in the other body. The two bodies are one picker to look at and two
+   * in the other body. The bodies are one picker to look at and
    * independent things to have browsed into.
    */
   private expandedTags = new Set<string>();
@@ -1127,7 +1137,7 @@ export class CreateSpacePanel {
       // around them. The role belongs HERE rather than on the box: ARIA
       // requires treeitems to be owned by the tree, and with an unroled div in
       // between assistive tech reported a tree of zero items and a pile of
-      // orphaned rows. Both bodies are trees now, but they differ on
+      // orphaned rows. The Vault and Tags bodies are trees, and the Properties body is a list; they differ on
       // `aria-multiselectable` and on the label, so each body sets both on every
       // draw rather than leaving a stale one behind after a switch. The empty
       // message is NOT a child of this box: it is drawn as its sibling inside the
@@ -1204,9 +1214,9 @@ export class CreateSpacePanel {
   }
 
   /**
-   * Draws whichever body the two buttons above the window ask for, in place.
+   * Draws whichever body the buttons above the window ask for, in place.
    *
-   * The sole redraw entry for both bodies. Separate from `renderInner()`
+   * The sole redraw entry for all three bodies. Separate from `renderInner()`
    * because filtering, expanding and picking must not rebuild the whole panel:
    * a full re-render would drop focus out of the filter field on every
    * keystroke.
@@ -1423,8 +1433,8 @@ export class CreateSpacePanel {
   }
 
   /**
-   * Draws one body's rows into `host`. The adapter is the only difference
-   * between the two bodies.
+   * Draws one tree body's rows into `host` (Vault or Tags, not Properties).
+   * The adapter is the only difference between those two bodies.
    *
    * Everything a row is lives here once: the overflow row, the mark classes,
    * the ARIA state, the caret, the keyboard split and the redraw after a pick,
@@ -1597,11 +1607,11 @@ export class CreateSpacePanel {
   }
 
   /**
-   * One of the two buttons that choose what the window below them shows.
+   * One of the buttons that choose what the window below them shows.
    *
    * They are new furniture in a pane that was kept bare on purpose, and that
    * is the point: a corner icon and a typed sigil both ask the user to already
-   * know the other body is there. Two labelled buttons say it.
+   * know the other bodies are there. Labelled buttons say it.
    *
    * `aria-pressed` rather than a radio group or a tablist: the pair beside
    * them, Curated and Folder pinned, is already a pressed-button pair in this
@@ -1751,9 +1761,9 @@ export class CreateSpacePanel {
   /**
    * The row pinned under the window's list: what this space holds so far.
    *
-   * It is what makes the two bodies one picker. A tag chosen in Tags mode has
-   * no row to mark in the tree, and a note chosen in the tree has none in the
-   * tag list, so without this the window could only ever report half of what
+   * It is what makes the bodies one picker. A tag chosen in Tags mode has
+   * no row to mark in the tree, a note chosen in the tree has none in the
+   * tag list, and a property has no row in either, so without this the window could only ever report half of what
    * was picked. Counting both in one line also keeps it to one line, which is
    * what the row of chips above the window failed at.
    *
@@ -1874,14 +1884,13 @@ export class CreateSpacePanel {
     host.replaceChildren();
     const message = (text: string): void => this.setEmptyMessage(host, text);
 
-    const snapshot = this.deps.properties();
-    if (snapshot.status === "unavailable") {
-      // Still reading, not empty: the cache is cold, and a vault with no
-      // properties is a different sentence.
+    const index = this.deps.properties();
+    if (index === null) {
+      // Still reading, not empty: nothing has been ready yet, and a vault with
+      // no properties is a different sentence.
       message("Loading this vault's properties…");
       return;
     }
-    const index = snapshot.index;
     const keys = pickableKeys(index.listKeys(), this.itemFilter);
     if (keys.length === 0) {
       message(
@@ -1984,6 +1993,9 @@ export class CreateSpacePanel {
         btn.className = "spaces-create-property-value";
         btn.dataset.control = `select:${valueId}`;
         btn.setAttribute("aria-pressed", String(heldValue));
+        // The value alone is ambiguous once two keys share one such as done,
+        // so the name carries its key.
+        btn.setAttribute("aria-label", `${key} equals ${valueLabel(v.value)}`);
         if (heldValue) btn.title = "Already selected";
         const label = doc.win.createSpan();
         label.className = "spaces-create-tree-name";
@@ -2010,7 +2022,7 @@ export class CreateSpacePanel {
    *
    * It holds all of them, with the ones this space already has marked — the
    * same job the item tree does for notes and folders, which is what makes the
-   * two buttons above the window mean the same kind of thing. An empty filter
+   * buttons above the window mean the same kind of thing. An empty filter
    * box is the whole tree, collapsed; text narrows it.
    *
    * **A tree, where this used to be a flat list of 50.** Obsidian's tags nest
@@ -2036,7 +2048,8 @@ export class CreateSpacePanel {
    * and a tree already has one that the rows' indentation is drawing. Ranking
    * inside a tree would either reorder siblings under their parent for reasons
    * the indentation cannot show, or be computed and then thrown away. One
-   * filter rule now serves both bodies, which is also what the one filter box
+   * filter rule now serves the Vault and Tags bodies, and the Properties body
+   * reads the same box against key names, which is also what the one filter box
    * above them implies.
    *
    * Each row reports how many notes its tag currently brings in, which is what

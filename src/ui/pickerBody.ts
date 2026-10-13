@@ -2,15 +2,15 @@
  * Which body the create panel's explorer window draws, and what the row
  * pinned under it says about the result.
  *
- * The window shows one of two things and the two buttons above it choose
- * which. Both bodies do the same job: show everything the vault holds of that
+ * The window shows one of three things (notes and folders, tags,
+ * properties) and the buttons above it choose which. All the bodies do the same job: show everything the vault holds of that
  * kind, mark what this space has already taken, and narrow to whatever the
- * filter box says. That symmetry is the design — two buttons that mean the
+ * filter box says. That symmetry is the design — buttons that mean the
  * same kind of thing — so the rule here is small on purpose, and the summary
  * row is what makes a choice made in one body still visible from the other.
  *
  * The row leads with the deduplicated number of notes the selection comes to,
- * then names the folders and tags that selected them, because a folder and a
+ * then names the folders, tags and properties that selected them, because a folder and a
  * tag are selectors: counting the members alone under-reports a selection of
  * two tags by however many notes carry them. Taking the union is
  * `buildPreview`'s job; saying it is this file's.
@@ -40,13 +40,15 @@ export interface PickedCounts {
   notes: number;
   folders: number;
   tags: number;
+  properties: number;
 }
 
 /** The counts behind a curated space's current members. */
 export function countPicked(items: readonly MemberEntry[]): PickedCounts {
-  const counts: PickedCounts = { notes: 0, folders: 0, tags: 0 };
+  const counts: PickedCounts = { notes: 0, folders: 0, tags: 0, properties: 0 };
   for (const item of items) {
     if (item.kind === "tag") counts.tags += 1;
+    else if (item.kind === "property") counts.properties += 1;
     else if (item.kind === "folder") counts.folders += 1;
     else counts.notes += 1;
   }
@@ -71,8 +73,8 @@ export function countPicked(items: readonly MemberEntry[]): PickedCounts {
  * paths, and a subfolder is not a note.
  *
  * `picked.notes` only decides whether anything was chosen at all; the figure
- * printed is `notes`. `folders` and `tags` are the number of members picked, not the number of
- * folders or tags in the union. They name the selectors, so a person can see
+ * printed is `notes`. `folders`, `tags` and `properties` are the number of members picked, not the
+ * number of folders, tags or properties in the union. They name the selectors, so a person can see
  * what to unpick to change the total.
  *
  * Any selection comes to some number of notes, including none, so the notes
@@ -99,9 +101,10 @@ export function pickedSummary(picked: PickedCounts, notes: number): string {
   };
   add(picked.folders, "folder", "folders");
   add(picked.tags, "tag", "tags");
+  add(picked.properties, "property", "properties");
   // The members picked, not `notes`: a note picked by hand that has since left
   // the vault resolves to no notes, and that is still a selection.
-  if (picked.notes + picked.folders + picked.tags === 0) return "Nothing selected";
+  if (picked.notes + picked.folders + picked.tags + picked.properties === 0) return "Nothing selected";
   return [tagCountLabel(notes), ...selectors].join(" • ");
 }
 

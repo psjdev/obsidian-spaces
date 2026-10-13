@@ -63,7 +63,7 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
       kindOf: (path) => VAULT[path] ?? null,
     },
     tags: { knownTags: () => [...VAULT_TAGS] },
-    properties: () => ({ status: "unavailable" }),
+    properties: () => null,
     subscribePropertyRefresh: () => () => undefined,
     tagIndex: () => {
       reached += 1;

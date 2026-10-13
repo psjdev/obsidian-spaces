@@ -4,7 +4,16 @@ import { byKey, makeHarness, panelEl, resetPanelDom, type Harness } from "./help
 import { noticeLog } from "./helpers/obsidian-stub";
 import { validateDefinitions } from "../src/definitions/schema";
 import { isPickableKey, holdsProperty } from "../src/ui/propertyRows";
-import { createPropertyIndex, type PropertyIndex } from "../src/visibility/PropertyIndex";
+import {
+  createPropertyIndex,
+  type PropertyIndex,
+  type PropertySnapshot,
+} from "../src/visibility/PropertyIndex";
+import { SpaceController } from "../src/controller/SpaceController";
+import { DefinitionStore } from "../src/definitions/DefinitionStore";
+import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
+import { buildFakeVault } from "./helpers/fakeVault";
+import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { VAULT_COALESCE_WINDOW_MS, createVaultChangeCoalescer } from "../src/lifecycle/eventCoalescer";
 import {
   PropertyRefreshHub,
@@ -352,7 +361,7 @@ function counting(index: PropertyIndex): { index: PropertyIndex; asked: string[]
   };
 }
 
-const ready = (index: PropertyIndex) => () => ({ status: "ready" as const, index });
+const ready = (index: PropertyIndex) => (): PropertyIndex => index;
 
 function openProperties(over: Parameters<typeof makeHarness>[0] = {}): Harness {
   const h = makeHarness(over);
@@ -432,6 +441,19 @@ describe("which keys the properties body offers", () => {
     expect(isPickableKey("tag")).toBe(false);
   });
 
+  it("never offers tags or tag in any case, because Obsidian reads them all as the alias", () => {
+    const index = indexOf({ "a.md": { Tags: ["t"], TAG: "t", Tag: "t", status: "x" } });
+    openProperties({ properties: ready(index) });
+    expect(offered()).toEqual(["status"]);
+  });
+
+  it("lists keys in alphabet order, not code-unit order", () => {
+    const index = indexOf({ "a.md": { zeta: 1, Beta: 2, alpha: 3, Alpha: 4 } });
+    openProperties({ properties: ready(index) });
+    // Code-unit order would put both capitals first: Alpha, Beta, alpha, zeta.
+    expect(offered()).toEqual(["Alpha", "alpha", "Beta", "zeta"]);
+  });
+
   it("narrows by key name only", () => {
     const index = indexOf({ "a.md": { status: "start", due: "x", owner: "stan" } });
     openProperties({ properties: ready(index) });
@@ -498,6 +520,17 @@ describe("expanding and selecting are separate actions", () => {
     expect(await storedMembers(h)).toEqual([{ kind: "property", key: "x", value: "" }]);
   });
 
+  it("a value row names its key, so two keys sharing a value are told apart", () => {
+    const index = indexOf({ "a.md": { status: "done", phase: "done" } });
+    openProperties({ properties: ready(index) });
+    expandBtn("status").click();
+    expandBtn("phase").click();
+    expect(valueBtns().map((b) => b.getAttribute("aria-label")).sort()).toEqual([
+      "phase equals done",
+      "status equals done",
+    ]);
+  });
+
   it("a value with a slash is one row", () => {
     const index = indexOf({ "a.md": { path: "Work/Notes" }, "b.md": { path: "a/b/c" } });
     openProperties({ properties: ready(index) });
@@ -537,8 +570,8 @@ describe("a member already held", () => {
 });
 
 describe("what the body says while it has no rows", () => {
-  it("says properties are loading, not absent, while the snapshot is unavailable", () => {
-    openProperties({ properties: () => ({ status: "unavailable" }) });
+  it("says properties are loading, not absent, while no index has been ready", () => {
+    openProperties({ properties: () => null });
     expect(emptyMessage()).toBe("Loading this vault's properties…");
     expect(keyRows()).toHaveLength(0);
   });
@@ -553,7 +586,7 @@ describe("the counts on picker rows", () => {
   it("are the index's own bucket counts, with nothing taken off", () => {
     const index = indexOf({
       "a.md": { status: "active" },
-      "Ignored/b.md": { status: "active" },
+      "b.md": { status: "active" },
       "c.md": { status: "done" },
     });
     openProperties({ properties: ready(index) });
@@ -561,6 +594,58 @@ describe("the counts on picker rows", () => {
     expandBtn("status").click();
     expect(valueBtn("active").textContent).toContain("2 notes");
     expect(valueBtn("done").textContent).toContain("1 note");
+  });
+});
+
+describe("the picker reads the drawn index, the same picture as the summary row", () => {
+  const index = indexOf({ "a.md": { status: "active" } });
+
+  /** A REAL controller behind the accessor the plugin hands the panel. */
+  function controllerAnswering(initial: PropertySnapshot) {
+    const defs = new DefinitionStore({ read: async () => undefined, write: async () => undefined });
+    const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    runtime.load();
+    let answer = initial;
+    const controller = new SpaceController(
+      defs,
+      runtime,
+      buildFakeVault({}),
+      { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => answer
+    );
+    return { controller, set: (s: PropertySnapshot) => void (answer = s) };
+  }
+
+  function openOver(controller: SpaceController): Array<() => void> {
+    const callbacks: Array<() => void> = [];
+    openProperties({
+      properties: () => controller.drawnPropertyIndex(),
+      subscribePropertyRefresh: (cb) => {
+        callbacks.push(cb);
+        return () => undefined;
+      },
+    });
+    return callbacks;
+  }
+
+  it("keeps its rows when the cache goes cold after a ready answer", () => {
+    const { controller, set } = controllerAnswering({ status: "ready", index });
+    const callbacks = openOver(controller);
+    expect(offered()).toEqual(["status"]);
+    set({ status: "unavailable" }); // a metadata change replaced the snapshot with a cold one
+    callbacks[0]();
+    expect(offered()).toEqual(["status"]);
+    expect(emptyMessage()).toBe("");
+  });
+
+  it("says loading on a genuine first start, and fills in when the first answer arrives", () => {
+    const { controller, set } = controllerAnswering({ status: "unavailable" });
+    const callbacks = openOver(controller);
+    expect(emptyMessage()).toBe("Loading this vault's properties…");
+    set({ status: "ready", index });
+    callbacks[0]();
+    expect(offered()).toEqual(["status"]);
   });
 });
 
@@ -658,12 +743,10 @@ describe("the picker owns a metadata subscription", () => {
 
   it("redraws the key list when told the snapshot changed", () => {
     const s = source();
-    let snapshot: ReturnType<ReturnType<typeof ready>> | { status: "unavailable" } = {
-      status: "unavailable",
-    };
+    let snapshot: PropertyIndex | null = null;
     openProperties({ properties: () => snapshot, subscribePropertyRefresh: s.subscribe });
     expect(keyRows()).toHaveLength(0);
-    snapshot = { status: "ready", index: indexOf({ "a.md": { status: "x" } }) };
+    snapshot = indexOf({ "a.md": { status: "x" } });
     s.callbacks[0]();
     expect(offered()).toEqual(["status"]);
   });
@@ -686,7 +769,7 @@ describe("the picker owns a metadata subscription", () => {
     openProperties({
       properties: () => {
         asks += 1;
-        return { status: "ready", index };
+        return index;
       },
       subscribePropertyRefresh: s.subscribe,
     });
