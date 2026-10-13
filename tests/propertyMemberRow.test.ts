@@ -61,6 +61,19 @@ describe("a property member's row", () => {
     );
   });
 
+  it("names the empty-string member rather than drawing a bare trailing colon", () => {
+    // The picker's "Empty string" row is the one thing that can store this,
+    // and a space can hold it beside the existence member of the same key.
+    // `status: ` with nothing after the colon cannot be told from a drawing
+    // bug, and the Remove tooltip and the failure notice read this same label.
+    expect(rowFor({ kind: "property", key: "status", value: "" }).label).toBe(
+      "status: Empty string"
+    );
+    expect(rowFor({ kind: "property", key: "status", value: "   " }).label).toBe(
+      "status: Empty string"
+    );
+  });
+
   it("is never missing, because it names no path", () => {
     expect("missing" in rowFor({ kind: "property", key: "due" })).toBe(false);
     expect(rowFor({ kind: "property", key: "due" }).status).not.toBe("missing");

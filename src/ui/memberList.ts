@@ -17,10 +17,11 @@ import type { TagIndex } from "../visibility/TagIndex";
 import { resolveMembers } from "../controller/resolveMembers";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { memberIdentity } from "../definitions/schema";
-import type { MemberEntry, MemberKind, SpaceDefinition } from "../types";
+import type { MemberEntry, MemberKind, PropertyMember, SpaceDefinition } from "../types";
+import { valueLabel } from "./propertyRows";
 
 /** A stored property member, as `memberRows` hands it to a counter. */
-export type PropertyMember = Extract<MemberEntry, { kind: "property" }>;
+export type { PropertyMember };
 
 type MemberStatus =
   /** Resolves to a real vault object and is the reason it is in the space. */
@@ -93,6 +94,9 @@ export interface PropertyMemberRow {
 
 export type MemberRow = PathMemberRow | TagMemberRow | PropertyMemberRow;
 
+/** A property member never reads the tag index, so the resolver gets an empty one. */
+const NO_TAGS: TagIndex = { pathsMatching: () => [] };
+
 /**
  * How many notes a property member contributes to a space.
  *
@@ -132,9 +136,6 @@ export function propertyMemberCount(
   if (index === null) return null;
   return resolveMembers({ ...space, members: [member] }, NO_TAGS, index).length;
 }
-
-// A property member never reads the tag index, so the resolver gets an empty one.
-const NO_TAGS: TagIndex = { pathsMatching: () => [] };
 
 /**
  * One row per stored member, in definition order.
@@ -181,7 +182,14 @@ export function memberRows(
           kind: "property",
           key: m.key,
           ...(m.value === undefined ? {} : { value: m.value }),
-          label: m.value === undefined ? m.key : `${m.key}: ${m.value}`,
+          // Through `valueLabel`, which is why that function exists: a member
+          // stored with the empty string — the picker's "Empty string" row is
+          // the one thing that can make one — drew `status: ` with nothing
+          // after the colon, next to the existence member `status`, and the
+          // same for a value that is only blanks. The picker already named
+          // them; the row, the Remove tooltip and the failure notice all read
+          // this label, so naming them once here covers all three.
+          label: m.value === undefined ? m.key : `${m.key}: ${valueLabel(m.value)}`,
           status: count === 0 ? "matches-nothing" : "present",
           matchCount: count,
         },

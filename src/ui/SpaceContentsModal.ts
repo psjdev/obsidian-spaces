@@ -215,7 +215,7 @@ export class SpaceContentsModal extends Modal {
     containerEl.createEl("p", {
       text:
         "This space is empty. Right-click a note or folder in the explorer and " +
-        "choose “Add to space”, or add a tag above.",
+        "choose “Add to space”, or add a tag or a property above.",
     });
   }
 
@@ -589,8 +589,12 @@ export class SpaceContentsModal extends Modal {
       return;
     }
     if (read.outcome === "spaced") {
+      // SAYS WHAT THE CHECK KNOWS, which is that this exact spelling is in no
+      // note. It used to say no property in the vault ends in a blank at all,
+      // which is a wider claim than `knownKeys.has(key)` tested: another
+      // padded key may well exist.
       new Notice(
-        "Spaces: no property in the vault is spelled with spaces at the ends. Remove them."
+        "Spaces: no property in this vault is spelled that way. Remove the spaces at the ends."
       );
       return;
     }
