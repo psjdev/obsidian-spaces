@@ -126,16 +126,16 @@ To drop a single note without dropping the tag, right-click it inside the space 
 
 ## Properties
 
-A curated space can hold a property as well as notes and folders. Add `due` to collect every note whose frontmatter has that property, or `status: active` to collect every note where `status` is set to `active`.
+A curated space can hold a property as well as notes and folders. Add the property `due` to collect every note whose frontmatter has it, or add `status` with the value `active` to collect only the notes where `status` is set to `active`.
 
 To add one:
 
-- In the creation form, switch the picker from **Vault** to **Properties** and click **Has property** or one of a property's values.
-- On an existing space, open Settings → Spaces, click **Contents…** beside the space, and fill in **Add a property**.
+- In the creation form, switch the picker from **Vault** to **Properties**. Click **Has property** beside a property to collect every note that has it, or open the property and click one of its values.
+- On an existing space, open Settings → Spaces, click **Contents…** beside the space, and fill in the property under **Add a property**, with a value if you want one.
 
-Values match without regard to capitals or surrounding spaces, so a note with `status: Active` is collected by `status: active`. The property name has to match exactly: `Status` and `status` are different properties. A list property is collected by any of its plain entries, so a note with `topics: [atlas, billing]` is collected by `topics: atlas`. A property with no value still counts as having the property.
+Values match without regard to capitals or surrounding spaces, so a note with `status: Active` is collected by the value `active`. The property name has to match exactly: `Status` and `status` are different properties. A list property is collected by any of the values in the list, so a note with `topics: [atlas, billing]` is collected by the value `atlas`. A property with no value still counts as having the property.
 
-A note joins the space when it gains a matching property and leaves when it no longer matches. Properties mix freely with notes, folders and tags in one space. For tags, use [Tags](#tags), which also finds tags written in a note's text.
+A note joins the space when it gains a matching property and leaves when it no longer matches. Properties mix freely with notes, folders and tags in one space. Tags are not available as a property. Use [Tags](#tags) instead, which also finds tags written in a note's text.
 
 To drop a single note without dropping the property, right-click it inside the space and choose `Remove from <space name>`. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
 
