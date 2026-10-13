@@ -84,6 +84,51 @@ describe("frontmatterFromHead", () => {
     expect(frontmatterFromHead("---\nk: v\n", true)).toEqual({ kind: "none" });
   });
 
+  it("calls an incomplete head with NO open block none, not truncated", () => {
+    // The fix for the jam that could never finish. `exists: false` means two
+    // things; appending a closing delimiter asks Obsidian which one, and only
+    // an OPEN block is worth reading more of.
+    expect(frontmatterFromHead("just a note, going on and on", false)).toEqual({ kind: "none" });
+    // A `---` line in the BODY does not open a block, so it must not grow
+    // either. This is the shape the reviewer's 300 KB probe caught.
+    expect(frontmatterFromHead("intro\n\n---\n\nmore text", false)).toEqual({ kind: "none" });
+    // Neither does a first line that is `---` with a trailing space, nor a
+    // leading blank line. Both are `exists: false` on the whole file too.
+    expect(frontmatterFromHead("--- \nk: v\nmore text", false)).toEqual({ kind: "none" });
+    expect(frontmatterFromHead("\n---\nk: v\nmore text", false)).toEqual({ kind: "none" });
+  });
+
+  it("asks the question in CRLF too", () => {
+    expect(frontmatterFromHead("---\r\nk: v\r\nmore text", false)).toEqual({ kind: "truncated" });
+  });
+
+  it("asks the question AFTER the byte-order mark is gone", () => {
+    // A BOM makes `exists: false` on its own, so a BOM-prefixed open block
+    // would read as "no block here" if the probe ran over the raw head.
+    expect(frontmatterFromHead("﻿---\nk: v\nmore text", false)).toEqual({ kind: "truncated" });
+  });
+});
+
+describe("the stub agrees with the real Obsidian on the appended delimiter", () => {
+  // Every row is a line of `e2e/wave7-head-vs-cache.mjs` output against
+  // Obsidian 1.13.7. `plain` is `getFrontMatterInfo(head).exists` and
+  // `appended` is the same over `head + "\n---\n"`. The production rule is the
+  // pair, so pinning the pair is what keeps the stub honest about it.
+  it.each([
+    ["just a note, going on and on", false, false],
+    ["---\nstatus: open\nmore text", false, true],
+    ["---\nstatus: open\n", false, true],
+    ["intro\n\n---\n\nmore text", false, false],
+    ["---", false, true],
+    ["", false, false],
+    ["--- \nstatus: x\nmore", false, false],
+    ["\n---\nstatus: x\nmore", false, false],
+    ["---\r\nstatus: open\r\nmore", false, true],
+  ])("getFrontMatterInfo(%j) plain/appended", (head, plain, appended) => {
+    expect(getFrontMatterInfo(head).exists).toBe(plain);
+    expect(getFrontMatterInfo(head + "\n---\n").exists).toBe(appended);
+  });
+
   it("strips exactly one byte-order mark", () => {
     expect(frontmatterFromHead("﻿---\nk: v\n---\n", true)).toEqual({
       kind: "frontmatter",
@@ -131,6 +176,33 @@ describe("the widening window", () => {
     const reader = mapReader({ "a.md": "just a note\n" });
     expect(await createFrontmatterSource(reader).read("a.md", 0)).toEqual({ kind: "none" });
     expect(reader.asked).toHaveLength(1);
+  });
+
+  it("does not grow for a LARGE file that has no frontmatter", async () => {
+    // The jam this feature exists for is a pasted log, an export or a dump,
+    // and a file of that shape almost never has frontmatter. Before the
+    // appended-delimiter question it read 16 KB, 64 KB and 256 KB and then
+    // answered "unreadable", which kept its path in `unparsed` and the
+    // snapshot unavailable forever — so the repair could never finish on the
+    // very vault it was written to rescue.
+    const reader = mapReader({ "a.md": "x".repeat(FRONTMATTER_HEAD_CAP_BYTES * 4) });
+    expect(await createFrontmatterSource(reader).read("a.md", 0)).toEqual({ kind: "none" });
+    expect(reader.asked).toEqual([[FRONTMATTER_HEAD_BYTES]]);
+  });
+
+  it("does not grow for a large file whose BODY contains a --- line", async () => {
+    const body = "intro\n\n---\n\n" + "y".repeat(FRONTMATTER_HEAD_CAP_BYTES * 4);
+    const reader = mapReader({ "a.md": body });
+    expect(await createFrontmatterSource(reader).read("a.md", 0)).toEqual({ kind: "none" });
+    expect(reader.asked).toEqual([[FRONTMATTER_HEAD_BYTES]]);
+  });
+
+  it("still grows, and still gives up, for a block that is genuinely open", async () => {
+    // The cap keeps meaning what it meant: we did not see the whole block, so
+    // we do not get to say the file has no properties.
+    const reader = mapReader({ "a.md": "---\nk: v\n" + "z".repeat(FRONTMATTER_HEAD_CAP_BYTES * 4) });
+    expect(await createFrontmatterSource(reader).read("a.md", 0)).toEqual({ kind: "unreadable" });
+    expect(reader.asked).toEqual([[16 * 1024], [64 * 1024], [256 * 1024]]);
   });
 });
 

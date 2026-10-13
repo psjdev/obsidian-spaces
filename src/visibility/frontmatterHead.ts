@@ -85,6 +85,10 @@ export const FRONTMATTER_HEAD_BYTES = 16 * 1024;
  * happily pulls the 33 MB file into memory to look for a delimiter that may
  * not be there. Past the cap the file is `"unreadable"`, not `"none"`: we did
  * not look at the whole block, so we do not get to say it has no properties.
+ *
+ * Only a file whose block is genuinely OPEN at 256 KB ever reaches this.
+ * `CLOSING_DELIMITER` answers a file with no frontmatter in the first window,
+ * so size alone no longer sends anything here.
  */
 export const FRONTMATTER_HEAD_CAP_BYTES = 256 * 1024;
 
@@ -100,18 +104,68 @@ function stripBom(text: string): string {
 }
 
 /**
+ * A closing delimiter, appended to an INCOMPLETE head to ask Obsidian whether
+ * that head has an open block.
+ *
+ * `getFrontMatterInfo` answers `exists: false` for two different things — *no
+ * opening delimiter at all* and *the block has not closed yet* — and a reader
+ * that cannot tell them apart has to grow its window for both. For a note with
+ * no frontmatter that is larger than the cap, growing ends at `"unreadable"`,
+ * which keeps the path in `unparsed` and the snapshot `unavailable` for the
+ * rest of the session. That is the HEADLINE case, not an edge: the file that
+ * jams Obsidian's parse queue is a pasted log, an export or a dump, and a file
+ * of that shape almost never carries frontmatter.
+ *
+ * Telling the two apart by looking for `---` ourselves would be a second,
+ * divergent copy of Obsidian's delimiter rule — and the BOM measurement in the
+ * divergence list above already disproved it as a three-byte question. So
+ * Obsidian is asked instead: append a closing delimiter and call it again. If
+ * a block appears, the head had an OPEN one and really is truncated, so grow.
+ * If it still does not, there was never an opening delimiter and the file has
+ * no frontmatter, in ONE read, whatever its size.
+ *
+ * MEASURED against a real Obsidian 1.13.7 rather than reasoned about, by
+ * `e2e/wave7-head-vs-cache.mjs` beside the design notes. The readings:
+ *
+ *     head                            plain    + "\n---\n"   verdict
+ *     "just a note, going on"         false    false         none
+ *     "---\nstatus: open\nmore"       false    TRUE          truncated
+ *     "---\nstatus: open\n"           false    TRUE          truncated
+ *     "intro\n\n---\n\nmore text"     false    false         none
+ *     "--- \nstatus: x\nmore"         false    false         none
+ *     "\n---\nstatus: x\nmore"        false    false         none
+ *     "---\r\nstatus: open\r\nmore"   false    TRUE          truncated
+ *     ""                              false    false         none
+ *
+ * The same probe ran the whole widening window over a planted vault and
+ * compared every answer against `metadataCache.getFileCache().frontmatter` for
+ * the same file.
+ *
+ * The one reading that would be wrong on its own is a head of exactly `---`,
+ * which the appended delimiter turns into an empty block (`exists: true`).
+ * It is unreachable: a file that short is `complete`, and a complete head is
+ * answered without this question ever being asked.
+ */
+const CLOSING_DELIMITER = "\n---\n";
+
+/**
  * What the head of a file says, through Obsidian's own two functions.
  *
- * `complete` is whether `head` is the WHOLE file. It is the only thing that
- * separates "this file has no frontmatter" from "the block has not closed
- * yet": an unterminated block reads as `exists: false`, measured, so without
- * knowing whether more bytes exist the two are indistinguishable and we would
- * report "none" for a file whose properties are 20 KB in.
+ * `complete` is whether `head` is the WHOLE file. A complete head needs no
+ * second question: `exists: false` over an entire file means the file has no
+ * frontmatter. An INCOMPLETE head is the ambiguous one, and `CLOSING_DELIMITER`
+ * above is how Obsidian is asked which of the two things it is.
  */
 export function frontmatterFromHead(head: string, complete: boolean): HeadVerdict {
   const text = stripBom(head);
   const info = getFrontMatterInfo(text);
-  if (!info.exists) return complete ? { kind: "none" } : { kind: "truncated" };
+  if (!info.exists) {
+    if (complete) return { kind: "none" };
+    // There may be more file. Grow ONLY if a block is open in what we have.
+    return getFrontMatterInfo(text + CLOSING_DELIMITER).exists
+      ? { kind: "truncated" }
+      : { kind: "none" };
+  }
   let doc: unknown;
   try {
     doc = parseYaml(info.frontmatter);
@@ -157,8 +211,14 @@ export interface FrontmatterSource {
  *
  * Three reads at worst, and the first one answers for every file anyone has
  * ever written. Growing is driven by `"truncated"`, which can only be returned
- * when the read filled the window — so a file SHORTER than the window is
- * answered in one read whatever it contains.
+ * when the read filled the window AND a frontmatter block is open inside it —
+ * so a file shorter than the window, and a file of any size with no opening
+ * delimiter, are both answered in ONE read.
+ *
+ * That second half is what makes the repair able to FINISH. The file that jams
+ * the parse queue is large and has no frontmatter; before `CLOSING_DELIMITER`
+ * it cost 336 KB of reading and then `"unreadable"`, which kept its path in
+ * `unparsed` and the snapshot `unavailable` for good.
  *
  * Encoding: the bytes are decoded as UTF-8 and a multibyte character may be
  * split at the window boundary. Harmless, because nothing past the closing
