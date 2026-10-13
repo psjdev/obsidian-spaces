@@ -405,8 +405,12 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     plugin.settle();
     expect(asks).toBe(1);
     expect(plugin.recomputes).toBe(1);
-    // Unavailable is not empty: the space keeps nothing here, and the
-    // controller holds its previous answer rather than publishing this one.
+    // The MIRROR resolves nothing from an unavailable snapshot. It has no
+    // `SpaceController` — `refresh` here is a hand-written reduction of
+    // `membersForSnapshot` — so nothing in this file holds a previous answer
+    // or decides whether to publish one. That "unavailable is not empty" rule
+    // is the controller's, and `coldMetadataCache.test.ts` is where it is
+    // pinned; this asserts only what the mirror returns.
     expect(plugin.members).toEqual([]);
     expect(plugin.counts.listings).toBe(1);
     // 500 reads: the walk reads up to the unparsed file and stops there. Two

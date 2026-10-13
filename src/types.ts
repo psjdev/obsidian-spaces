@@ -414,12 +414,12 @@ export interface SpacesApi {
    * - A path under a member folder answers true, unless the space's
    *   `exclude` names it, in which case it answers false — which is what
    *   the space shows.
-   * - **A note the space holds only through a TAG member answers false**,
-   *   even though the space visibly contains it. Which notes a tag reaches
-   *   is computed against Obsidian's metadata cache, which this surface
-   *   does not read: answering would make a `data.json` projection depend
-   *   on live vault state, and a stale true is worse than a documented
-   *   false.
+   * - **A note the space holds only through a TAG or PROPERTY member
+   *   answers false**, even though the space visibly contains it. Which
+   *   notes a tag or a frontmatter property reaches is computed against
+   *   Obsidian's metadata cache, which this surface does not read:
+   *   answering would make a `data.json` projection depend on live vault
+   *   state, and a stale true is worse than a documented false.
    *
    * A consumer that needs what the space currently SHOWS wants the
    * visibility snapshot, not this.
@@ -431,10 +431,11 @@ export interface SpacesApi {
    * never stored — so a descendant of a member folder is a member without
    * appearing here. Empty for *All* and for an unknown id.
    *
-   * TAG members are omitted entirely. A tag names no path, so it has nothing
-   * to contribute to a list of paths, and the notes it reaches are not
-   * stored anywhere to be listed. A space whose members are all tags returns
-   * an empty array, which is not the same as a space with no members.
+   * TAG and PROPERTY members are omitted entirely. Neither names a path, so
+   * neither has anything to contribute to a list of paths, and the notes
+   * they reach are not stored anywhere to be listed. A space whose members
+   * are all tags or all properties returns an empty array, which is not the
+   * same as a space with no members.
    */
   memberPaths(spaceId?: string): string[];
   /**

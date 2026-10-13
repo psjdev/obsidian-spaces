@@ -28,8 +28,9 @@ import type { DefinitionStore } from "../definitions/DefinitionStore";
 /**
  * Takes `paths` out of `spaceId`, one way or the other: a path a stored
  * member names is removed as a member; a path no stored member names (it is
- * in the space because a tag member matched it, or because a member folder
- * covers it) becomes an entry in that space's `exclude` list instead.
+ * in the space because a tag or property member matched it, or because a
+ * member folder covers it) becomes an entry in that space's `exclude` list
+ * instead.
  *
  * Exact paths only, in the member case. The inheritance means a folder
  * member confers membership on everything under it WITHOUT storing an entry

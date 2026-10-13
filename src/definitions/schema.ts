@@ -81,7 +81,12 @@ export function isSafeVaultPath(p: unknown): p is string {
  * Property members are keyed by this where members are de-duplicated (the
  * loader below and `pathRepair`). File, folder and tag members keep the keys
  * those two places already use; this function's file, folder and tag cases
- * are for the picker, member list and contents dialog to adopt.
+ * are for the picker, member list and contents dialog to adopt. NOTE THE ONE
+ * WAY THEY DIFFER before adopting it for a dedupe: the loader's file and
+ * folder key is `"p:" + path`, which is not namespaced by kind, so it
+ * collapses a file and a folder member at the same path into one; this
+ * separates them, and `tests/propertyMember.test.ts` pins that separation.
+ * Swapping one for the other changes what survives a write.
  *
  * OPAQUE. It holds arbitrary vault text, so it is never interpolated into a
  * CSS selector or markup; rows carry it in a dataset value or a Map.

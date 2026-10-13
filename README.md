@@ -133,7 +133,7 @@ To add one:
 - In the creation form, switch the picker from **Vault** to **Properties**. Click **Has property** beside a property to collect every note that has it, or open the property and click one of its values.
 - On an existing space, open Settings → Spaces, click **Contents…** beside the space, and fill in the property under **Add a property**, with a value if you want one.
 
-Values match without regard to capitals or surrounding spaces, so a note with `status: Active` is collected by the value `active`. The property name has to match exactly: `Status` and `status` are different properties. A list property is collected by any of the values in the list, so a note with `topics: [atlas, billing]` is collected by the value `atlas`. A property with no value still counts as having the property.
+Values match without regard to capitals or surrounding spaces, so a note with `status: Active` is collected by the value `active`. The property name has to match exactly: `Status` and `status` are different properties. A list property is collected by any of the plain values in the list, so a note with `topics: [atlas, billing]` is collected by the value `atlas`. A property with no value still counts as having the property.
 
 A note joins the space when it gains a matching property and leaves when it no longer matches. Properties mix freely with notes, folders and tags in one space. Tags are not available as a property. Use [Tags](#tags) instead, which also finds tags written in a note's text.
 

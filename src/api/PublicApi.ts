@@ -140,9 +140,10 @@ export class PublicApi {
       const excluded = space.exclude ?? [];
       return !excluded.some((e) => canonicalPath(e) === canonicalPath(path));
     },
-    // Tag members carry no path and are dropped by `pathMembers`. Stated on
-    // the declared surface in `types.ts`, because "the exact stored member
-    // paths" is honest but no longer complete on its own.
+    // Tag and property members carry no path and are dropped by
+    // `pathMembers`. Stated on the declared surface in `types.ts`, because
+    // "the exact stored member paths" is honest but no longer complete on
+    // its own.
     memberPaths: (spaceId) => {
       const space = spaceId === undefined ? this.activeSpace() : this.spaceById(spaceId);
       return space ? pathMembers(space).map((m) => m.path) : [];
