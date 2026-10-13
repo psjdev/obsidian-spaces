@@ -169,24 +169,28 @@ export class SpaceContentsModal extends Modal {
     const exists = (path: string): boolean =>
       this.app.vault.getAbstractFileByPath(path) !== null;
 
-    // Taken once per render, like the tag index above, and only asked of when
-    // a property row is counted.
+    // Taken AT MOST once per render, like the tag index above, and only when
+    // something actually asks for it: a property row being counted, or the
+    // adder's key field being touched. NOTHING below this line may ask
+    // unconditionally. The index is lazy and its first ask IS a walk of every
+    // note's frontmatter, so a folder, path or tag space in a vault with no
+    // property member must be able to open this dialog and pay nothing.
+    // Taking it once rather than once per asker is what makes every count on
+    // screen describe one picture of the vault.
     let properties: PropertyIndex | null | undefined;
-    const propertyCount = (m: Parameters<typeof propertyMemberCount>[0]): number | null => {
-      properties = properties === undefined ? this.propertyIndex() : properties;
-      return propertyMemberCount(m, properties, space);
+    const propertyIndexOnce = (): PropertyIndex | null => {
+      if (properties === undefined) properties = this.propertyIndex();
+      return properties;
     };
+    const propertyCount = (m: Parameters<typeof propertyMemberCount>[0]): number | null =>
+      propertyMemberCount(m, propertyIndexOnce(), space);
 
     const rows = memberRows(space, exists, matchCount, propertyCount);
 
     // Above the list, so it is still reachable on a space with no members:
     // that is the space most in need of one.
     this.renderTagAdder(contentEl, space);
-    this.renderPropertyAdder(
-      contentEl,
-      space,
-      properties === undefined ? this.propertyIndex() : properties
-    );
+    this.renderPropertyAdder(contentEl, space, propertyIndexOnce);
 
     if (rows.length === 0) {
       this.renderEmpty(contentEl);
@@ -291,30 +295,56 @@ export class SpaceContentsModal extends Modal {
    * `datalist`; typing a key the vault does not hold yet is allowed, as for
    * tags.
    *
-   * `index` null is the only case that says the properties are still loading.
-   * An index with no keys draws no suggestions and says nothing, because the
-   * vault having no properties is not the same as not knowing yet.
+   * THE SUGGESTIONS ARE FILLED ON FIRST TOUCH OF THE KEY FIELD, not at
+   * render. Filling them at render asked for the property index on every
+   * open, which is a full frontmatter walk of the vault — paid by a folder,
+   * path or tag space that holds no property member at all, which is the one
+   * case the budget says costs nothing. The gate is the user engaging the
+   * control, NOT the space holding a property member: a space with none is
+   * exactly the space whose adder is most needed.
+   *
+   * Focus AND input, because a key can arrive by typing into a field the
+   * pointer never focused (a paste into an already-focused field after the
+   * dialog re-rendered), and because the browser only consults a `datalist`
+   * when the field is engaged. Either way the list is in place before a
+   * suggestion could be shown.
+   *
+   * A null index is the only case that says the properties are still loading,
+   * and it can only be known once asked, so that sentence is added on first
+   * touch rather than drawn with the field. An index with no keys draws no
+   * suggestions and says nothing, because the vault having no properties is
+   * not the same as not knowing yet.
    */
   private renderPropertyAdder(
     containerEl: HTMLElement,
     space: SpaceDefinition,
-    index: PropertyIndex | null
+    takeIndex: () => PropertyIndex | null
   ): void {
-    const setting = new Setting(containerEl)
-      .setName("Add a property")
-      .setDesc(
-        (index === null ? "Suggestions appear once the vault's properties have loaded. " : "") +
-          "Type a property to add every note that has it. Add a value to add only " +
-          "the notes where the property equals it."
-      );
+    const instruction =
+      "Type a property to add every note that has it. Add a value to add only " +
+      "the notes where the property equals it.";
+    const setting = new Setting(containerEl).setName("Add a property").setDesc(instruction);
 
     const listId = `spaces-property-keys-${++propertyListSeq}`;
     const list = setting.controlEl.createEl("datalist", { attr: { id: listId } });
-    if (index !== null) {
+    // Once per render. `takeIndex` is the render's own memo, so a dialog whose
+    // rows already counted against the index fills from that same picture and
+    // walks nothing more; a re-render after a write asks afresh.
+    let filled = false;
+    const fillSuggestions = (): void => {
+      if (filled) return;
+      filled = true;
+      const index = takeIndex();
+      if (index === null) {
+        setting.setDesc(
+          "Suggestions appear once the vault's properties have loaded. " + instruction
+        );
+        return;
+      }
       for (const { key } of pickableKeys(index.listKeys(), "")) {
         list.createEl("option", { attr: { value: key } });
       }
-    }
+    };
 
     let keyEl!: HTMLInputElement;
     let valueEl!: HTMLInputElement;
@@ -322,6 +352,8 @@ export class SpaceContentsModal extends Modal {
       t.setPlaceholder("Property");
       t.inputEl.setAttribute("aria-label", `Property to add to ${space.name}`);
       t.inputEl.setAttribute("list", listId);
+      t.inputEl.addEventListener("focus", fillSuggestions);
+      t.inputEl.addEventListener("input", fillSuggestions);
       keyEl = t.inputEl;
     });
     setting.addText((t) => {
