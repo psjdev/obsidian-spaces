@@ -2022,9 +2022,16 @@ export class CreateSpacePanel {
    * user just clicked, or the one the keyboard is on, and the browser keeps a
    * focused control in view — but a redraw raised by the vault changing can
    * land while it is not. So when the first pass does not find it, the window
-   * is repainted around it and it is looked for again. Focus is never dropped
-   * to `<body>` on a redraw; the one place it can leave a row is a SCROLL that
-   * takes the row off the list, and `onPickerScroll` says what happens there.
+   * is moved to it and it is looked for again.
+   *
+   * THE THIRD CASE IS A CONTROL THAT NO LONGER EXISTS, which is the one this
+   * method used to answer by returning silently and leaving focus on `<body>`:
+   * `renderPickerBody` had already destroyed the row, and a key or value can
+   * genuinely stop existing between two draws when the last note holding it is
+   * deleted or edited during a sync. It falls back to the picker window, the
+   * same place `onPickerScroll` uses and the same place `showFault` focuses,
+   * so a keyboard user is left in the panel rather than at the top of the
+   * document. Focus does not land on `<body>` in any of the three.
    */
   private redrawProperties(focusControl?: string): void {
     const host = this.treeEl;
@@ -2040,31 +2047,55 @@ export class CreateSpacePanel {
     if (this.focusControl(host, control)) return;
     // Not drawn by the window the scroller asked for. Move the window to it
     // rather than leaving a keyboard user holding nothing: `scrollIntoView`
-    // below then takes the list to where the row now is.
+    // inside `focusControl` then takes the list to where the row now is.
     this.propertyPaint?.(control);
-    this.focusControl(host, control);
+    if (this.focusControl(host, control)) return;
+    // It is not in the list at all any more.
+    this.focusPickerWindow(host);
+  }
+
+  /**
+   * Focus of last resort: the picker window itself.
+   *
+   * It is focusable for exactly this kind of reason — `showFault` marks it and
+   * focuses it — so sequential Tab continues from the list rather than from
+   * the top of the document. `preventScroll`, because every caller reaches
+   * here after the row that was focused has gone, and scrolling the pane to
+   * the box the user is already looking at is movement with nothing behind it.
+   */
+  private focusPickerWindow(host: HTMLElement): void {
+    const windowEl = host.closest<HTMLElement>(".spaces-create-tree");
+    windowEl?.focus({ preventScroll: true });
+  }
+
+  /** The named control, if this draw built it. */
+  private findControl(host: HTMLElement, control: string): HTMLElement | null {
+    // Compared as values, not through a selector: the control names embed
+    // vault text, which must never be interpolated into one.
+    for (const el of Array.from(host.querySelectorAll<HTMLElement>("[data-control]"))) {
+      if (el.dataset.control === control) return el;
+    }
+    return null;
   }
 
   /**
    * Focuses the named control if this draw built it, and says whether it did.
    */
   private focusControl(host: HTMLElement, control: string): boolean {
-    // Compared as values, not through a selector: the control names embed
-    // vault text, which must never be interpolated into one.
-    for (const el of Array.from(host.querySelectorAll<HTMLElement>("[data-control]"))) {
-      if (el.dataset.control === control) {
-        // `preventScroll`, then a scroll of our own. A plain `focus()` scrolls
-        // EVERY ancestor scroller, and on a vault with enough keys to overflow
-        // the list that moves rows under the pointer between one click and the
-        // next. `block: "nearest"` is a no-op while the control is already in
-        // view, so the list moves only when the control would otherwise be off
-        // it, which is what `renderItemBody` already does with the same call.
-        el.focus({ preventScroll: true });
-        el.scrollIntoView({ block: "nearest" });
-        return true;
-      }
-    }
-    return false;
+    const el = this.findControl(host, control);
+    if (el === null) return false;
+    // `preventScroll`, then a scroll of our own. A plain `focus()` scrolls
+    // EVERY ancestor scroller, and on a vault with enough keys to overflow
+    // the list that moves rows under the pointer between one click and the
+    // next. `block: "nearest"` is a no-op while the control is already in
+    // view, so the list moves only when the control would otherwise be off
+    // it, which is what `renderItemBody` already does with the same call.
+    //
+    // NOT for a restore during a scroll: that one must not move the list at
+    // all. `onPickerScroll` focuses without this.
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: "nearest" });
+    return true;
   }
 
   /**
@@ -2427,8 +2458,20 @@ export class CreateSpacePanel {
      * scrolling changes which rows are wanted, never what they are.
      * `anchor` names a control that must be built whatever the scroller says,
      * which is how focus survives a redraw.
+     *
+     * EVERY PAINT THAT CHANGES THE WINDOW DESTROYS EVERY DRAWN ROW, including
+     * the rows the new window still contains, because it replaces the host's
+     * children wholesale. Whatever had focus inside it does not survive;
+     * `onPickerScroll` and `redrawProperties` each put focus back, by their own
+     * rule. A paint that does not move the window returns before touching
+     * anything, which is what makes that cheap to detect.
+     *
+     * `measure` is for the draw that follows a plan rebuild, which is the only
+     * one that re-reads the row pitch. A scroll repaint must not: `repitch`
+     * reads `offsetTop`, which forces a synchronous layout, and a scroll
+     * gesture is the one place that is paid dozens of times a second.
      */
-    const paint = (anchor?: string): void => {
+    const paint = (anchor?: string, measure = false): void => {
       const metrics = {
         ...this.pickerViewport(host),
         count: plan.length,
@@ -2451,13 +2494,14 @@ export class CreateSpacePanel {
       if (below > 0) frag.appendChild(spacer(below));
       host.replaceChildren(frag);
       this.propertyRange = range;
+      if (!measure) return;
       this.repitch(host, () => {
         this.propertyRange = null;
         paint(anchor);
       });
     };
     this.propertyPaint = paint;
-    paint();
+    paint(undefined, true);
   }
 
   /**
@@ -2471,6 +2515,14 @@ export class CreateSpacePanel {
    *
    * `deps.pickerViewport` replaces it wholesale, so a test can hand the panel
    * a viewport that jsdom could never produce.
+   *
+   * `closest`, not `parentElement`: a wrapper put between the host and the
+   * scroller would otherwise make this read a height of zero, which the window
+   * calculation reads as "not laid out" and answers by building every row —
+   * windowing silently off, with nothing in the node suite able to see it. The
+   * e2e probe is what would catch that (`B8 it builds only the rows that fit`
+   * fails the moment this returns zero in a real browser), and naming the
+   * scroller rather than counting parents is what keeps it from happening.
    */
   private pickerViewport(host: HTMLElement): {
     scrollTop: number;
@@ -2479,7 +2531,7 @@ export class CreateSpacePanel {
   } {
     const supplied = this.deps.pickerViewport;
     if (supplied !== undefined) return supplied();
-    const scroll = host.parentElement;
+    const scroll = host.closest<HTMLElement>(".spaces-create-tree-scroll");
     return {
       scrollTop: scroll?.scrollTop ?? 0,
       viewportHeight: scroll?.clientHeight ?? 0,
@@ -2501,7 +2553,20 @@ export class CreateSpacePanel {
    * Two rows, not one: the pitch is a row's height PLUS the margin under it,
    * and the distance between two consecutive rows is the only place both are
    * visible. The slice is contiguous, so the first two drawn rows are always
-   * adjacent. jsdom reports zero for both, so nothing here fires in a test.
+   * adjacent.
+   *
+   * UNREACHABLE IN JSDOM, AND SO UNTESTED THERE. `offsetTop` is 0 for every
+   * element, so `pitch <= 0` returns before anything happens, and no test in
+   * the suite can observe the re-entrancy guard, the `propertyRange` reset or
+   * the repaint. That is a property of the thing being measured, not a gap
+   * that can be closed by a better test: this method IS the layout read that
+   * the pure window calculation exists to keep out of itself. What stands in
+   * for a test is the e2e walk, which reads back spacer heights that only
+   * reconcile with the live list if the pitch this produced is right.
+   *
+   * Called from a plan rebuild's own paint and from nowhere else. A scroll
+   * repaint must not call it: a forced synchronous layout dozens of times a
+   * second is the kind of cost windowing was done to remove.
    */
   private repitch(host: HTMLElement, again: () => void): void {
     if (this.repitching) return;
@@ -2527,26 +2592,50 @@ export class CreateSpacePanel {
    * and a list that repaints a second after it is scrolled is worse than one
    * that repaints in the scroll handler.
    *
-   * FOCUS. A control the user has scrolled off the list cannot stay built, so
-   * the browser would drop focus to `<body>` and a keyboard user would lose
-   * the panel entirely. Focus moves to the picker WINDOW instead, which is
-   * focusable for exactly this kind of reason (`showFault` focuses it too), so
-   * the next Tab continues from the list rather than from the top of the
-   * document. A redraw is a different case and keeps the control itself: see
-   * `redrawProperties`.
+   * FOCUS. A repaint replaces every drawn row, so the focused control is
+   * destroyed whether or not the new window still contains it. THE TWO CASES
+   * ARE DIFFERENT AND MUST NOT BE CONFLATED, which is the defect this answers:
+   * handing focus to the container whenever the active element went missing
+   * meant that one wheel notch after any click — a click leaves focus on the
+   * control it hit — collapsed the user's Tab position to the top of the drawn
+   * window, on every scroll that moved the window by a single row.
+   *
+   * So the control is looked for by name in what was just built. Found, it is
+   * focused again and the user has not moved. Genuinely off the list, focus
+   * goes to the picker WINDOW, which is focusable for exactly this reason
+   * (`showFault` focuses it too), so the next Tab continues from the list
+   * rather than from the top of the document, and never from `<body>`.
+   *
+   * NO `scrollIntoView` on the way back, which is why this does not go through
+   * `focusControl`. The window is three rows wider than the viewport at each
+   * edge, so a restored control may legitimately be sitting just off screen in
+   * the overscan — and scrolling it into view would drag the list back against
+   * the gesture that is still in progress. The same call is also what made the
+   * redraw's restore undo itself: `focusControl`'s `scrollIntoView` fires a
+   * scroll event at the next rendering step, which lands here, and the 4 px of
+   * padding on the scroller is enough to make that repaint a different window.
+   * It now re-focuses the same control instead of dropping it.
    */
   private onPickerScroll(): void {
     const paint = this.propertyPaint;
     const host = this.treeEl;
     if (paint === null || host === null) return;
     const before = this.doc?.activeElement ?? null;
-    const hadFocus = before !== null && host.contains(before);
+    const control =
+      before !== null && host.contains(before) && before.instanceOf(HTMLElement)
+        ? before.dataset.control
+        : undefined;
     paint();
-    if (!hadFocus) return;
-    const after = this.doc?.activeElement ?? null;
-    if (after !== null && host.contains(after)) return;
-    const windowEl = host.parentElement?.parentElement;
-    if (windowEl?.instanceOf(HTMLElement)) windowEl.focus({ preventScroll: true });
+    if (control === undefined) return;
+    // The window did not move, so nothing was rebuilt and the control the user
+    // is on is the one they were on.
+    if (this.doc?.activeElement === before) return;
+    const again = this.findControl(host, control);
+    if (again !== null) {
+      again.focus({ preventScroll: true });
+      return;
+    }
+    this.focusPickerWindow(host);
   }
 
   /**

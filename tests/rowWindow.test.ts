@@ -96,6 +96,43 @@ describe("visibleRange", () => {
   it("draws a short list whole, however it is scrolled", () => {
     expect(visibleRange({ ...PICKER, count: 9 })).toEqual({ first: 0, last: 9 });
   });
+
+  it("draws a list shorter than the overscan whole, without reaching past it", () => {
+    expect(visibleRange({ ...PICKER, count: 5, overscan: 100 })).toEqual({ first: 0, last: 5 });
+  });
+
+  it("handles a fractional row height, which a theme's line box produces", () => {
+    // A row's natural height is a line box plus padding, and it is fractional
+    // at most font sizes: `styles.css` says so where it explains its 3px
+    // margin. The indices it yields are still whole rows.
+    // Overscan off, so the arithmetic rather than the slack is what is read:
+    // the tail of a 24.6px list is rows 192 to 205, and `min(…, count)`
+    // absorbs the float at the end rather than reaching past it.
+    const tall = { ...PICKER, rowHeight: 24.6, scrollTop: 5000, overscan: 0 };
+    expect(visibleRange(tall)).toEqual({ first: 192, last: 206 });
+    const { first, last } = visibleRange({ ...tall, scrollTop: 1000 });
+    expect(Number.isInteger(first) && Number.isInteger(last)).toBe(true);
+  });
+
+  it("floors a fractional count rather than letting it reach the spacers", () => {
+    expect(visibleRange({ ...PICKER, count: 206.5, viewportHeight: 0 })).toEqual({
+      first: 0,
+      last: 206,
+    });
+  });
+
+  it("accounts for every row, so the scrollbar describes the whole list", () => {
+    // The invariant the two spacers rest on: what is above, what is drawn and
+    // what is below add up to the list, at every offset and at every pitch.
+    for (const rowHeight of [25, 24.6, 40]) {
+      for (let top = 0; top <= 206 * rowHeight; top += 211) {
+        const { first, last } = visibleRange({ ...PICKER, rowHeight, scrollTop: top });
+        const above = spacerHeight(first, rowHeight);
+        const below = spacerHeight(206 - last, rowHeight);
+        expect(above + (last - first) * rowHeight + below).toBeCloseTo(206 * rowHeight, 6);
+      }
+    }
+  });
 });
 
 describe("windowCovering", () => {

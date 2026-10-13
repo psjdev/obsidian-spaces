@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { byKey, makeHarness, panelEl, resetPanelDom, type Harness } from "./helpers/createPanel";
+import { byKey, makeHarness, panelEl, resetPanelDom, rows, type Harness } from "./helpers/createPanel";
 import { noticeLog } from "./helpers/obsidian-stub";
 import { validateDefinitions } from "../src/definitions/schema";
 import {
@@ -1155,6 +1155,88 @@ describe("the properties list builds only the rows on screen", () => {
     });
     expect(keyRows()).toHaveLength(8);
     expect(offered()[0]).toBe("k00");
+  });
+
+  it("the spacers are not rows, and say so to assistive tech", () => {
+    openWindowed();
+    scrollTo(400);
+    expect(spacers()).toHaveLength(2);
+    expect(spacers().map((s) => s.getAttribute("role"))).toEqual(["presentation", "presentation"]);
+    expect(spacers().map((s) => s.getAttribute("aria-hidden"))).toEqual(["true", "true"]);
+    // And nothing that counts the list counts them as part of it.
+    expect(spacers().some((s) => s.hasAttribute("aria-posinset"))).toBe(false);
+  });
+
+  it("a scroll that moves the window KEEPS focus on the row it was on", () => {
+    // A repaint replaces every drawn row, including the rows the new window
+    // still contains, so the focused control is destroyed either way. Handing
+    // focus to the container whenever it went missing meant that one wheel
+    // notch after any click — a click leaves focus on the control it hit —
+    // collapsed the user's place to the top of the drawn window.
+    openWindowed();
+    const btn = valueBtns()[2];
+    const control = btn.dataset.control;
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    scrollTo(100); // the window moves from rows 0-7 to rows 2-17
+    expect(propertyRows()[0].getAttribute("aria-posinset")).toBe("3");
+    // A different element, because everything was rebuilt, and the same control.
+    expect(document.activeElement).not.toBe(btn);
+    expect((document.activeElement as HTMLElement).dataset.control).toBe(control);
+    expect(panelEl().querySelector(".spaces-create-tree")!.contains(document.activeElement)).toBe(
+      true
+    );
+  });
+
+  it("a scroll that takes the focused control off the list hands focus to the picker window", () => {
+    openWindowed();
+    const btn = valueBtns()[1];
+    btn.focus();
+    scrollTo(400); // rows 17-27: the control is no longer in the list
+    expect(valueBtns().some((b) => b === btn)).toBe(false);
+    expect(document.activeElement).toBe(panelEl().querySelector(".spaces-create-tree"));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("a redraw whose control has stopped existing keeps focus in the picker", () => {
+    // The third case, and the one that used to return silently: the key or
+    // value a control names can genuinely stop existing between two draws,
+    // when the last note holding it is edited or deleted during a sync. The
+    // window cannot be moved to a row that is not in the plan, so focus goes
+    // where a scroll that loses its control sends it.
+    const callbacks: Array<() => void> = [];
+    let index = indexOf({ "a.md": { status: "active" }, "b.md": { status: "done" } });
+    openProperties({
+      properties: () => index,
+      subscribePropertyRefresh: (onChange) => {
+        callbacks.push(onChange);
+        return () => undefined;
+      },
+    });
+    expandBtn("status").click();
+    const btn = valueBtn("done");
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    // The note holding `done` is edited away, and the picker is told.
+    index = indexOf({ "a.md": { status: "active" }, "b.md": { status: "active" } });
+    callbacks[0]();
+    expect(valueLabels()).toEqual(["active"]);
+    expect(document.activeElement).toBe(panelEl().querySelector(".spaces-create-tree"));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("a scroll after another body has drawn repaints nothing", () => {
+    // The plan belongs to the draw that built it. It is dropped whenever any
+    // body draws, and when the panel is destroyed, so a scroll event arriving
+    // afterwards cannot paint property rows over what is there now.
+    openWindowed();
+    const scroll = panelEl().querySelector(".spaces-create-tree-scroll")!;
+    byKey("body-items").click();
+    const drawn = rows().map((r) => r.dataset.path);
+    expect(drawn.length).toBeGreaterThan(0);
+    scroll.dispatchEvent(new Event("scroll"));
+    expect(rows().map((r) => r.dataset.path)).toEqual(drawn);
+    expect(propertyRows()).toHaveLength(0);
   });
 });
 

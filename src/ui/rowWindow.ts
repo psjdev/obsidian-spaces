@@ -74,10 +74,25 @@ function positive(n: number): boolean {
  * clamps its own `scrollTop`, so an unclamped read would window past the end
  * of the new list and paint nothing where the browser is about to show the
  * tail of it.
+ *
+ * **ROW 0 IS ASSUMED TO START AT SCROLL OFFSET 0, and in the picker it does
+ * not: `.spaces-create-tree-scroll` has 4 px of padding.** So every offset
+ * here is 4 px ahead of the truth, which is a sixth of a row. The overscan
+ * absorbs it — the window is three rows wider than the viewport needs at each
+ * edge — and it is deliberately not corrected for here, because the correction
+ * belongs to whatever measures the scroller, not to arithmetic that knows
+ * nothing about padding. It does mean two calls either side of a 4 px scroll
+ * can return different ranges, so the caller must not assume a repaint is
+ * focus-preserving: see `CreateSpacePanel.onPickerScroll`.
+ *
+ * `count` is floored. Nothing can reach it with a fraction today, since it is
+ * an array length, but `last` and the spacer heights derived from it would go
+ * fractional and a spacer of 4,712.5 px is a scrollbar that lies.
  */
 export function visibleRange(input: RowWindowInput): RowWindow {
-  const { scrollTop, viewportHeight, rowHeight, count } = input;
-  if (!Number.isFinite(count) || count <= 0) return { first: 0, last: 0 };
+  const { scrollTop, viewportHeight, rowHeight } = input;
+  const count = Number.isFinite(input.count) ? Math.floor(input.count) : 0;
+  if (count <= 0) return { first: 0, last: 0 };
   if (!positive(viewportHeight) || !positive(rowHeight)) return { first: 0, last: count };
   const overscan =
     input.overscan === undefined || !Number.isFinite(input.overscan) || input.overscan < 0
@@ -89,6 +104,10 @@ export function visibleRange(input: RowWindowInput): RowWindow {
   );
   const first = Math.max(Math.floor(top / rowHeight) - overscan, 0);
   const last = Math.min(Math.ceil((top + viewportHeight) / rowHeight) + overscan, count);
+  // `last` cannot be below `first` once `top` is clamped, so this is defensive
+  // and nothing reaches it. It is kept because the alternative to an empty
+  // range here is a negative row count in the caller's loop and a negative
+  // spacer, and a future change to the clamp would not announce itself.
   return { first, last: Math.max(last, first) };
 }
 
