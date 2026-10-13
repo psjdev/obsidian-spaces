@@ -1256,6 +1256,34 @@ describe("the picker owns a metadata subscription", () => {
     expect(summary()).toContain("4 notes");
   });
 
+  it("pays no preview on a refresh while nothing picked can be moved by it", () => {
+    // `deps.preview` is the engine resolving the whole selection over the
+    // vault, and this handler runs at notification cadence: about four times a
+    // second through a sync. A selection with no property member in it is not
+    // part of the picture the snapshot changes, so it keeps the figure its
+    // pick computed and the refresh costs nothing.
+    const s = source();
+    let previews = 0;
+    openProperties({
+      properties: ready(indexOf({ "a.md": { status: "x" } })),
+      subscribePropertyRefresh: s.subscribe,
+      preview: () => {
+        previews += 1;
+        return { paths: new Set<string>(), notes: 1 };
+      },
+    });
+    previews = 0;
+    s.callbacks[0]();
+    s.callbacks[0]();
+    expect(previews).toBe(0);
+    // And it is paid again the moment one is picked, and on every refresh
+    // after that, which is the two-numbers-from-one-snapshot rule above.
+    selectBtn("status").click();
+    previews = 0;
+    s.callbacks[0]();
+    expect(previews).toBe(1);
+  });
+
   it("keeps a key open across a refresh", () => {
     const s = source();
     openProperties({

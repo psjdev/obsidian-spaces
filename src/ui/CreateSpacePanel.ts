@@ -1983,16 +1983,26 @@ export class CreateSpacePanel {
    * The snapshot was replaced. Only the Properties body reads it, so any
    * other body has nothing to redraw; the next draw of this one asks again.
    *
-   * The SUMMARY ROW goes with it. Redrawing the body alone left the per-key
-   * counts reading from the new snapshot while the "… N notes" line pinned
-   * under them still showed the figure computed at the last pick: two numbers
-   * on one screen from two different pictures. It costs one `deps.preview`,
-   * which is the same thunk a pick already pays.
+   * The SUMMARY ROW goes with it, FOR A SELECTION THIS SNAPSHOT CAN MOVE.
+   * Redrawing the body alone left the per-key counts reading from the new
+   * snapshot while the "… N notes" line pinned under them still showed the
+   * figure computed at the last pick: two numbers on one screen from two
+   * different pictures. But this handler runs at NOTIFICATION cadence, about
+   * four times a second through a sync, and the summary costs a
+   * `deps.preview`, which is the engine resolving the whole selection over the
+   * vault: a price written for the once-per-pick it used to be paid at.
+   *
+   * A selection holding no property member is not part of the picture this
+   * snapshot changes. Its figure comes from folders and tags, the rows beside
+   * it carry no count drawn from it, and there is nothing for it to disagree
+   * with, so it keeps the figure its pick computed — which is what it did
+   * before — and pays the preview again at the next pick. A selection that
+   * DOES hold one is the case the paragraph above is about, and is redrawn.
    */
   private onPropertiesChanged(): void {
     if (this.el === null || this.treeEl === null) return;
     if (readPickerBody(this.pickerMode, this.state.folderMode) !== "properties") return;
-    this.renderSummary();
+    if (this.pickedMembers().some((m) => m.kind === "property")) this.renderSummary();
     this.redrawProperties();
   }
 
