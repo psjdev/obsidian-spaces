@@ -45,6 +45,10 @@ interface Harness {
   /** How many times a coalesced recompute was requested. */
   requested: () => number;
   fire: () => void;
+  /** A VAULT event, through the plugin's own `onVaultChange`. */
+  fireVault: () => Promise<void>;
+  /** Subscribes to the plugin's REAL hub, as an open picker does. */
+  openPicker: () => () => void;
   /** What the coming flush would do, from the plugin's own `flushState`. */
   pending: () => Promise<{ full: boolean; recompute: boolean; rebuild: boolean }>;
 }
@@ -88,6 +92,11 @@ function harness(active: SpaceDefinition | null): Harness {
     propertyInstalled,
     requested: () => requested,
     fire: () => (plugin as unknown as { onMetadataEvent(): void }).onMetadataEvent(),
+    fireVault: () =>
+      (
+        plugin as unknown as { onVaultChange(fn: () => Promise<unknown>): Promise<void> }
+      ).onVaultChange(async () => undefined),
+    openPicker: () => plugin.subscribePropertyRefresh(() => undefined),
     /** What the coming flush would do, read from the plugin's own state. */
     pending: async () => {
       await new Promise<void>((r) => setTimeout(r, 0));
@@ -116,6 +125,36 @@ describe("what a metadata event asks the flush to do", () => {
       h.fire();
       expect(await h.pending()).toEqual({ full: false, recompute: false, rebuild: false });
     }
+  });
+
+  it("flushes for an open picker alone, and asks that flush for nothing else", async () => {
+    // The THIRD route, which nothing drove against the real method: the two
+    // other harnesses in the suite never subscribe, so `propertyRefresh.size`
+    // was always 0 and `metadataNotifyRoute`'s second argument was never
+    // exercised here. A picker open over a space that watches nothing still
+    // needs the flush, to be told the snapshot was replaced — and the flush
+    // must not re-index the tree or recompute a space that cannot have
+    // changed.
+    const h = harness(PATH_SPACE);
+    const release = h.openPicker();
+    h.fire();
+    expect(h.requested()).toBe(1);
+    expect(await h.pending()).toEqual({ full: false, recompute: false, rebuild: false });
+    release();
+    h.fire();
+    expect(h.requested()).toBe(1);
+  });
+
+  it("does not install a second snapshot over the one the event just installed", async () => {
+    // A vault event, then a metadata event that routes to NOTHING. The event
+    // installs a snapshot either way, so the flush behind the vault event
+    // must not install another: `rebuild` is `full && !fresh`, and the flag
+    // tracks the install rather than the route it took afterwards.
+    const h = harness(PATH_SPACE);
+    await h.fireVault();
+    h.fire();
+    expect(h.propertyInstalled.length).toBe(1);
+    expect(await h.pending()).toEqual({ full: true, recompute: true, rebuild: false });
   });
 });
 

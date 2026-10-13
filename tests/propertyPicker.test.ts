@@ -15,14 +15,14 @@ import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildFakeVault } from "./helpers/fakeVault";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { VAULT_COALESCE_WINDOW_MS, createVaultChangeCoalescer } from "../src/lifecycle/eventCoalescer";
+import { PropertyRefreshHub } from "../src/ui/PropertyRefreshHub";
 import {
-  PropertyRefreshHub,
   RefreshFlushState,
   installThenNotify,
   submitMetadataWork,
   submitVaultWork,
   metadataNotifyRoute,
-} from "../src/visibility/PropertyRefreshHub";
+} from "../src/lifecycle/refreshFlush";
 
 /** Lets the coalescer's promise chain run far enough to schedule its timer. */
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));

@@ -7,14 +7,14 @@ import { holdsPropertyMember, watchesMetadata } from "../src/definitions/members
 import type { SpaceDefinition } from "../src/types";
 import { createLazyPropertySnapshot, createObsidianPropertySnapshot } from "../src/visibility/ObsidianPropertyIndex";
 import { createObsidianVaultIndex } from "../src/visibility/ObsidianVaultIndex";
+import { PropertyRefreshHub } from "../src/ui/PropertyRefreshHub";
 import {
-  PropertyRefreshHub,
   RefreshFlushState,
   metadataNotifyRoute,
   runFlush,
   submitMetadataWork,
   submitVaultWork,
-} from "../src/visibility/PropertyRefreshHub";
+} from "../src/lifecycle/refreshFlush";
 import { createObsidianTagIndex } from "../src/visibility/ObsidianTagIndex";
 import { createLazyTagIndex, createMapTagIndex, type TagIndex } from "../src/visibility/TagIndex";
 import { createPropertyIndex, type PropertySnapshot } from "../src/visibility/PropertyIndex";

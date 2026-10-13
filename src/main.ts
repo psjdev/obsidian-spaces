@@ -29,7 +29,8 @@ import {
   createLazyPropertySnapshot,
   createObsidianPropertySnapshot,
 } from "./visibility/ObsidianPropertyIndex";
-import { PropertyRefreshHub, RefreshFlushState, metadataNotifyRoute, runFlush, submitMetadataWork, submitVaultWork } from "./visibility/PropertyRefreshHub";
+import { PropertyRefreshHub } from "./ui/PropertyRefreshHub";
+import { RefreshFlushState, metadataNotifyRoute, runFlush, submitMetadataWork, submitVaultWork } from "./lifecycle/refreshFlush";
 import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
@@ -474,6 +475,17 @@ export default class SpacesPlugin extends Plugin {
         this.onMetadataEvent();
       })
     );
+    // HERE, not in `startSteps`, for the same reason the listener above is.
+    // Both are field initializers, alive from construction and reachable from
+    // the handler that listener calls, and `startSteps` is allowed to throw —
+    // `start()` catches it and leaves a half-installed plugin running. A
+    // release registered after the throwing step is a release that never
+    // happens, and a pending flush timer would then outlive `onunload`,
+    // holding the plugin instance and firing one O(vault) re-index after
+    // teardown. The coalescing window is a live timer; the hub holds a
+    // closure over any picker still open.
+    this.register(() => this.vaultChanges.cancel());
+    this.register(() => this.propertyRefresh.clear());
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -850,18 +862,14 @@ export default class SpacesPlugin extends Plugin {
     // A note's tags are not vault structure, so no vault event reports them.
     this.registerEvent(this.app.metadataCache.on("changed", () => this.onMetadataEvent()));
 
-    // The coalescing window is a live timer, so it must not outlive the
-    // plugin. `register` runs this on unload with the rest of the teardown.
-    this.register(() => this.vaultChanges.cancel());
-    // The body marker comes off and every API subscriber is dropped.
-    // Through `register` rather than a line in `onunload` for the same reason
-    // the coalescer above uses it — the state is created here, so its release
-    // belongs here.
+    // The coalescer's and the hub's releases are NOT here; they are in
+    // `onload`, beside the listener that can reach them. See the comment
+    // there.
+    //
+    // The body marker comes off and every API subscriber is dropped. Through
+    // `register` rather than a line in `onunload` because the state is created
+    // here, so its release belongs here.
     this.register(() => this.releaseSpaceSurface());
-    // Pickers release their own subscription on close; this covers one still
-    // open when the plugin unloads, so no closure over a torn-down view stays
-    // reachable from a plugin that is gone.
-    this.register(() => this.propertyRefresh.clear());
 
     // The right-click half of the gesture. `file-menu` is public and
     // carries the folder the user acted on — the empty explorer body reports
@@ -1478,10 +1486,13 @@ export default class SpacesPlugin extends Plugin {
    * The space gate (`watchesMetadata`) asks whether a SPACE holds a tag or
    * property member, which is the wrong question while someone is still
    * choosing one: a picker opened in a files-and-folders space would never
-   * refresh, because nothing in the vault watches metadata yet. The panel or
-   * modal that opens the picker owns this subscription and must call the
-   * returned function when it closes; a `register` callback clears any still
-   * held when the plugin unloads.
+   * refresh, because nothing in the vault watches metadata yet. The panel
+   * that opens the picker owns this subscription and must call the returned
+   * function when it closes; a `register` callback clears any still held when
+   * the plugin unloads. `CreateSpacePanel` is the only subscriber: the
+   * contents dialog reads the index through a thunk and redraws from its own
+   * writes, so its counts are a point-in-time reading of the moment it opened
+   * and it is not told when a newer snapshot arrives.
    *
    * It fires when the snapshot has been REPLACED, which happens on a metadata
    * change, on the readiness transition (`resolved`), and on the coalesced
@@ -1490,9 +1501,13 @@ export default class SpacesPlugin extends Plugin {
    * frontmatter, and so the raw snapshot, untouched, though they do change
    * filtered member counts.
    *
-   * Both paths are coalesced, so a burst of file or metadata events notifies
-   * once after the burst, and a subscriber need not debounce. A notification
-   * arrives up to the coalescing window after the event.
+   * Both paths are coalesced, so a subscriber need not debounce: one
+   * notification per coalesced flush, arriving up to the coalescing window
+   * after the event. NOT once per burst, for a burst that does not end. The
+   * coalescer's `VAULT_COALESCE_MAX_WAIT_MS` forces a flush every 250 ms
+   * while events keep arriving, so a sync or a `git pull` notifies about four
+   * times a second for as long as it runs. That cadence is the coalescer's
+   * and belongs there if it ever needs changing.
    */
   subscribePropertyRefresh(onChange: () => void): () => void {
     return this.propertyRefresh.subscribe(onChange);
@@ -1534,9 +1549,15 @@ export default class SpacesPlugin extends Plugin {
    *    not vault structure, so nothing about the tree has changed; and the
    *    ordering hazard runs the other way — `TagIndex.ts` documents that a
    *    FRESH vault read against a STALE tag index is what shows a note the
-   *    vault has and the tags do not. The reverse is benign, because
-   *    `resolveLivePath` simply finds nothing for a path the vault index has
-   *    not seen yet, and the create's own coalesced flush replaces both.
+   *    vault has and the tags do not. The reverse is benign FOR THE TREE,
+   *    because `resolveLivePath` simply finds nothing for a path the vault
+   *    index has not seen yet, and the create's own coalesced flush replaces
+   *    both. The member COUNTS are not insulated by that: `propertyMemberCount`
+   *    and the contents dialog's tag count resolve members with no
+   *    vault-existence filter, so a dialog opened inside this window reports
+   *    one more note than the tree is drawing, until the flush lands. Both
+   *    counts are documented as a point-in-time reading, and the window is
+   *    the coalescing window.
    *
    * 2. REQUEST A RECOMPUTE only when the active space's contents can actually
    *    have changed, which is what `watchesMetadata` has always been for. A
@@ -1554,6 +1575,16 @@ export default class SpacesPlugin extends Plugin {
     if ((this.controller as SpaceController | undefined) === undefined) return;
     this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
     this.controller.setPropertySnapshot(this.newPropertySnapshot());
+    // Beside the install it reports, and ABOVE the routing, because the
+    // install above is unconditional. It used to sit after the routing, below
+    // the `"none"` early return, where it tracked the ROUTE rather than the
+    // install: a burst holding a vault event and a `"none"`-routed metadata
+    // event left the flag clear, and the flush then installed a second
+    // snapshot over one that already postdated every vault event in the
+    // burst. The snapshot is lazy and read from the metadata cache, so one
+    // installed after a vault event arrived is built from state at least as
+    // new; a vault event arriving afterwards clears the flag again.
+    this.flushState.noteSnapshotInstalled();
     // Pickers are NOT told here, and that is deliberate. Every route below is
     // coalesced, and exactly one of them notifies: when the active space
     // watches metadata the shared flush recomputes and notifies, so a direct
@@ -1578,9 +1609,6 @@ export default class SpacesPlugin extends Plugin {
       // second timer.
       void submitMetadataWork((work) => this.vaultChanges.submit(work), this.flushState);
     }
-    // The snapshot installed above postdates every vault event this burst has
-    // seen so far, so a full flush need not install another.
-    this.flushState.noteSnapshotInstalled();
   }
 
   private async cycle(delta: number): Promise<void> {
