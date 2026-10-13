@@ -392,6 +392,13 @@ const valueBtn = (label: string): HTMLElement => {
   if (!b) throw new Error(`no value row ${JSON.stringify(label)}; have ${JSON.stringify(valueLabels())}`);
   return b;
 };
+/** The key's own name cell, which is what a person reading the row clicks. */
+const keyName = (key: string): HTMLElement =>
+  keyRow(key).querySelector<HTMLElement>(".spaces-create-tree-name")!;
+/** The row a value button sits in, including the indent gutter left of it. */
+const valueRow = (label: string): HTMLElement => valueBtn(label).parentElement as HTMLElement;
+const valueName = (label: string): HTMLElement =>
+  valueBtn(label).querySelector<HTMLElement>(".spaces-create-tree-name")!;
 const summary = (): string => panelEl().querySelector(".spaces-create-summary")?.textContent ?? "";
 const emptyMessage = (): string =>
   panelEl().querySelector(".spaces-create-tree-empty")?.textContent ?? "";
@@ -539,24 +546,120 @@ describe("expanding and selecting are separate actions", () => {
   });
 });
 
-describe("a member already held", () => {
-  it("is a no-op that says so, for a key", async () => {
-    const h = openProperties({ properties: ready(indexOf({ "a.md": { status: "x" } })) });
-    selectBtn("status").click();
-    expect(noticeLog).toHaveLength(0);
+/**
+ * The ROW is the target, not one button inside it.
+ *
+ * A picker row advertises a click across its whole width: `cursor: pointer`
+ * and a row-wide hover, both inherited from `.spaces-create-tree-row`. The
+ * key row used to take one only on the "Has property" button at its right
+ * edge, so clicking the key's own NAME did nothing and said nothing, and a
+ * value row left an inert gutter under its indent. The Vault and Tags bodies
+ * have always made the whole row the target; these say the Properties body
+ * does too, with the caret still the one control that opens without choosing.
+ */
+describe("the whole property row is the target", () => {
+  const notes: Notes = {
+    "a.md": { status: "active", due: "2026-01-01" },
+    "b.md": { status: "done" },
+  };
+
+  it("selects the key's existence member when its NAME is clicked", async () => {
+    const h = openProperties({ properties: ready(indexOf(notes)) });
+    keyName("status").click();
     expect(selectBtn("status").getAttribute("aria-pressed")).toBe("true");
-    selectBtn("status").click();
-    expect(noticeLog.map((n) => n.messageEl.textContent)).toEqual(["Spaces: already selected."]);
+    expect(keyRow("status").classList.contains("is-selected")).toBe(true);
     expect(await storedMembers(h)).toEqual([{ kind: "property", key: "status" }]);
   });
 
-  it("is a no-op that says so, for a value", async () => {
+  it("selects it from the row itself, left of every control", async () => {
+    const h = openProperties({ properties: ready(indexOf(notes)) });
+    keyRow("status").click();
+    expect(await storedMembers(h)).toEqual([{ kind: "property", key: "status" }]);
+  });
+
+  it("opens on the caret and selects nothing, opening or closing", () => {
+    openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    expect(valueLabels()).toEqual(["active", "done"]);
+    expect(summary()).toBe("Nothing selected");
+    expect(keyRow("status").classList.contains("is-selected")).toBe(false);
+    expandBtn("status").click();
+    expect(valueBtns()).toHaveLength(0);
+    expect(summary()).toBe("Nothing selected");
+  });
+
+  it("selects a value member from the value row, not only from its button", async () => {
+    const h = openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    valueRow("active").click();
+    expect(await storedMembers(h)).toEqual([
+      { kind: "property", key: "status", value: "active" },
+    ]);
+  });
+
+  it("selects a value member when its NAME is clicked", async () => {
+    const h = openProperties({ properties: ready(indexOf(notes)) });
+    expandBtn("status").click();
+    valueName("done").click();
+    expect(await storedMembers(h)).toEqual([
+      { kind: "property", key: "status", value: "done" },
+    ]);
+  });
+
+  it("holds BOTH when two different keys are picked in one sitting", async () => {
+    const h = openProperties({ properties: ready(indexOf(notes)) });
+    keyName("status").click();
+    keyName("due").click();
+    expect(selectBtn("status").getAttribute("aria-pressed")).toBe("true");
+    expect(selectBtn("due").getAttribute("aria-pressed")).toBe("true");
+    expect(summary()).toContain("2 properties");
+    expect(await storedMembers(h)).toEqual([
+      { kind: "property", key: "status" },
+      { kind: "property", key: "due" },
+    ]);
+  });
+
+  it("holds BOTH when a key and another key's value are picked in one sitting", async () => {
+    const h = openProperties({ properties: ready(indexOf(notes)) });
+    keyName("due").click();
+    expandBtn("status").click();
+    valueRow("done").click();
+    expect(await storedMembers(h)).toEqual([
+      { kind: "property", key: "due" },
+      { kind: "property", key: "status", value: "done" },
+    ]);
+  });
+});
+
+describe("a member already held", () => {
+  it("comes off on a second click, for a key, from either way in", async () => {
     const h = openProperties({ properties: ready(indexOf({ "a.md": { status: "x" } })) });
+    selectBtn("status").click();
+    expect(selectBtn("status").getAttribute("aria-pressed")).toBe("true");
+    selectBtn("status").click();
+    expect(selectBtn("status").getAttribute("aria-pressed")).toBe("false");
+    expect(summary()).toBe("Nothing selected");
+    // The row is a way out as well as a way in, the same as the button.
+    keyName("status").click();
+    expect(selectBtn("status").getAttribute("aria-pressed")).toBe("true");
+    keyRow("status").click();
+    expect(selectBtn("status").getAttribute("aria-pressed")).toBe("false");
+    // Never a notice: a toggle has nothing to report that the row is not
+    // already showing.
+    expect(noticeLog).toHaveLength(0);
+    expect(await storedMembers(h)).toEqual([]);
+  });
+
+  it("comes off on a second click, for a value, leaving the key alone", async () => {
+    const h = openProperties({ properties: ready(indexOf({ "a.md": { status: "x" } })) });
+    selectBtn("status").click();
     expandBtn("status").click();
     valueBtn("x").click();
+    expect(valueBtn("x").getAttribute("aria-pressed")).toBe("true");
     valueBtn("x").click();
-    expect(noticeLog).toHaveLength(1);
-    expect(await storedMembers(h)).toEqual([{ kind: "property", key: "status", value: "x" }]);
+    expect(valueBtn("x").getAttribute("aria-pressed")).toBe("false");
+    expect(noticeLog).toHaveLength(0);
+    expect(await storedMembers(h)).toEqual([{ kind: "property", key: "status" }]);
   });
 
   it("is judged by memberIdentity, so the spelling of a value does not make a second member", () => {

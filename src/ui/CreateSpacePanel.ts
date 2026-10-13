@@ -1859,12 +1859,20 @@ export class CreateSpacePanel {
    * The properties body: every key the vault holds, each openable to its
    * values.
    *
-   * Opening and choosing are different controls on purpose. A key row has a
-   * disclosure button that only expands, and a separate "Has property" button
-   * that only adds the existence member, so a person can look inside a key
-   * without choosing it and choose it without opening it. Neither does the
-   * other's job, which is also what keeps expanding from ever changing
-   * membership.
+   * Opening and choosing are different controls on purpose, and the OPENER is
+   * the caret. A key row's disclosure button only expands, so a person can
+   * look inside a key without choosing it; everywhere else on the row picks
+   * the existence member, and a value row picks its value member anywhere on
+   * itself. That is the Vault and Tags bodies' own contract: the row carries
+   * `cursor: pointer` and a row-wide hover from `.spaces-create-tree-row`, so
+   * a row that took a click on one button inside it was advertising a target
+   * it did not have.
+   *
+   * The "Has property" button stays, as the explicitly labelled control a
+   * screen reader and the keyboard reach, but it is now one way in rather than
+   * the only one. Every control inside a row that means something other than
+   * "pick this row" stops the click from reaching the row, which leaves the
+   * caret as the one thing that can be clicked without choosing.
    *
    * Keys are listed from the index, which is cheap. A key's values are asked
    * for only while that key is open: drawing the body lists NO values, and the
@@ -1941,6 +1949,10 @@ export class CreateSpacePanel {
 
       const el = row(0, heldKey ? "is-selected" : "");
       el.dataset.propertyKey = key;
+      // The whole row, not the button alone: see the docblock above. Bubbled
+      // from the name, the count and the row's own padding; the caret and the
+      // select button stop the event before it gets here.
+      el.addEventListener("click", () => pick(keyMember, `select:${id}`));
 
       const disclose = doc.win.createEl("button");
       disclose.type = "button";
@@ -1949,8 +1961,11 @@ export class CreateSpacePanel {
       disclose.setAttribute("aria-expanded", String(open));
       disclose.setAttribute("aria-label", `${open ? "Hide" : "Show"} values of ${key}`);
       setIcon(disclose, open ? "chevron-down" : "chevron-right");
-      disclose.addEventListener("click", () => {
-        // Browsing only: nothing here touches `state`.
+      disclose.addEventListener("click", (e) => {
+        // Browsing only: nothing here touches `state`. Stopped so the row's
+        // own pick does not run: looking inside a key must never choose it,
+        // and that split is the whole reason this control exists.
+        e.stopPropagation();
         if (open) this.expandedProperties.delete(key);
         else this.expandedProperties.add(key);
         this.redrawProperties(`expand:${id}`);
@@ -1971,7 +1986,12 @@ export class CreateSpacePanel {
       select.setAttribute("aria-label", `Has property ${key}`);
       select.setAttribute("aria-pressed", String(heldKey));
       if (heldKey) select.title = "Already selected";
-      select.addEventListener("click", () => pick(keyMember, `select:${id}`));
+      // Stopped, then picks: without this the row would pick a second time on
+      // the same click and the two would cancel out.
+      select.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pick(keyMember, `select:${id}`);
+      });
       el.appendChild(select);
       host.appendChild(el);
 
@@ -1989,6 +2009,9 @@ export class CreateSpacePanel {
         const valueId = memberIdentity(valueMember);
         const heldValue = holdsProperty(held, valueMember);
         const vr = row(1, heldValue ? "is-selected" : "");
+        // The whole value row, including the indent gutter left of the button,
+        // which was inert while the button was the only target.
+        vr.addEventListener("click", () => pick(valueMember, `select:${valueId}`));
         const btn = doc.win.createEl("button");
         btn.type = "button";
         btn.className = "spaces-create-property-value";
@@ -2004,7 +2027,10 @@ export class CreateSpacePanel {
         label.textContent = valueLabel(v.value);
         btn.appendChild(label);
         btn.appendChild(countSpan(v.count));
-        btn.addEventListener("click", () => pick(valueMember, `select:${valueId}`));
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          pick(valueMember, `select:${valueId}`);
+        });
         vr.appendChild(btn);
         host.appendChild(vr);
       }
