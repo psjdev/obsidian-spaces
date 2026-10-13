@@ -371,8 +371,8 @@ export class SpaceController {
       return root === null ? [] : [{ path: root, kind: "folder" }];
     }
     // Asked ONCE per resolve, and only for a space that holds a property
-    // member: while the cache is cold the accessor rebuilds on every ask, and
-    // a space with no property member must not pay a vault walk for it.
+    // member: the first ask after a metadata event is a frontmatter walk of
+    // the whole vault, and a space with no property member must not pay it.
     // UNAVAILABLE IS NOT EMPTY. `drawnPropertyIndex` falls back to the last
     // READY index, because resolving property members against nothing would
     // blank a property space's rows whenever the cache is cold. EVERYTHING
@@ -381,10 +381,43 @@ export class SpaceController {
     // says instead of missing a cache and emptying the space. Nothing is keyed
     // on the definition for that reason. The property matches themselves may
     // be stale until the parse event that makes the snapshot ready recomputes
-    // the space. With no ready index yet (a first start) the members
-    // contribute nothing and the space fills then.
+    // the space. With no ready index yet this is not reached at all for a
+    // space holding a property member: `stillReading` holds the recompute
+    // back, because publishing members resolved against nothing would publish
+    // "not known yet" as "matches nothing".
     const index = holdsPropertyMember(space) ? this.drawnPropertyIndex() : null;
     return resolveMembers(space, this.tags, index);
+  }
+
+  /**
+   * Whether this space's membership is still unknown rather than empty.
+   *
+   * TWO signals, not one, because they measure different things.
+   * `metadataReady` is the host's: resolved, and the layout ready. Snapshot
+   * readiness is strictly stricter — ONE unparsed file makes the whole
+   * property snapshot unavailable (`ObsidianPropertyIndex.ts` says why), and
+   * that can outlast `resolved`. Reading only the host's signal let a space
+   * pass this gate with no ready index behind it, so `resolveMembers` was
+   * handed `properties = null`, every property member contributed nothing,
+   * and the space published itself EMPTY. `resolveMembers.ts` states the
+   * contract that breaks: null is "not known yet", not "matches nothing", and
+   * a caller publishing the result as a membership must hold its previous
+   * answer instead.
+   *
+   * The property arm asks ONLY for a space that holds a property member, so a
+   * tag space pays nothing for it; and it reads `drawnPropertyIndex`, so it is
+   * false as soon as any index has EVER been ready, which is what keeps a
+   * cold cache mid-session from blanking or re-opening a space that already
+   * has a good answer. Reachable only before the first ready index of a
+   * session, which is why the fall-open below is the right posture for it.
+   *
+   * Asking here costs no extra walk: the accessor answers every ask in a
+   * burst from one build, and `membersForSnapshot` asks the same accessor a
+   * moment later.
+   */
+  private stillReading(space: SpaceDefinition): boolean {
+    if (this.host.metadataReady?.() === false) return true;
+    return holdsPropertyMember(space) && this.drawnPropertyIndex() === null;
   }
 
   /**
@@ -429,13 +462,14 @@ export class SpaceController {
     // while the main thread is busy.
     //
     // Unfiltered rather than the previous snapshot, on purpose. At FIRST
-    // PAINT — the only moment this branch can be taken — there is no previous
-    // snapshot, so holding one degenerates to this anyway for the case that
-    // matters; and showing everything is this plugin's existing, stated
-    // failure posture ("Showing all files"), whereas holding a frozen tree
-    // over a vault that has since changed on disk is wrong in a way the user
-    // cannot see. It is self-correcting: `resolved` fires, main.ts requests a
-    // recompute, and the tree filters.
+    // PAINT — the only moment either arm of `stillReading` can be true —
+    // there is no previous snapshot, so holding one degenerates to this
+    // anyway for the case that matters; and showing everything is this
+    // plugin's existing, stated failure posture ("Showing all files"),
+    // whereas holding a frozen tree over a vault that has since changed on
+    // disk is wrong in a way the user cannot see. It is self-correcting:
+    // `resolved` fires, or the parse that makes the property snapshot ready
+    // does, main.ts requests a recompute, and the tree filters.
     //
     // Gated on `watchesMetadata`, so a folder space and a curated space of
     // paths still filter normally at first paint — neither has anything to
@@ -445,7 +479,8 @@ export class SpaceController {
     // The hazard: a tag space that genuinely matches nothing MUST still
     // render empty. "No matches yet" and "no matches" are different answers,
     // which is why this reads a readiness signal and not the member count.
-    if (watchesMetadata(space) && this.host.metadataReady?.() === false) {
+    // `stillReading` carries both signals and what each one knows.
+    if (watchesMetadata(space) && this.stillReading(space)) {
       this.snapshot = null;
       this.host.apply(null);
       return;

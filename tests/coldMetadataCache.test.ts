@@ -27,6 +27,7 @@ import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildFakeVault } from "./helpers/fakeVault";
 import { createLazyTagIndex } from "../src/visibility/TagIndex";
+import { createPropertyIndex, type PropertySnapshot } from "../src/visibility/PropertyIndex";
 import { tagIndexOf } from "./helpers/tagIndex";
 import { SCHEMA_VERSION, type MemberEntry, type SpaceDefinition } from "../src/types";
 
@@ -42,7 +43,7 @@ type Tags = Map<string, string[]>;
 async function build(
   members: MemberEntry[],
   tags: Tags,
-  opts: { ready: boolean; root?: string }
+  opts: { ready: boolean; root?: string; properties?: PropertySnapshot }
 ) {
   const space: SpaceDefinition = {
     id: "research",
@@ -69,6 +70,10 @@ async function build(
   const apply = vi.fn();
   let ready = opts.ready;
   let builds = 0;
+  // Unavailable unless a case says otherwise, which is what a cache that has
+  // not parsed every file reports.
+  let properties: PropertySnapshot = opts.properties ?? { status: "unavailable" };
+  let propertyAsks = 0;
   const controller = new SpaceController(
     store,
     runtime,
@@ -82,22 +87,36 @@ async function build(
       builds++;
       return tagIndexOf(tags);
     }),
-    () => ({ status: "unavailable" })
+    () => {
+      propertyAsks++;
+      return properties;
+    }
   );
   return {
     controller,
     apply,
     runtime,
     builds: () => builds,
+    propertyAsks: () => propertyAsks,
     resolve: () => {
       ready = true;
+    },
+    setProperties: (next: PropertySnapshot) => {
+      properties = next;
     },
   };
 }
 
 const TAG_MEMBERS: MemberEntry[] = [{ kind: "tag", tag: "project" }];
+const PROPERTY_MEMBERS: MemberEntry[] = [{ kind: "property", key: "status", value: "active" }];
 const COLD: Tags = new Map();
 const WARM: Tags = new Map([["Recipes.md", ["project"]]]);
+
+/** A ready snapshot in which `Recipes.md`, and only it, is `status: active`. */
+const readyProperties = (): PropertySnapshot => ({
+  status: "ready",
+  index: createPropertyIndex([{ path: "Recipes.md", frontmatter: { status: "active" } }], 1),
+});
 
 describe("a tag space at first paint, before the metadata cache has resolved", () => {
   it("renders the unfiltered tree rather than an empty one", async () => {
@@ -146,6 +165,76 @@ describe("the hazard: no matches yet is not no matches", () => {
     expect(snap).not.toBeNull();
     expect(snap!.decisionFor("Recipes.md").visible).toBe(false);
     expect(snap!.decisionFor("Papers/A.md").visible).toBe(false);
+  });
+});
+
+describe("a property space whose snapshot has never been ready", () => {
+  it("falls open rather than publishing itself empty, although the host says ready", async () => {
+    // The two readiness signals are not the same question. `metadataReady` is
+    // resolved-and-laid-out; snapshot readiness is strictly stricter, because
+    // ONE unparsed file makes the whole property snapshot unavailable. Reading
+    // only the host's signal let this space pass the gate, resolve its
+    // property members against `null` and publish itself EMPTY — "not known
+    // yet" rendered as "matches nothing", which is the contract
+    // `resolveMembers` states and its caller was breaking.
+    const { controller, apply } = await build(PROPERTY_MEMBERS, COLD, { ready: true });
+    await controller.switchTo({ kind: "space", id: "research" });
+    expect(controller.currentSnapshot()).toBeNull();
+    expect(apply).toHaveBeenLastCalledWith(null);
+  });
+
+  it("filters as soon as an index is ready", async () => {
+    // Self-correcting, like the tag arm: the parse that makes the snapshot
+    // ready is a metadata event, and main.ts asks for the recompute.
+    const { controller, setProperties } = await build(PROPERTY_MEMBERS, COLD, { ready: true });
+    await controller.switchTo({ kind: "space", id: "research" });
+    expect(controller.currentSnapshot()).toBeNull();
+    setProperties(readyProperties());
+    controller.refresh();
+    const snap = controller.currentSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.decisionFor("Recipes.md").visible).toBe(true);
+    expect(snap!.decisionFor("Papers/A.md").visible).toBe(false);
+  });
+
+  it("renders a property space that genuinely matches nothing as empty", async () => {
+    // The same hazard the tag arm has: a ready index that matches nothing is
+    // an ANSWER, and the space must render empty rather than fall open.
+    const { controller } = await build([{ kind: "property", key: "nobody" }], COLD, {
+      ready: true,
+      properties: readyProperties(),
+    });
+    await controller.switchTo({ kind: "space", id: "research" });
+    const snap = controller.currentSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.decisionFor("Recipes.md").visible).toBe(false);
+    expect(snap!.decisionFor("Papers/A.md").visible).toBe(false);
+  });
+
+  it("holds its last good answer once one index has been ready", async () => {
+    // Only the FIRST ready index of a session is waited for.
+    // `drawnPropertyIndex` keeps it, so a cache going cold again mid-session
+    // must neither blank the space nor re-open the whole tree.
+    const { controller, setProperties } = await build(PROPERTY_MEMBERS, COLD, {
+      ready: true,
+      properties: readyProperties(),
+    });
+    await controller.switchTo({ kind: "space", id: "research" });
+    setProperties({ status: "unavailable" });
+    controller.refresh();
+    const snap = controller.currentSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.decisionFor("Recipes.md").visible).toBe(true);
+  });
+
+  it("costs a tag space nothing", async () => {
+    // The property arm is asked ONLY for a space that holds a property
+    // member, so a tag space never touches the snapshot to answer the gate.
+    // The accessor's first ask is a walk of every note's frontmatter.
+    const { controller, propertyAsks } = await build(TAG_MEMBERS, WARM, { ready: true });
+    await controller.switchTo({ kind: "space", id: "research" });
+    expect(controller.currentSnapshot()).not.toBeNull();
+    expect(propertyAsks()).toBe(0);
   });
 });
 
