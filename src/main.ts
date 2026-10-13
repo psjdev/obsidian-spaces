@@ -1,4 +1,5 @@
 import {
+  FileSystemAdapter,
   FileView,
   Menu,
   Notice,
@@ -27,8 +28,20 @@ import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
 import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
 import {
   createLazyPropertySnapshot,
-  createObsidianPropertySnapshot,
+  snapshotFromWalk,
+  walkPropertyCache,
+  type PropertyWalk,
 } from "./visibility/ObsidianPropertyIndex";
+import {
+  createFrontmatterSource,
+  memoizeFrontmatterSource,
+  type FrontmatterRead,
+  type FrontmatterSource,
+} from "./visibility/frontmatterHead";
+import { createNodeHeadReader } from "./visibility/nodeHeadReader";
+import { mergeRepairedWalk, planRepair } from "./visibility/propertyRepair";
+import { createParseStallWatch, type ParseStallWatch } from "./lifecycle/parseStall";
+import { nativeParseProgress } from "./visibility/nativeParseProgress";
 import { PropertyRefreshHub } from "./ui/PropertyRefreshHub";
 import { RefreshFlushState, metadataNotifyRoute, runFlush, submitMetadataWork, submitVaultWork } from "./lifecycle/refreshFlush";
 import type { PropertySnapshot } from "./visibility/PropertyIndex";
@@ -303,6 +316,42 @@ export default class SpacesPlugin extends Plugin {
   private readonly propertyRefresh = new PropertyRefreshHub();
 
   /**
+   * Watches whether Obsidian is still getting through its parse queue.
+   *
+   * Armed on the first `resolved` and re-armed whenever a property consumer
+   * asks and is told "unavailable". `lifecycle/parseStall.ts` carries the
+   * measurements that rule out every cheaper trigger. Sampling costs one
+   * scalar read and no vault walk, so it is free in the terms
+   * `tests/propertyWorkBudget.test.ts` states the budget in.
+   *
+   * A FIELD INITIALIZER, like the coalescer, so it is alive from construction
+   * and its `cancel` can be registered in `onload` before anything that may
+   * throw.
+   */
+  private readonly parseStall: ParseStallWatch = createParseStallWatch({
+    timer: {
+      set: (fn, ms) => window.setTimeout(fn, ms),
+      clear: (handle) => window.clearTimeout(handle),
+    },
+    progress: () => nativeParseProgress(this.app),
+    // The verdict alone repairs nothing. It makes the NEXT unavailable answer
+    // trigger a repair, and pokes the current one so a user who is already
+    // staring at a fallen-open space does not wait for an event that a jammed
+    // vault will never send.
+    onStalled: () => this.repairPropertiesIfStalled(),
+  });
+
+  /**
+   * Reads a file's frontmatter head off disk, for the files Obsidian has not
+   * parsed. Null until `start()` builds it, which is also what makes the
+   * repair impossible before the vault root is known.
+   */
+  private frontmatter: FrontmatterSource | null = null;
+
+  /** One repair at a time. A second ask while one runs is dropped, not queued. */
+  private repairing = false;
+
+  /**
    * Takes `fileManager.getNewFileParent` back off. Null until `start()`
    * installs it, and null again once teardown has run.
    */
@@ -472,6 +521,12 @@ export default class SpacesPlugin extends Plugin {
         // The one place readiness is ever granted. From here a tag space
         // matching nothing means nothing matches, not that nobody has looked.
         this.metadataResolved = true;
+        // ARMED HERE, and nowhere earlier. `resolved` is the first moment
+        // Obsidian has done any parsing at all, so sampling before it would
+        // read a queue that has not started. It fires once on a jammed vault
+        // and never again — measured, with two negative experiments behind it
+        // — so this is the only arming the common case gets.
+        this.parseStall.arm();
         this.onMetadataEvent();
       })
     );
@@ -486,6 +541,9 @@ export default class SpacesPlugin extends Plugin {
     // closure over any picker still open.
     this.register(() => this.vaultChanges.cancel());
     this.register(() => this.propertyRefresh.clear());
+    // Same reason: a live sampling timer that outlived `onunload` would hold
+    // the plugin instance and go on reading a torn-down app.
+    this.register(() => this.parseStall.cancel());
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -665,6 +723,17 @@ export default class SpacesPlugin extends Plugin {
   }
 
   private startSteps(): void {
+    // The reader for the repair, built once. It needs the vault's real
+    // directory, which only a `FileSystemAdapter` has; on anything else — and
+    // the manifest says `isDesktopOnly`, so there should be nothing else —
+    // this stays null and the repair simply never runs, leaving the feature
+    // exactly where it was before this code existed.
+    const adapter = this.app.vault.adapter;
+    if (adapter instanceof FileSystemAdapter) {
+      this.frontmatter = memoizeFrontmatterSource(
+        createFrontmatterSource(createNodeHeadReader(adapter.getBasePath()))
+      );
+    }
     this.adapter.onHealthChange((healthy) => {
       if (healthy) {
         this.explorerHealthWarned = false;
@@ -1516,10 +1585,134 @@ export default class SpacesPlugin extends Plugin {
   /**
    * A fresh LAZY property snapshot: nothing walks the vault until a property
    * member asks, and a ready answer is kept until the next replacement.
+   *
+   * The walk is kept beside the snapshot it produced, because the repair needs
+   * the entries it already collected as well as the paths it could not read.
+   * Re-walking after the async read instead would merge two different pictures
+   * of the vault.
+   *
+   * THE REPAIR IS DEMAND-DRIVEN, and that is what keeps it free. It is asked
+   * for only from inside this build — which runs only when a property member
+   * or an open picker actually asks a question — so a vault with neither pays
+   * nothing, exactly as budget 2 in `tests/propertyWorkBudget.test.ts` states.
+   * It is also what makes the repair reach a user who switches into a property
+   * space ten minutes into a jammed session, with no extra wiring for it.
    */
   private newPropertySnapshot(): () => PropertySnapshot {
     const generation = ++this.propertyGeneration;
-    return createLazyPropertySnapshot(() => createObsidianPropertySnapshot(this.app, generation));
+    // Kept from the build, so the repair gets the entries this walk already
+    // collected as well as the paths it could not read.
+    let walked: PropertyWalk | null = null;
+    const lazy = createLazyPropertySnapshot(() => {
+      const walk = walkPropertyCache(this.app);
+      walked = walk;
+      return snapshotFromWalk(walk, generation);
+    });
+    // OUTSIDE the memo, deliberately. The memo is what holds a burst to one
+    // walk, and it also means an unavailable answer is handed back without the
+    // build ever running again — so a check placed inside it would fire once
+    // and never again. A jammed vault sends no further metadata events, so
+    // "once" is the difference between a user who selects a property space
+    // before the stall is detected and one who selects it after: without this,
+    // the first is repaired and the second waits forever. The cost on every
+    // other path is two comparisons.
+    return () => {
+      const snapshot = lazy();
+      if (walked !== null && walked.unparsed.length > 0) {
+        // Re-arm even when the stall is not latched yet: the watcher gives up
+        // after two minutes, and this is the signal that somebody still cares.
+        this.parseStall.arm();
+        this.requestPropertyRepair(walked);
+      }
+      return snapshot;
+    };
+  }
+
+  /**
+   * Read the frontmatter of the files Obsidian has not parsed, and install a
+   * complete new snapshot built from the result.
+   *
+   * ## The three things this must not get wrong
+   *
+   * 1. **It must not run on a merely cold cache.** Two guards, one of which
+   *    cannot be wrong. `parseStall.stalled()` is the judgement — see
+   *    `lifecycle/parseStall.ts` for why `resolved` alone was not enough — and
+   *    `planRepair` is the absolute bound: more than 200 unparsed files is not
+   *    a jam and nothing is read.
+   * 2. **It must not tear the snapshot in flight.** A property snapshot build
+   *    is fully synchronous, which is what makes it safe against a metadata
+   *    event or a rename landing mid-walk. This is async, so it computes a
+   *    COMPLETE new walk off to the side and installs it as a constant thunk
+   *    in one assignment. Nothing half-repaired is ever observable, and the
+   *    installed thunk never rebuilds, so it cannot ask for a second repair.
+   * 3. **It must not install over something newer.** `propertyGeneration` is
+   *    stamped by every install; if it moved while we were awaiting, a
+   *    metadata or vault event has superseded this walk and the result is
+   *    dropped. Nothing is lost: the newer accessor is lazy, so the next ask
+   *    rebuilds, finds the holes again and asks for a repair again.
+   */
+  private requestPropertyRepair(walk: PropertyWalk): void {
+    if (!this.parseStall.stalled() || this.repairing) return;
+    const source = this.frontmatter;
+    if (source === null) return;
+    const plan = planRepair(walk.unparsed);
+    // "too-many" and "nothing" both mean: leave the snapshot unavailable and
+    // honest. A vault where thousands of files are unparsed is broken in a way
+    // to report, not to paper over by reading it all off disk.
+    if (plan.kind !== "repair") return;
+    this.repairing = true;
+    void this.runPropertyRepair(walk, plan.paths, source).finally(() => {
+      this.repairing = false;
+    });
+  }
+
+  private async runPropertyRepair(
+    walk: PropertyWalk,
+    paths: readonly string[],
+    source: FrontmatterSource
+  ): Promise<void> {
+    const startedAt = this.propertyGeneration;
+    const repaired = new Map<string, FrontmatterRead>();
+    for (const path of paths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      // Serial, not `Promise.all`. At most 200 files, so the wall-clock saving
+      // is small, and a jam is already a sign of a filesystem or a file that
+      // is misbehaving — 200 concurrent handles into it is not the thing to do
+      // about that.
+      repaired.set(path, await source.read(path, file instanceof TFile ? file.stat.mtime : 0));
+      // Teardown mid-read. Stop before touching a controller that is gone.
+      if (!this.loaded) return;
+    }
+    if (this.propertyGeneration !== startedAt) return;
+    const generation = ++this.propertyGeneration;
+    const snapshot = snapshotFromWalk(mergeRepairedWalk(walk, repaired), generation);
+    // ONE assignment, over a value that is already complete.
+    this.controller.setPropertySnapshot(() => snapshot);
+    this.propertyRefresh.notify();
+    this.controller.refresh();
+  }
+
+  /**
+   * The stall watcher's verdict, applied to whatever is on screen now.
+   *
+   * A jammed vault emits no further metadata events of its own, so without
+   * this the repair would wait for a user keystroke before a space that is
+   * currently showing the whole vault got its contents back.
+   */
+  private repairPropertiesIfStalled(): void {
+    if ((this.controller as SpaceController | undefined) === undefined) return;
+    // Budget 2 stands: a vault with no metadata-driven space and no open
+    // picker pays NOTHING here — and has nothing to repair for anyway, since
+    // nothing is reading properties. A tag-only space passes this gate and
+    // still walks nothing, because the snapshot below is lazy and a recompute
+    // that resolves no property member never asks it.
+    if (!watchesMetadata(this.controller.activeSpace()) && this.propertyRefresh.size === 0) return;
+    // No new accessor: ASKING the one in force is enough, because the retry in
+    // `newPropertySnapshot` sits outside the memo. So this costs no vault walk
+    // of its own — the recompute pays the walk it was always going to pay, and
+    // a memoized unavailable answer pays none at all.
+    this.propertyRefresh.notify();
+    this.controller.refresh();
   }
 
   private async onVaultChange(fn: () => Promise<unknown>): Promise<void> {
