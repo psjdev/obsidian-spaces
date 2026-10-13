@@ -132,11 +132,6 @@ export class SpaceController {
     this.properties = get;
   }
 
-  /** The CURRENT property snapshot, asked of the accessor on each call. */
-  propertySnapshot(): PropertySnapshot {
-    return this.properties();
-  }
-
   /**
    * The property index the tree is drawn from: the ready one when the
    * snapshot is ready, otherwise the last one that WAS ready, and `null` only
@@ -346,6 +341,11 @@ export class SpaceController {
    */
   dispose(): void {
     this.disposed = true;
+    // The kept index is the one piece of state here that is large: a whole
+    // vault's frontmatter keys, and the value buckets of everything anyone
+    // expanded. Nothing asks after this, so holding it would keep megabytes
+    // reachable from a torn-down controller for the rest of the session.
+    this.lastReadyIndex = null;
   }
 
   /**
@@ -454,6 +454,12 @@ export class SpaceController {
   /**
    * The last READY property index this controller saw, used only while the
    * snapshot is unavailable. Never replaced by an unavailable answer.
+   *
+   * Held for the life of the controller, not for the life of the need: it is
+   * not dropped when the last property member is removed, because the next
+   * ready snapshot would replace it anyway and a space can regain one between
+   * two recomputes. `dispose()` releases it, so teardown does not leave a
+   * vault-sized structure reachable.
    */
   private lastReadyIndex: PropertyIndex | null = null;
 

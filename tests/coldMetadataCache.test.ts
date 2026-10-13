@@ -236,6 +236,38 @@ describe("a property space whose snapshot has never been ready", () => {
     expect(controller.currentSnapshot()).not.toBeNull();
     expect(propertyAsks()).toBe(0);
   });
+
+  it("costs a FOLDER space nothing, although it carries a property member", async () => {
+    // A folder space renders from its root and never reads its member list,
+    // so a leftover property member in one must not make it wait for, or pay
+    // for, an index it cannot use. That is the `!hasRoot` half of
+    // `resolvesPropertyMembers`, which nothing else exercises: without it this
+    // space would ask the accessor on every recompute and, worse, be held
+    // behind a snapshot that has never been ready.
+    const { controller, propertyAsks } = await build(PROPERTY_MEMBERS, COLD, {
+      ready: true,
+      root: "Papers",
+    });
+    await controller.switchTo({ kind: "space", id: "research" });
+    const snap = controller.currentSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.decisionFor("Papers/A.md").visible).toBe(true);
+    expect(propertyAsks()).toBe(0);
+  });
+
+  it("releases the index it kept when the controller is disposed", async () => {
+    // The kept index is a whole vault's frontmatter keys plus the buckets of
+    // everything anyone expanded. Teardown must not leave it reachable.
+    const { controller, setProperties } = await build(PROPERTY_MEMBERS, COLD, {
+      ready: true,
+      properties: readyProperties(),
+    });
+    await controller.switchTo({ kind: "space", id: "research" });
+    setProperties({ status: "unavailable" });
+    expect(controller.drawnPropertyIndex()).not.toBeNull();
+    controller.dispose();
+    expect(controller.drawnPropertyIndex()).toBeNull();
+  });
 });
 
 describe("a space the metadata cache cannot affect", () => {
