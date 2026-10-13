@@ -390,6 +390,13 @@ const selectBtn = (key: string): HTMLElement =>
   keyRow(key).querySelector<HTMLElement>(".spaces-create-property-select")!;
 const valueBtns = (): HTMLElement[] =>
   Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-property-value"));
+/** Every row the body DREW, in drawn order: with a window, not every row it planned. */
+const propertyRows = (): HTMLElement[] =>
+  Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-property-row"));
+/** The stand-ins for the rows a window left out, in order: at most one each end. */
+const spacers = (): HTMLElement[] =>
+  Array.from(panelEl().querySelectorAll<HTMLElement>(".spaces-create-tree-spacer"));
+const spacerHeights = (): string[] => spacers().map((s) => s.style.height);
 const labelOf = (b: HTMLElement): string =>
   b.querySelector(".spaces-create-tree-name")?.textContent ?? "";
 const valueLabels = (): string[] => valueBtns().map(labelOf);
@@ -702,25 +709,27 @@ describe("expanding and selecting are separate actions", () => {
     ]);
   });
 
-  it("the disclosure OWNS the rows it reveals, and owns nothing while closed", () => {
-    // `aria-expanded` with no `aria-controls` names a state with no subject:
-    // the value rows are SIBLINGS of their key row, so the indentation that
-    // carries the nesting for the eye carried nothing for anyone else.
+  it("names no rows, and every row says where it sits in the whole list", () => {
+    // THE DISCLOSURE NO LONGER ENUMERATES WHAT IT REVEALS. It used to carry an
+    // `aria-controls` naming the id of every value row it had drawn, which
+    // windowing turns from incomplete into wrong: the list builds about
+    // fourteen rows of a key that may hold four thousand values, so the
+    // enumeration would name a dozen ids and imply that was the lot.
+    // `aria-setsize` and `aria-posinset` on every row say the real length and
+    // the real position instead, which is what a reader counts through, and
+    // `aria-expanded` keeps its meaning from the rows being the control's own
+    // next siblings.
     openProperties({ properties: ready(indexOf({ "a.md": { status: "done" }, "b.md": { status: "live" } })) });
     expect(expandBtn("status").getAttribute("aria-controls")).toBeNull();
-    expandBtn("status").click();
-    const owned = expandBtn("status").getAttribute("aria-controls")!.split(" ");
-    expect(owned).toHaveLength(2);
-    expect(owned.map((id) => panelEl().querySelector(`#${id}`)).map((el) => el !== null)).toEqual([
-      true,
-      true,
-    ]);
-    expect(owned.map((id) => labelOf(panelEl().querySelector(`#${id}`) as HTMLElement))).toEqual([
-      "done",
-      "live",
-    ]);
+    expect(keyRow("status").getAttribute("aria-setsize")).toBe("1");
+    expect(keyRow("status").getAttribute("aria-posinset")).toBe("1");
     expandBtn("status").click();
     expect(expandBtn("status").getAttribute("aria-controls")).toBeNull();
+    expect(expandBtn("status").getAttribute("aria-expanded")).toBe("true");
+    const rows = propertyRows();
+    expect(rows.map((r) => r.getAttribute("aria-setsize"))).toEqual(["3", "3", "3"]);
+    expect(rows.map((r) => r.getAttribute("aria-posinset"))).toEqual(["1", "2", "3"]);
+    expect(valueLabels()).toEqual(["done", "live"]);
   });
 
   it("a value with a slash is one row", () => {
@@ -980,6 +989,161 @@ describe("the work budget of the picker", () => {
     expect(new Set(spy.asked)).toEqual(new Set(["status"]));
     // `due` was never asked, so its value matching the query cannot show it.
     expect(offered()).toEqual([]);
+  });
+});
+
+/**
+ * WHAT WINDOWING DOES, observed through the one seam that makes it observable.
+ *
+ * jsdom implements no layout, so a panel left to measure its own scroller
+ * reads zero for the viewport and draws the whole list — which is the right
+ * runtime behaviour for a pane nothing has laid out yet, and is what every
+ * other test in this file goes on seeing. `deps.pickerViewport` hands the
+ * panel the numbers a real scroller would give instead, so these tests can
+ * watch it build a dozen rows of sixty-one and say so.
+ *
+ * The decision itself is `rowWindow.ts`, tested on numbers in
+ * `rowWindow.test.ts`. What is tested HERE is the panel's half: which rows it
+ * builds, what stands in for the rest, what a row says about the list it is
+ * part of, that a scroll rebuilds the window, and that a redraw does not lose
+ * the control that had focus.
+ */
+describe("the properties list builds only the rows on screen", () => {
+  /** One key, `n` values, each on its own note so each value is distinct. */
+  const manyValues = (n: number): PropertyIndex =>
+    indexOf(
+      Object.fromEntries(
+        Array.from({ length: n }, (_, i) => [`n${i}.md`, { created: `2020-01-${i}` }])
+      )
+    );
+
+  /** A scroller a test can move, in the three numbers the panel asks for. */
+  const viewport = { scrollTop: 0, viewportHeight: 100, rowHeight: 20 };
+  /** Moves it, and tells the panel the way the browser does. */
+  const scrollTo = (top: number): void => {
+    viewport.scrollTop = top;
+    panelEl()
+      .querySelector(".spaces-create-tree-scroll")!
+      .dispatchEvent(new Event("scroll"));
+  };
+  const openWindowed = (values = 60): Harness => {
+    viewport.scrollTop = 0;
+    const h = openProperties({
+      properties: ready(manyValues(values)),
+      pickerViewport: () => ({ ...viewport }),
+    });
+    expandBtn("created").click();
+    return h;
+  };
+
+  it("draws the rows in view and a few either side, not the whole list", () => {
+    openWindowed();
+    // 61 planned rows: the key and its 60 values. 100px of viewport over 20px
+    // rows is five on screen, plus three of overscan below and nothing above.
+    expect(propertyRows()).toHaveLength(8);
+    expect(valueBtns()).toHaveLength(7);
+  });
+
+  it("stands the rows it skipped up as height, so the scrollbar is the list's", () => {
+    openWindowed();
+    // Nothing above row 0, and 53 rows of 20px below what was drawn.
+    expect(spacerHeights()).toEqual(["1060px"]);
+    scrollTo(400);
+    expect(spacerHeights()).toEqual(["340px", "660px"]);
+  });
+
+  it("every row carries the length of the WHOLE list and its place in it", () => {
+    openWindowed();
+    expect(propertyRows().map((r) => r.getAttribute("aria-setsize"))).toEqual(
+      Array.from({ length: 8 }, () => "61")
+    );
+    scrollTo(400);
+    const rows = propertyRows();
+    expect(rows[0].getAttribute("aria-posinset")).toBe("18");
+    expect(rows.map((r) => r.getAttribute("aria-setsize"))).toEqual(
+      rows.map(() => "61")
+    );
+  });
+
+  it("a scroll builds what came into view and drops what left it", () => {
+    openWindowed();
+    const first = valueBtns().map((b) => b.dataset.control);
+    scrollTo(400);
+    const later = valueBtns().map((b) => b.dataset.control);
+    expect(later).toHaveLength(11);
+    expect(later.some((c) => first.includes(c))).toBe(false);
+    // The key row went with them: it is row 0 of a list scrolled past row 17.
+    expect(keyRows()).toHaveLength(0);
+    scrollTo(0);
+    expect(valueBtns().map((b) => b.dataset.control)).toEqual(first);
+  });
+
+  it("does not rebuild anything for a scroll that leaves the window where it was", () => {
+    // A scroll gesture is dozens of events and most of them do not change
+    // which rows are wanted; rebuilding on each would put the cost windowing
+    // removed back into the scroll.
+    openWindowed();
+    scrollTo(410);
+    const before = propertyRows()[0];
+    scrollTo(415); // still inside the same rows, top and bottom
+    expect(propertyRows()[0]).toBe(before);
+    scrollTo(600);
+    expect(propertyRows()[0]).not.toBe(before);
+  });
+
+  it("brings a focused control back into the window rather than dropping focus", () => {
+    // The one thing windowing takes away: a control that is not built cannot
+    // be focused. A redraw raised while the list is somewhere else must not
+    // leave a keyboard user on `<body>`, so the window moves to the control.
+    const h = openWindowed();
+    scrollTo(400);
+    const btn = valueBtns()[2];
+    const control = btn.dataset.control;
+    // The list is scrolled back without telling the panel, the way a redraw
+    // from a vault change arrives: the scroller is no longer where the row is.
+    viewport.scrollTop = 0;
+    btn.click(); // picks, which redraws the body
+    expect(document.activeElement).toBe(
+      propertyRows()
+        .flatMap((r) => Array.from(r.querySelectorAll<HTMLElement>("[data-control]")))
+        .find((c) => c.dataset.control === control)
+    );
+    expect(document.activeElement).not.toBe(document.body);
+    expect(h.submitted).toHaveLength(0);
+  });
+
+  it("draws every row when nothing has measured the viewport", () => {
+    // jsdom's own answer, and a pane that is not laid out yet: windowing is
+    // something that switches ON once a measurement exists, so the whole list
+    // is what the rest of this file keeps seeing.
+    openProperties({ properties: ready(manyValues(60)) });
+    expandBtn("created").click();
+    expect(propertyRows()).toHaveLength(61);
+    expect(spacers()).toHaveLength(0);
+  });
+
+  it("draws every row when the viewport is measurable but the rows are not", () => {
+    viewport.scrollTop = 0;
+    openProperties({
+      properties: ready(manyValues(60)),
+      pickerViewport: () => ({ ...viewport, rowHeight: 0 }),
+    });
+    expandBtn("created").click();
+    expect(propertyRows()).toHaveLength(61);
+    expect(spacers()).toHaveLength(0);
+  });
+
+  it("windows the keys as well as the values", () => {
+    viewport.scrollTop = 0;
+    const keys = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`k${String(i).padStart(2, "0")}`, i])
+    );
+    openProperties({
+      properties: ready(indexOf({ "a.md": keys })),
+      pickerViewport: () => ({ ...viewport }),
+    });
+    expect(keyRows()).toHaveLength(8);
+    expect(offered()[0]).toBe("k00");
   });
 });
 

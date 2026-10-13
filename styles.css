@@ -723,6 +723,21 @@
   color: var(--text-muted);
   font-size: 0.9em;
 }
+/* Stands in for rows a windowed list did not build.
+
+   The Properties body builds only the rows its viewport shows -- about 14 of
+   them for a key holding four thousand values -- and puts one of these above
+   what it drew and one below, each as tall as the rows it replaces. That is
+   what keeps the scrollbar describing the whole list, and every drawn row at
+   the offset it would have had.
+
+   Inert on purpose: it is not a row, so it must not take a pointer, show a
+   hover or draw anything. Its `height` is written per draw and is the only
+   thing about it that varies. */
+.spaces-create-tree-spacer {
+  pointer-events: none;
+  flex: 0 0 auto;
+}
 
 /* §: the tag tree, drawn in the same box as the item tree and reached by the
    Tags button above it.
