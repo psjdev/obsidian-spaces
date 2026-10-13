@@ -352,6 +352,41 @@ export default class SpacesPlugin extends Plugin {
   private repairing = false;
 
   /**
+   * What the last INSTALLED repair read, and the mtime it read each path at —
+   * empty whenever that repair closed every hole.
+   *
+   * A repair that ran, installed its answer and STILL left holes must not run
+   * again over the same files at the same mtimes: it would read the same bytes
+   * and install the same unavailable snapshot.
+   *
+   * WHY IT IS HERE AND NOT IN THE MEMO. `memoizeFrontmatterSource` deliberately
+   * never caches `"unreadable"`, and that is right: a lock that cleared or a
+   * share that came back must not be remembered as a permanent failure. The
+   * thing worth remembering is one level up and is about the REPAIR, not about
+   * the file — "we just tried exactly these and nothing moved" — so it lives
+   * with the caller that decides whether to try again.
+   *
+   * Without it, every metadata event installs a fresh accessor, the first ask
+   * finds the same holes, and the same repair runs in full: a complete
+   * `PropertyIndex` rebuild, an extra `propertyRefresh.notify()`, an extra
+   * `controller.refresh()`, and — because `"unreadable"` is not memoized — a
+   * real `open`/`read`/`close` per file, up to `PROPERTY_REPAIR_MAX_FILES` of
+   * them, on exactly the disconnected-share case `nodeHeadReader.ts` names in
+   * its own docblock. Measured by the wave 6 reviewer: 20 metadata events, 20
+   * extra index builds, 20 extra recomputes, 20 disk reads per file.
+   *
+   * Keyed on mtime because that is the signal already threaded through
+   * `FrontmatterSource.read`, and dropped wholesale on every fresh stall latch
+   * (`repairPropertiesIfStalled`), which is the one event that says the
+   * situation itself has changed.
+   *
+   * ONLY SET WHEN THE REPAIR INSTALLED. A repair dropped by the generation
+   * guard never produced an answer anybody saw, so remembering it would turn
+   * "superseded" into "do not try again" and leave the feature dark.
+   */
+  private repairedAtMtime: ReadonlyMap<string, number> = new Map();
+
+  /**
    * Takes `fileManager.getNewFileParent` back off. Null until `start()`
    * installs it, and null again once teardown has run.
    */
@@ -1660,10 +1695,35 @@ export default class SpacesPlugin extends Plugin {
     // honest. A vault where thousands of files are unparsed is broken in a way
     // to report, not to paper over by reading it all off disk.
     if (plan.kind !== "repair") return;
+    // We have been here before, with these files, at these mtimes, and got
+    // nowhere. Running again would read the same bytes and install the same
+    // unavailable answer. See `repairedAtMtime`.
+    if (this.repairIsARepeat(plan.paths)) return;
     this.repairing = true;
     void this.runPropertyRepair(walk, plan.paths, source).finally(() => {
       this.repairing = false;
     });
+  }
+
+  /**
+   * TRUE when every file this repair would read was already read, at the same
+   * mtime, by a repair that installed its answer and still left holes.
+   *
+   * EVERY, not any: one path that is new or has changed is a path a repair can
+   * still make progress on, and progress on one file is what turns an
+   * unavailable snapshot into a ready one.
+   */
+  private repairIsARepeat(paths: readonly string[]): boolean {
+    for (const path of paths) {
+      if (this.repairedAtMtime.get(path) !== this.propertyMtime(path)) return false;
+    }
+    return true;
+  }
+
+  /** A file's mtime, or 0 for anything the vault will not call a file. */
+  private propertyMtime(path: string): number {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof TFile ? file.stat.mtime : 0;
   }
 
   private async runPropertyRepair(
@@ -1673,21 +1733,29 @@ export default class SpacesPlugin extends Plugin {
   ): Promise<void> {
     const startedAt = this.propertyGeneration;
     const repaired = new Map<string, FrontmatterRead>();
+    const stamps = new Map<string, number>();
     for (const path of paths) {
-      const file = this.app.vault.getAbstractFileByPath(path);
+      const stamp = this.propertyMtime(path);
       // Serial, not `Promise.all`. At most 200 files, so the wall-clock saving
       // is small, and a jam is already a sign of a filesystem or a file that
       // is misbehaving — 200 concurrent handles into it is not the thing to do
       // about that.
-      repaired.set(path, await source.read(path, file instanceof TFile ? file.stat.mtime : 0));
+      repaired.set(path, await source.read(path, stamp));
+      stamps.set(path, stamp);
       // Teardown mid-read. Stop before touching a controller that is gone.
       if (!this.loaded) return;
     }
     if (this.propertyGeneration !== startedAt) return;
     const generation = ++this.propertyGeneration;
-    const snapshot = snapshotFromWalk(mergeRepairedWalk(walk, repaired), generation);
+    const merged = mergeRepairedWalk(walk, repaired);
+    const snapshot = snapshotFromWalk(merged, generation);
     // ONE assignment, over a value that is already complete.
     this.controller.setPropertySnapshot(() => snapshot);
+    // A WHOLE new map, so it can only ever hold what THIS repair read — at most
+    // `PROPERTY_REPAIR_MAX_FILES` entries, with nothing accumulating across
+    // renames. Empty when every hole closed, because then there is nothing left
+    // to decline to retry. See `repairedAtMtime`.
+    this.repairedAtMtime = merged.unparsed.length > 0 ? stamps : new Map();
     this.propertyRefresh.notify();
     this.controller.refresh();
   }
@@ -1700,6 +1768,13 @@ export default class SpacesPlugin extends Plugin {
    * currently showing the whole vault got its contents back.
    */
   private repairPropertiesIfStalled(): void {
+    // A FRESH latch is the one event that says the situation itself changed,
+    // so it is where "we tried these and got nowhere" stops applying. The
+    // watcher only latches again after its counter has moved or drained
+    // (`lifecycle/parseStall.ts`), so this cannot re-run a repair while
+    // nothing is happening — and it is what lets a share that came back be
+    // read again, which is why `"unreadable"` is not memoized either.
+    this.repairedAtMtime = new Map();
     if ((this.controller as SpaceController | undefined) === undefined) return;
     // Budget 2 stands: a vault with no metadata-driven space and no open
     // picker pays NOTHING here — and has nothing to repair for anyway, since

@@ -55,6 +55,14 @@ import { normalizeValue } from "../src/visibility/propertyValues";
  * real controller skips the recompute while the cache is cold and the space
  * watches metadata; the cold cases below are therefore an upper bound.
  *
+ * WHAT THE MIRROR CANNOT SEE, SAID PLAINLY. It has no stall watcher, no
+ * `requestPropertyRepair` and no repair-driven `refresh`, so NONE of the work
+ * the repair does is counted anywhere in this file. That budget is stated and
+ * asserted against the real plugin methods instead, in
+ * `tests/propertyRepairWiring.test.ts` under "the cost of a repair that cannot
+ * close its holes". Counting it here would need the plugin class and so an
+ * Obsidian runtime, which is the reason the mirror exists at all.
+ *
  * ONE-SIZE COUNTS CANNOT SEE A CONSTANT FACTOR. A count is the same on every
  * machine but it does not know that a pass costs 8 ms. What it can see is a
  * change in asymptotic class, so the sizes below run at 500 and 5,000 notes

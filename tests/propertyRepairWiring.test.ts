@@ -90,8 +90,9 @@ function harness(opts: {
   const armed = vi.fn();
   record.parseStall = { arm: armed, stalled: () => stalled, cancel: () => undefined };
 
+  const heads: Record<string, FrontmatterRead> = { ...opts.heads };
   const read = vi.fn(
-    async (path: string): Promise<FrontmatterRead> => opts.heads?.[path] ?? { kind: "unreadable" }
+    async (path: string): Promise<FrontmatterRead> => heads[path] ?? { kind: "unreadable" }
   );
   record.frontmatter = { read };
 
@@ -101,6 +102,21 @@ function harness(opts: {
     refreshes,
     armed,
     read,
+    /** Change a file's mtime, the way a real edit would. */
+    touch: (path: string, mtime: number): void => {
+      const f = tfiles.get(path);
+      if (f === undefined) throw new Error("no such file " + path);
+      f.stat = { ...f.stat, mtime };
+    },
+    /** A new file the cache has not parsed, with the head read it will get. */
+    addFile: (path: string, head: FrontmatterRead): void => {
+      const f = new TFile();
+      f.path = path;
+      f.stat = { ctime: 0, mtime: 7, size: 0 };
+      tfiles.set(path, f);
+      opts.files[path] = null;
+      heads[path] = head;
+    },
     jam: () => {
       stalled = true;
     },
@@ -303,6 +319,129 @@ describe("when the watcher latches with a space already on screen", () => {
     expect(h.read).toHaveBeenCalledTimes(1);
     const snapshot = h.installed[h.installed.length - 1]();
     expect(snapshot.status).toBe("ready");
+  });
+
+  it("does nothing at all when no space and no picker is reading properties", async () => {
+    // Budget 2: a vault with no metadata-driven space and no open picker pays
+    // NOTHING, stalled or not.
+    const h = harness({ files: { "jammed.md": null }, heads: { "jammed.md": { kind: "none" } }, active: null });
+    h.jam();
+    h.stallFired();
+    await tick();
+    expect(h.installed).toEqual([]);
+    expect(h.read).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * THE BUDGET FOR THE REPAIR ITSELF, against the real plugin methods.
+ *
+ * `tests/propertyWorkBudget.test.ts` cannot state this one: its glue is a
+ * mirror of `onMetadataEvent` with no stall watcher and no repair in it, so
+ * every count below is invisible there. The numbers the wave 6 reviewer
+ * measured against these same methods were 20 metadata events producing 20
+ * extra property-index builds, 20 extra recomputes and 20 real disk reads per
+ * persistently unreadable file — up to 200 serial `open`/`read`/`close` per
+ * event at the cap, on the disconnected-share case `nodeHeadReader.ts` names.
+ *
+ * THE BOUND: a repair that does not close its holes costs ONE repair, ONE read
+ * per file and ONE extra recompute, however many metadata events follow —
+ * until a file it failed on actually changes, or the stall latches afresh.
+ */
+describe("the cost of a repair that cannot close its holes", () => {
+  /** A metadata event, as `main.ts` serves it: a brand new lazy accessor, asked. */
+  const metadataEvent = (h: ReturnType<typeof harness>): void => void h.ask();
+
+  it("reads once and recomputes once across twenty metadata events", async () => {
+    const h = harness({ files: { "locked.md": null }, stalled: true });
+    for (let i = 0; i < 20; i++) {
+      metadataEvent(h);
+      await tick();
+    }
+    // One repair, one head read, one extra recompute. Not twenty.
+    expect(h.read).toHaveBeenCalledTimes(1);
+    expect(h.refreshes).toHaveLength(1);
+  });
+
+  it("counts the installs, so a repair that gets nowhere cannot keep rebuilding", async () => {
+    // A partial repair: one file answers, one never will. The snapshot stays
+    // unavailable, so the second ask would otherwise start the whole thing
+    // again — a complete `PropertyIndex` rebuild and an extra `refresh` each.
+    const h = harness({
+      files: { "jammed.md": null, "locked.md": null },
+      heads: { "jammed.md": { kind: "frontmatter", frontmatter: { status: "done" } } },
+      stalled: true,
+    });
+    metadataEvent(h);
+    await tick();
+    const installsAfterFirst = h.installed.length;
+    const refreshesAfterFirst = h.refreshes.length;
+    for (let i = 0; i < 20; i++) {
+      metadataEvent(h);
+      await tick();
+    }
+    // Twenty more accessors were installed by the twenty asks themselves, and
+    // not one more by a repair.
+    expect(h.installed.length).toBe(installsAfterFirst + 20);
+    expect(h.refreshes.length).toBe(refreshesAfterFirst);
+    expect(h.read).toHaveBeenCalledTimes(2); // jammed.md and locked.md, once each
+  });
+
+  it("tries again when a file it failed on has actually changed", async () => {
+    // Mtime is the signal, and it is the one already threaded through
+    // `FrontmatterSource.read`. A share that came back with no edit is covered
+    // by the fresh-latch clear below, not by this.
+    const h = harness({ files: { "locked.md": null }, stalled: true });
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(1);
+
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(1);
+
+    h.touch("locked.md", 99);
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(2);
+    expect(h.read).toHaveBeenLastCalledWith("locked.md", 99);
+  });
+
+  it("tries again when the stall watcher latches afresh", async () => {
+    // The one event that says the situation itself changed. Without it a share
+    // that came back with no mtime change would never be read again, which is
+    // the reason `memoizeFrontmatterSource` refuses to cache "unreadable".
+    const h = harness({ files: { "locked.md": null }, stalled: true });
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(1);
+
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(1);
+
+    h.stallFired();
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not block a repair when one of the files is new", async () => {
+    // EVERY, not any: a path a repair can still make progress on is a path
+    // worth reading, and progress on one file is what turns an unavailable
+    // snapshot into a ready one.
+    const h = harness({
+      files: { "locked.md": null },
+      stalled: true,
+    });
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(1);
+
+    // A second file appears unparsed, and this one CAN be read.
+    h.addFile("new.md", { kind: "frontmatter", frontmatter: { status: "done" } });
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(3); // locked.md again, and new.md
   });
 
   it("does nothing at all when no space and no picker is reading properties", async () => {
