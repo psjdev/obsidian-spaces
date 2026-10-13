@@ -52,6 +52,14 @@ describe("the pure property index", () => {
     ]);
   });
 
+  it("hands back the one key list rather than rebuilding and re-sorting it", () => {
+    // The picker asks on every draw and therefore on every keystroke in its
+    // filter box, and then re-sorts by name itself. Identity is the whole
+    // observation: a rebuilt list would be equal and not the same object.
+    const index = sample();
+    expect(index.listKeys()).toBe(index.listKeys());
+  });
+
   it("lists a key's values with a representative spelling", () => {
     // `a.md` sorts before `b.md`, so " active " is the representative and is
     // drawn as authored.

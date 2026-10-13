@@ -28,6 +28,14 @@ export function normalizeValue(text: string): string {
  * primary shape and it asks exactly this question. Spelled via
  * `Object.prototype` because the lib target is ES2018, which lacks
  * `Object.hasOwn`.
+ *
+ * ITS ONE PRODUCTION CALL SITE CANNOT SEE IT ANSWER FALSE, and the call is
+ * belt and braces rather than the guard. `createPropertyIndex` enumerates
+ * with `Object.keys`, which already yields own enumerable string keys only,
+ * and every map the feature keys on vault text is a `Map`, so a note
+ * authoring `__proto__` is stopped there and not here. This stays the one
+ * spelling of the rule, for a later caller whose keys come from somewhere
+ * `Object.keys` does not already filter.
  */
 export function hasOwnKey(frontmatter: unknown, key: string): boolean {
   if (frontmatter === null || typeof frontmatter !== "object") return false;

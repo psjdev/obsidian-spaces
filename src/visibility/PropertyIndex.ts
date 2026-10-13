@@ -13,8 +13,15 @@ import { hasOwnKey, normalizeValue } from "./propertyValues";
  * it. This is the one place this index deliberately differs from the tag
  * index, which has few tags per note and can afford to file them all.
  *
- * The laziness bounds WORK, not memory. The key map holds a path list per key,
- * so it is bounded by total key occurrences across the vault.
+ * The laziness bounds WORK, not memory, and the walk fills TWO maps rather
+ * than one. `byKey` holds a path list per key and `captured` holds the raw
+ * value per key occurrence — including a copy of every array-valued entry in
+ * the vault, whether or not anyone opens that key — so both are bounded by
+ * total key occurrences across the vault. `buckets`, and the sorted list
+ * memoized beside it, are a third structure that grows as keys are expanded;
+ * a key's captured entries are released once its buckets exist, so an
+ * expanded key is not held twice. The 0.77 MB measured cold on a 5,000-note
+ * fixture is all of them together, not the key map alone.
  */
 export interface PropertyIndex {
   /**
@@ -33,8 +40,36 @@ export interface PropertyIndex {
   readonly generation: number;
   pathsWithKey(key: string): string[];
   pathsMatching(key: string, value: string): string[];
-  listKeys(): Array<{ key: string; count: number }>;
-  listValues(key: string): ReadonlyArray<{ value: string; normalized: string; count: number }>;
+  /**
+   * Every key the walk saw, busiest first and ties broken by name.
+   *
+   * Memoized and handed out, not copied, which is why it is readonly: no
+   * production caller displays this order — the picker re-sorts by name
+   * (`pickableKeys`) and the contents dialog reduces it to a `Set` — so the
+   * order here is only a deterministic one, and the memo is what stops the
+   * sort being redone on every draw and so on every keystroke in the filter
+   * box.
+   */
+  listKeys(): ReadonlyArray<PropertyKeyCount>;
+  listValues(key: string): ReadonlyArray<PropertyValueCount>;
+}
+
+/** One row of `listKeys`. Readonly through, because the rows are the memo's own. */
+export interface PropertyKeyCount {
+  readonly key: string;
+  readonly count: number;
+}
+
+/**
+ * One row of `listValues`. Readonly through: `ReadonlyArray` alone stops a
+ * caller sorting or pushing, and not a write to `rows[0].count`, which would
+ * corrupt what every later reader of the memo sees.
+ */
+export interface PropertyValueCount {
+  /** The spelling the note's author used. */
+  readonly value: string;
+  readonly normalized: string;
+  readonly count: number;
 }
 
 /**
@@ -65,6 +100,13 @@ export function createPropertyIndex(
   for (const { path, frontmatter } of sorted) {
     if (frontmatter === null || typeof frontmatter !== "object") continue;
     for (const key of Object.keys(frontmatter)) {
+      // BELT AND BRACES, and said so rather than left to read as the guard.
+      // `Object.keys` returns own enumerable string keys only, so this cannot
+      // be false here: the protection the docblock on `hasOwnKey` describes
+      // is delivered on this path by the enumeration above and by every map
+      // below being a `Map`, not by this call. It is kept as the one spelling
+      // of the own-key rule, so a later source of keys cannot slip past
+      // without the rule being written a second time.
       if (!hasOwnKey(frontmatter, key)) continue;
       let paths = byKey.get(key);
       if (paths === undefined) {
@@ -132,6 +174,12 @@ export function createPropertyIndex(
       }
     }
     buckets.set(key, found);
+    // Released once the buckets exist. The memo check above returns first
+    // from here on, so this key's captured raws are never read again, and
+    // holding both doubled the retained cost of an expanded key (0.77 MB to
+    // 1.36 MB on the 5,000-note fixture after opening `created`). `byKey`
+    // still answers `pathsWithKey`, which is a different map.
+    captured.delete(key);
     return found;
   };
 
@@ -142,11 +190,12 @@ export function createPropertyIndex(
   // `created` holds 4,035 distinct values: one sort of those to show the
   // first 200, not one per keystroke.
   //
-  // The memo is handed out, not copied, which is why the type is a
-  // `ReadonlyArray`: the rows are the snapshot's own and a caller that sorted
-  // them in place would reorder what every later reader sees.
-  const listed = new Map<string, ReadonlyArray<{ value: string; normalized: string; count: number }>>();
-  const listValues = (key: string): ReadonlyArray<{ value: string; normalized: string; count: number }> => {
+  // The memo is handed out, not copied, which is why the rows are readonly
+  // through `PropertyValueCount`: they are the snapshot's own, and a caller
+  // that sorted the array in place — or wrote to a row's `count` — would
+  // change what every later reader sees.
+  const listed = new Map<string, ReadonlyArray<PropertyValueCount>>();
+  const listValues = (key: string): ReadonlyArray<PropertyValueCount> => {
     let found = listed.get(key);
     if (found !== undefined) return found;
     found = [...bucketsFor(key).entries()]
@@ -156,14 +205,24 @@ export function createPropertyIndex(
     return found;
   };
 
+  // Memoized for the reason the value list is: both production callers throw
+  // this order away — `pickableKeys` re-sorts by name and the contents dialog
+  // builds a `Set` — but the picker asks on every draw, so the key list was
+  // built and sorted once per keystroke to be sorted again straight after.
+  let keysListed: ReadonlyArray<PropertyKeyCount> | null = null;
+  const listKeys = (): ReadonlyArray<PropertyKeyCount> => {
+    if (keysListed !== null) return keysListed;
+    keysListed = [...byKey.entries()]
+      .map(([key, paths]) => ({ key, count: paths.length }))
+      .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    return keysListed;
+  };
+
   return {
     generation,
     pathsWithKey: (key) => [...(byKey.get(key) ?? [])],
     pathsMatching: (key, value) => [...(bucketsFor(key).get(normalizeValue(value))?.paths ?? [])],
-    listKeys: () =>
-      [...byKey.entries()]
-        .map(([key, paths]) => ({ key, count: paths.length }))
-        .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+    listKeys,
     listValues,
   };
 }
