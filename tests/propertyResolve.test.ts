@@ -177,7 +177,11 @@ describe("SpaceController with a property space", () => {
   };
   const unavailable: PropertySnapshot = { status: "unavailable" };
 
-  async function build(members: MemberEntry[], exclude?: string[]) {
+  async function build(
+    members: MemberEntry[],
+    exclude?: string[],
+    host?: { metadataReady?: () => boolean }
+  ) {
     let stored: unknown = {
       schemaVersion: SCHEMA_VERSION,
       settings: { globalIgnore: [], restoreLayouts: false },
@@ -198,7 +202,7 @@ describe("SpaceController with a property space", () => {
       store,
       runtime,
       files,
-      { apply: vi.fn(), livePaths: () => new Set<string>() },
+      { apply: vi.fn(), livePaths: () => new Set<string>(), ...host },
       createMapTagIndex(new Map()),
       asks
     );
@@ -234,6 +238,17 @@ describe("SpaceController with a property space", () => {
     await controller.switchTo({ kind: "space", id: "p" });
     controller.refresh();
     expect(asks).not.toHaveBeenCalled();
+  });
+
+  it("does not read the snapshot while the host is still loading", async () => {
+    // `metadataReady` answers the gate on its own. Asking for the index first
+    // made a property space pay for a walk at first paint that the gate was
+    // about to make pointless, and no existing test could see it because the
+    // other hosts here leave `metadataReady` undefined.
+    const { controller, asks } = await build(ACTIVE, undefined, { metadataReady: () => false });
+    await controller.switchTo({ kind: "space", id: "p" });
+    expect(asks).not.toHaveBeenCalled();
+    expect(controller.currentSnapshot()).toBeNull();
   });
 
   it("keeps the previous result while the snapshot is unavailable", async () => {

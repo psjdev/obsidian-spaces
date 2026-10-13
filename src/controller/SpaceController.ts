@@ -432,17 +432,23 @@ export class SpaceController {
    * a caller publishing the result as a membership must hold its previous
    * answer instead.
    *
-   * The property arm reads the index this recompute already has, so it costs
-   * nothing and asks nothing for a space that resolves no property member.
+   * Both arms are cheap in the case that matters. `metadataReady` answers on
+   * its own and the index is never asked for, which is why `properties` is a
+   * thunk: reading it before this point made a property space pay for a walk
+   * at first paint that this gate was about to make pointless. A space that
+   * resolves no property member never asks either.
    * `drawnPropertyIndex` keeps the last READY index, so this is false as soon
    * as one has EVER been ready: a cache going cold mid-session neither blanks
    * a space that already has a good answer nor re-opens the tree. Reachable
    * only before the first ready index of a session, which is why the
    * fall-open below is the right posture for it.
    */
-  private stillReading(space: SpaceDefinition, properties: PropertyIndex | null): boolean {
+  private stillReading(
+    space: SpaceDefinition,
+    properties: () => PropertyIndex | null
+  ): boolean {
     if (this.host.metadataReady?.() === false) return true;
-    return properties === null && resolvesPropertyMembers(space);
+    return resolvesPropertyMembers(space) && properties() === null;
   }
 
   /**
@@ -505,7 +511,12 @@ export class SpaceController {
     // render empty. "No matches yet" and "no matches" are different answers,
     // which is why this reads a readiness signal and not the member count.
     // `stillReading` carries both signals and what each one knows.
-    const properties = this.propertiesFor(space);
+    // At most one read per recompute, and none at all when the gate below can
+    // answer without it: the gate and the snapshot further down must be handed
+    // the same answer, or they can disagree about what this space holds.
+    let asked: PropertyIndex | null | undefined;
+    const properties = (): PropertyIndex | null =>
+      (asked = asked === undefined ? this.propertiesFor(space) : asked);
     if (watchesMetadata(space) && this.stillReading(space, properties)) {
       this.snapshot = null;
       this.host.apply(null);
@@ -518,7 +529,7 @@ export class SpaceController {
     const visitors = settings.revealVisitors ? revealed : new Set<string>();
     this.snapshot = buildVisibilitySnapshot(
       this.vault,
-      { ...space, members: [...this.membersForSnapshot(space, properties)] },
+      { ...space, members: [...this.membersForSnapshot(space, properties())] },
       visitors,
       ignore,
       new Set((space.exclude ?? []).map(canonicalPath))
