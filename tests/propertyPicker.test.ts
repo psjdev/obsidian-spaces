@@ -527,15 +527,40 @@ describe("expanding and selecting are separate actions", () => {
     expect(await storedMembers(h)).toEqual([{ kind: "property", key: "x", value: "" }]);
   });
 
-  it("a value row names its key, so two keys sharing a value are told apart", () => {
+  it("a value row names its key and its count, so two keys sharing a value are told apart", () => {
+    // The count span is a CHILD of this button and `aria-label` replaces the
+    // accessible name, so a count left out of the label is a count a screen
+    // reader can never reach. The key row announces its own, because there
+    // the count is a sibling.
     const index = indexOf({ "a.md": { status: "done", phase: "done" } });
     openProperties({ properties: ready(index) });
     expandBtn("status").click();
     expandBtn("phase").click();
     expect(valueBtns().map((b) => b.getAttribute("aria-label")).sort()).toEqual([
-      "phase equals done",
-      "status equals done",
+      "phase equals done, 1 note",
+      "status equals done, 1 note",
     ]);
+  });
+
+  it("the disclosure OWNS the rows it reveals, and owns nothing while closed", () => {
+    // `aria-expanded` with no `aria-controls` names a state with no subject:
+    // the value rows are SIBLINGS of their key row, so the indentation that
+    // carries the nesting for the eye carried nothing for anyone else.
+    openProperties({ properties: ready(indexOf({ "a.md": { status: "done" }, "b.md": { status: "live" } })) });
+    expect(expandBtn("status").getAttribute("aria-controls")).toBeNull();
+    expandBtn("status").click();
+    const owned = expandBtn("status").getAttribute("aria-controls")!.split(" ");
+    expect(owned).toHaveLength(2);
+    expect(owned.map((id) => panelEl().querySelector(`#${id}`)).map((el) => el !== null)).toEqual([
+      true,
+      true,
+    ]);
+    expect(owned.map((id) => labelOf(panelEl().querySelector(`#${id}`) as HTMLElement))).toEqual([
+      "done",
+      "live",
+    ]);
+    expandBtn("status").click();
+    expect(expandBtn("status").getAttribute("aria-controls")).toBeNull();
   });
 
   it("a value with a slash is one row", () => {
@@ -807,21 +832,37 @@ describe("the picker owns a metadata subscription", () => {
     };
   }
 
-  it("subscribes when the picker opens and not before", () => {
+  it("subscribes when the PROPERTIES body is shown, and not merely when the picker opens", () => {
+    // The body, not the window. A picker open on Vault reads nothing from the
+    // snapshot, and subscribing for it made every metadata event in the vault
+    // schedule a flush whose only action was a notify this panel threw away.
     const s = source();
     makeHarness({ subscribePropertyRefresh: s.subscribe });
     expect(s.active).toBe(0);
     byKey("mode-curate").click();
-    expect(s.active).toBe(1);
-    // A redraw while it stays open does not stack a second one.
+    expect(s.active).toBe(0);
     byKey("body-properties").click();
     expect(s.active).toBe(1);
+    // A redraw while the body stays on screen does not stack a second one.
+    byKey("body-properties").click();
+    expect(s.active).toBe(1);
+  });
+
+  it("releases when the picker switches to another body", () => {
+    const s = source();
+    makeHarness({ subscribePropertyRefresh: s.subscribe });
+    byKey("mode-curate").click();
+    byKey("body-properties").click();
+    expect(s.active).toBe(1);
+    byKey("body-items").click();
+    expect(s.active).toBe(0);
   });
 
   it("releases when the picker is closed", () => {
     const s = source();
     makeHarness({ subscribePropertyRefresh: s.subscribe });
     byKey("mode-curate").click();
+    byKey("body-properties").click();
     expect(s.active).toBe(1);
     byKey("mode-curate").click(); // the same button collapses the picker
     expect(s.active).toBe(0);
@@ -831,6 +872,8 @@ describe("the picker owns a metadata subscription", () => {
     const s = source();
     const h = makeHarness({ subscribePropertyRefresh: s.subscribe });
     byKey("mode-curate").click();
+    byKey("body-properties").click();
+    expect(s.active).toBe(1);
     byKey("cancel").click();
     expect(h.closes).toBe(1);
     expect(s.active).toBe(0);
@@ -840,6 +883,8 @@ describe("the picker owns a metadata subscription", () => {
     const s = source();
     const h = makeHarness({ subscribePropertyRefresh: s.subscribe });
     byKey("mode-curate").click();
+    byKey("body-properties").click();
+    expect(s.active).toBe(1);
     h.panel.destroy();
     expect(s.active).toBe(0);
   });
@@ -852,6 +897,25 @@ describe("the picker owns a metadata subscription", () => {
     snapshot = indexOf({ "a.md": { status: "x" } });
     s.callbacks[0]();
     expect(offered()).toEqual(["status"]);
+  });
+
+  it("redraws the SUMMARY ROW too, so the two numbers come from one snapshot", () => {
+    // The body's per-key counts came from the new snapshot while the "N notes"
+    // line pinned under them still showed the figure computed at the last
+    // pick. The preview here answers from a value the notification moves, so
+    // a summary that was not redrawn keeps the old one.
+    const s = source();
+    let notes = 1;
+    openProperties({
+      properties: ready(indexOf({ "a.md": { status: "x" } })),
+      subscribePropertyRefresh: s.subscribe,
+      preview: () => ({ paths: new Set<string>(), notes }),
+    });
+    selectBtn("status").click();
+    expect(summary()).toContain("1 note");
+    notes = 4;
+    s.callbacks[0]();
+    expect(summary()).toContain("4 notes");
   });
 
   it("keeps a key open across a refresh", () => {

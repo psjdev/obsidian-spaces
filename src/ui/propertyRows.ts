@@ -7,7 +7,7 @@
  */
 
 import { isEligiblePropertyKey, memberIdentity } from "../definitions/schema";
-import type { MemberEntry, SpaceDefinition } from "../types";
+import type { MemberEntry, PropertyMember, SpaceDefinition } from "../types";
 
 /**
  * Keys the picker never offers although the vault holds them.
@@ -72,23 +72,26 @@ export function valueLabel(value: string): string {
 }
 
 /** The member the key row's select control adds: the key exists. */
-export function existsMember(key: string): MemberEntry {
+export function existsMember(key: string): PropertyMember {
   return { kind: "property", key };
 }
 
 /** The member a value row adds, in the spelling the vault showed. */
-export function equalsMember(key: string, value: string): MemberEntry {
+export function equalsMember(key: string, value: string): PropertyMember {
   return { kind: "property", key, value };
 }
 
 /**
  * Whether the space already holds this property member, by `memberIdentity`,
  * so `" Active "` and `"active"` are the one member the loader would keep.
- * A non-property member never matches, with no guard here saying so:
- * `memberIdentity` namespaces every identity by kind, so a file, folder or tag
- * spelled like the key cannot share one with a property member.
+ * `items` is the whole mixed list and `member` is a `PropertyMember`, so the
+ * kind check is the compiler's: a file, folder or tag cannot be passed as the
+ * question, and one in `items` can never be the answer because
+ * `memberIdentity` namespaces every identity by kind, so a path spelled like
+ * the key cannot share one. `addPropertyMember` carried a runtime
+ * `member.kind !== "property"` guard for this that no caller could reach.
  */
-export function holdsProperty(items: readonly MemberEntry[], member: MemberEntry): boolean {
+export function holdsProperty(items: readonly MemberEntry[], member: PropertyMember): boolean {
   const id = memberIdentity(member);
   return items.some((m) => memberIdentity(m) === id);
 }
@@ -105,14 +108,14 @@ export function holdsProperty(items: readonly MemberEntry[], member: MemberEntry
  * space unchanged, so a caller that raced a second add cannot store two rows
  * the loader would collapse into one.
  */
-export function addPropertyMember(space: SpaceDefinition, member: MemberEntry): SpaceDefinition {
-  if (member.kind !== "property" || holdsProperty(space.members, member)) return space;
+export function addPropertyMember(space: SpaceDefinition, member: PropertyMember): SpaceDefinition {
+  if (holdsProperty(space.members, member)) return space;
   return { ...space, members: [...space.members, member] };
 }
 
 /** What typing a property into the contents dialog's adder amounts to. */
 export type PropertyAdd =
-  | { outcome: "add"; member: MemberEntry }
+  | { outcome: "add"; member: PropertyMember }
   | { outcome: "held"; label: string }
   | { outcome: "blank" }
   | { outcome: "tags" }

@@ -84,6 +84,15 @@ import { SEL } from "../explorer/selectors";
 const MAX_PICKER_ROWS = 200;
 
 /**
+ * Mints the ids a property disclosure points `aria-controls` at.
+ *
+ * Module scope, so two panels in two windows cannot hand out the same id, and
+ * never reset: an id only has to be unique in its document while the rows
+ * carrying it exist, and the rows are replaced wholesale on every draw.
+ */
+let propertyRowSeq = 0;
+
+/**
  * How long the sigil stays in the filter box before the box takes it back, in
  * ms.
  *
@@ -1717,6 +1726,10 @@ export class CreateSpacePanel {
     this.paintPickerModes();
     this.renderPlaceholder();
     this.renderPickerBody();
+    // The metadata subscription belongs to the Properties body, not to the
+    // window, so a switch takes it or releases it. Nothing else here needs a
+    // render, which is why this does not go through one.
+    this.syncPropertySubscription();
     // Nothing is written to the summary row: it shows the figures and the
     // figures do not change with the body, so a switch is silent in the live
     // region. The buttons are `aria-pressed`, which a screen reader says when
@@ -1795,9 +1808,23 @@ export class CreateSpacePanel {
     return this.state.root === "" ? [] : [{ kind: "folder", path: this.state.root }];
   }
 
-  /** Starts listening for property changes if the picker is open and nothing is yet. */
+  /**
+   * Starts listening for property changes while the PROPERTIES body is
+   * showing, and nothing is yet.
+   *
+   * The body, not the picker window. Subscribing for the whole window made
+   * `metadataNotifyRoute` answer `"picker-flush"` rather than `"none"` for a
+   * vault with no property member whose user happened to have the panel open
+   * on Vault or Tags, so every save cost a coalescer submit and a flush whose
+   * only action was a notify that this handler then threw away. Nothing goes
+   * stale by waiting: switching bodies redraws, and the Properties body reads
+   * the accessor on every draw.
+   *
+   * Called from `render` (after the window is built or dropped) and from
+   * `setPickerMode`, which redraws in place without a render.
+   */
   private syncPropertySubscription(): void {
-    if (!this.itemsOpen) {
+    if (!this.itemsOpen || readPickerBody(this.pickerMode, this.state.folderMode) !== "properties") {
       this.releasePropertySubscription();
       return;
     }
@@ -1820,10 +1847,17 @@ export class CreateSpacePanel {
   /**
    * The snapshot was replaced. Only the Properties body reads it, so any
    * other body has nothing to redraw; the next draw of this one asks again.
+   *
+   * The SUMMARY ROW goes with it. Redrawing the body alone left the per-key
+   * counts reading from the new snapshot while the "… N notes" line pinned
+   * under them still showed the figure computed at the last pick: two numbers
+   * on one screen from two different pictures. It costs one `deps.preview`,
+   * which is the same thunk a pick already pays.
    */
   private onPropertiesChanged(): void {
     if (this.el === null || this.treeEl === null) return;
     if (readPickerBody(this.pickerMode, this.state.folderMode) !== "properties") return;
+    this.renderSummary();
     this.redrawProperties();
   }
 
@@ -2013,19 +2047,33 @@ export class CreateSpacePanel {
       host.appendChild(el);
 
       if (!open) continue;
+      // What the disclosure OWNS. The value rows are siblings of their key
+      // row rather than descendants of it — the indent carries the nesting
+      // for the eye and nothing carried it for anyone else — so `aria-expanded`
+      // named a state with no subject. Ids are minted per draw from a
+      // counter rather than from the key, because a key is vault text and an
+      // id built from it would be unpredictable to anything that later had to
+      // select on it.
+      const owned: string[] = [];
+      const own = (el: HTMLElement): HTMLElement => {
+        el.id = `spaces-property-value-${(propertyRowSeq += 1)}`;
+        owned.push(el.id);
+        return el;
+      };
       // The one place values are asked for, once per open key per draw.
       const values = index.listValues(key);
       if (values.length === 0) {
-        const none = row(1, "is-note");
+        const none = own(row(1, "is-note"));
         none.textContent = "No values to pick";
         host.appendChild(none);
+        disclose.setAttribute("aria-controls", owned.join(" "));
         continue;
       }
       for (const v of values.slice(0, MAX_PICKER_ROWS)) {
         const valueMember = equalsMember(key, v.value);
         const valueId = memberIdentity(valueMember);
         const heldValue = heldIds.has(valueId);
-        const vr = row(1, heldValue ? "is-selected" : "");
+        const vr = own(row(1, heldValue ? "is-selected" : ""));
         // The whole value row, including the indent gutter left of the button,
         // which was inert while the button was the only target.
         vr.addEventListener("click", () => pick(valueMember, `select:${valueId}`));
@@ -2035,8 +2083,12 @@ export class CreateSpacePanel {
         btn.dataset.control = `select:${valueId}`;
         btn.setAttribute("aria-pressed", String(heldValue));
         // The value alone is ambiguous once two keys share one such as done,
-        // so the name carries its key.
-        btn.setAttribute("aria-label", `${key} equals ${valueLabel(v.value)}`);
+        // so the name carries its key — AND its count, because the count span
+        // is a child of this button and `aria-label` replaces the accessible
+        // name, so a screen reader would otherwise never reach it. On a key
+        // row the count is a sibling of the button inside the `listitem` and
+        // is announced on its own; this is the two row kinds agreeing.
+        btn.setAttribute("aria-label", `${key} equals ${valueLabel(v.value)}, ${tagCountLabel(v.count)}`);
         if (heldValue) vr.title = `Remove ${key}: ${valueLabel(v.value)}`;
         const label = doc.win.createSpan();
         label.className = "spaces-create-tree-name";
@@ -2054,6 +2106,7 @@ export class CreateSpacePanel {
       if (values.length > MAX_PICKER_ROWS) {
         overflow(1, values.length - MAX_PICKER_ROWS, "not shown");
       }
+      disclose.setAttribute("aria-controls", owned.join(" "));
     }
     if (keys.length > MAX_PICKER_ROWS) {
       overflow(0, keys.length - MAX_PICKER_ROWS, "narrow the filter to see them");

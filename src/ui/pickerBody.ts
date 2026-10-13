@@ -43,14 +43,26 @@ export interface PickedCounts {
   properties: number;
 }
 
-/** The counts behind a curated space's current members. */
+/**
+ * The counts behind a curated space's current members.
+ *
+ * Every kind is named and the tail is a `never`, as `isPathMember` and
+ * `expandMembers` are. The chain used to end in a bare `else`, so a fifth
+ * member kind would have been counted as a NOTE and reported as one in the
+ * summary row, with nothing in the toolchain saying so: the one member-kind
+ * switch on this feature with no guard at all.
+ */
 export function countPicked(items: readonly MemberEntry[]): PickedCounts {
   const counts: PickedCounts = { notes: 0, folders: 0, tags: 0, properties: 0 };
   for (const item of items) {
     if (item.kind === "tag") counts.tags += 1;
     else if (item.kind === "property") counts.properties += 1;
     else if (item.kind === "folder") counts.folders += 1;
-    else counts.notes += 1;
+    else if (item.kind === "file") counts.notes += 1;
+    else {
+      const unreached: never = item;
+      return unreached;
+    }
   }
   return counts;
 }

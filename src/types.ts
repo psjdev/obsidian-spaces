@@ -3,9 +3,9 @@ import type { OrderMap } from "./order/orderModel";
 export type { OrderMap };
 
 /**
- * What a vault object is. Deliberately NOT widened to include `"tag"`:
- * `VaultIndex.kindOf` returns this, and a tag is not something the vault
- * holds.
+ * What a vault object is. Deliberately NOT widened to include `"tag"` or
+ * `"property"`: `VaultIndex.kindOf` returns this, and neither a tag nor a
+ * frontmatter property is something the vault holds.
  */
 export type MemberKind = "file" | "folder";
 
@@ -14,11 +14,12 @@ export type MemberKind = "file" | "folder";
  *
  * A discriminated union rather than `{ path, kind }` with an optional `tag`
  * beside it. `path` exists only on the kinds where it means something, so
- * reading `m.path` on a tag member is a compile error rather than
- * `undefined` reaching a vault lookup at runtime.
+ * reading `m.path` on a tag or property member is a compile error rather
+ * than `undefined` reaching a vault lookup at runtime.
  *
  * Members were always selectors: a `folder` member expands to everything
- * inside it on every render. `tag` is the same idea with a different source.
+ * inside it on every render. `tag` is the same idea with a different source,
+ * and `property` is a third: a frontmatter key, with or without a value.
  */
 export type MemberEntry =
   | { kind: "file"; path: string }
@@ -28,6 +29,13 @@ export type MemberEntry =
 
 /** The members that name a vault path. See `pathMembers`. */
 export type PathMember = Extract<MemberEntry, { path: string }>;
+
+/**
+ * A stored property member. Narrower than `MemberEntry` wherever a function
+ * only ever handles one, so the kind check is the compiler's rather than a
+ * runtime guard no caller can reach.
+ */
+export type PropertyMember = Extract<MemberEntry, { kind: "property" }>;
 
 export interface SpaceDefinition {
   id: string;

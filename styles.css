@@ -763,8 +763,10 @@
 }
 /* A selected row goes accent-colored and semibold; the count must not follow
    it there, or the hint becomes the loudest thing on the row it is hinting
-   about. */
-.spaces-create-tag-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
+   about. On the ROW class rather than the tag row's own: the property key and
+   value rows draw this same count span, and a selected one was taking the
+   accent, which is the thing this rule exists to stop. */
+.spaces-create-tree-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
 
 /* The theme button replaces the old swatch row: full width under the name,
    so it reads as an action rather than seven unexplained circles. The brush
