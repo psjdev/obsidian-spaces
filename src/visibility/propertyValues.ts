@@ -1,52 +1,22 @@
 /**
- * What a frontmatter entry OFFERS as matchable values, and what counts as
- * equal.
+ * What counts as EQUAL between two values, and what counts as carrying a key.
  *
- * Pure, so it runs in plain node. The shapes below were measured by planting
- * frontmatter in a running Obsidian 1.13.7 and reading
- * `metadataCache.getFileCache().frontmatter` back; the planted note is in the
- * spec so the probe can be repeated against a later Obsidian.
+ * Pure, so it runs in plain node.
  *
- * NO `Date` BRANCH. No probe produced one on this path — `date: 2026-08-31`
- * arrives as the string `"2026-08-31"` — and a branch with no input to
- * exercise it is behavior nobody can check. Add one deliberately if a later
- * Obsidian produces a `Date`, with a UTC-or-local rule decided at the time.
+ * WHICH VALUES AN ENTRY OFFERS IS NOT HERE. It is the bucket builder in
+ * `PropertyIndex.ts`, because that rule has to keep the authored spelling for
+ * the picker to draw while `normalizeValue` is what the matching is keyed on.
+ * A second, normalized-only copy of the offering rule lived here as
+ * `valuesOf` with NO caller in `src/`, and the spec's boundary table was
+ * driven through it — so the eight shapes the table exists for were never run
+ * against the code the plugin runs. The copy is gone and the table drives
+ * `createPropertyIndex` (`tests/propertyValues.test.ts`). One rule, one
+ * table.
  */
 
 /** Values compare trimmed and case-folded. Keys never do. */
 export function normalizeValue(text: string): string {
   return text.trim().toLowerCase();
-}
-
-/**
- * The normalized values this entry offers, deduplicated, in first-seen order.
- *
- * `null` and `undefined` offer NOTHING rather than the text "null".
- * `String(null)` is `"null"`, so the naive rule files every blank property
- * under a value a member could ask for, and a blank property is among the
- * commonest shapes in a real vault.
- *
- * An array offers its DIRECT scalar entries and is never stringified whole:
- * `String(["atlas","billing"])` is `"atlas,billing"`, which would match a
- * member asking for exactly that. A nested array, an object or a null inside
- * a list contributes nothing, so the rule is one level deep and says so.
- */
-export function valuesOf(raw: unknown): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const take = (v: unknown): void => {
-    if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") return;
-    const text = normalizeValue(String(v));
-    if (seen.has(text)) return;
-    seen.add(text);
-    out.push(text);
-  };
-  if (Array.isArray(raw)) {
-    for (const entry of raw) take(entry);
-    return out;
-  }
-  take(raw);
-  return out;
 }
 
 /**

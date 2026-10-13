@@ -70,6 +70,29 @@ export function createPropertyIndex(
     }
   }
 
+  /**
+   * THE VALUE RULE. The only copy: what a frontmatter entry OFFERS as
+   * matchable values, keyed on the normalized text and drawn in the spelling
+   * the note's author used. The spec's boundary table is driven through this,
+   * in `tests/propertyValues.test.ts`.
+   *
+   * Only DIRECT scalars are values. `null` and `undefined` offer NOTHING
+   * rather than the text "null": `String(null)` is `"null"`, so the naive
+   * rule files every blank property under a value a member could ask for, and
+   * a blank property is among the commonest shapes in a real vault. An array
+   * offers its direct scalar entries and is never stringified whole, because
+   * `String(["atlas","billing"])` is `"atlas,billing"`, which would match a
+   * member asking for exactly that. A nested array, an object or a null
+   * inside a list contributes nothing, so the rule is one level deep.
+   *
+   * NO `Date` BRANCH. No probe produced one on this path — `date: 2026-08-31`
+   * arrives as the string `"2026-08-31"` — and a branch with no input to
+   * exercise it is behavior nobody can check. The shapes were measured by
+   * planting frontmatter in a running Obsidian 1.13.7 and reading
+   * `metadataCache.getFileCache().frontmatter` back; the planted note is in
+   * the spec so the probe can be repeated. Add a branch deliberately if a
+   * later Obsidian produces a `Date`, with a UTC-or-local rule decided then.
+   */
   const buckets = new Map<string, Map<string, Bucket>>();
   const bucketsFor = (key: string): Map<string, Bucket> => {
     let found = buckets.get(key);
@@ -81,8 +104,6 @@ export function createPropertyIndex(
     for (const { path, raw } of captured.get(key) ?? []) {
       const spellings: unknown[] = Array.isArray(raw) ? (raw as unknown[]) : [raw];
       for (const one of spellings) {
-        // Only direct scalars are values, the same rule as `valuesOf`; this
-        // builder keeps the authored spelling, which `valuesOf` discards.
         if (typeof one !== "string" && typeof one !== "number" && typeof one !== "boolean") continue;
         const spelling = String(one);
         const normalized = normalizeValue(spelling);
