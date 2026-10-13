@@ -14,6 +14,7 @@ import {
   PROPERTY_STALL_SAMPLE_MS,
   PROPERTY_STALL_SAMPLES_AGREED,
   createParseStallWatch,
+  stallCleared,
   stallVerdict,
 } from "../src/lifecycle/parseStall";
 import { nativeParseProgress } from "../src/visibility/nativeParseProgress";
@@ -103,6 +104,36 @@ describe("stallVerdict", () => {
   });
 });
 
+describe("stallCleared", () => {
+  it("is true when the counter has MOVED", () => {
+    expect(stallCleared([11, 11, 11, 10])).toBe(true);
+    expect(stallCleared([11, 12])).toBe(true); // up counts too: something queued
+  });
+
+  it("is true when the counter has reached zero", () => {
+    expect(stallCleared([11, 11, 11, 0])).toBe(true);
+    expect(stallCleared([0])).toBe(true);
+  });
+
+  it("is FALSE while the counter is unchanged", () => {
+    expect(stallCleared([11, 11])).toBe(false);
+    expect(stallCleared([11, 11, 11])).toBe(false);
+  });
+
+  it("is FALSE on a window too short to say, so re-arming cannot un-latch", () => {
+    expect(stallCleared([])).toBe(false);
+    expect(stallCleared([11])).toBe(false);
+  });
+
+  it("is FALSE when either reading is missing", () => {
+    // Symmetric with `stallVerdict`: a build that stops exposing the counter
+    // must not be able to decide anything by itself.
+    expect(stallCleared([11, null])).toBe(false);
+    expect(stallCleared([null, 11])).toBe(false);
+    expect(stallCleared([null, null])).toBe(false);
+  });
+});
+
 describe("the watcher", () => {
   const watcher = (progress: () => number | null) => {
     const clock = manualTimer();
@@ -130,10 +161,96 @@ describe("the watcher", () => {
     clock.advance(PROPERTY_STALL_SAMPLE_MS);
     expect(watch.stalled()).toBe(true);
     expect(onStalled).toHaveBeenCalledTimes(1);
-    // And it stops: no timer is left running, and no second callback.
-    clock.advance(PROPERTY_STALL_SAMPLE_MS * 20);
+    // The callback is on the TRANSITION, so a counter that goes on agreeing
+    // does not call it again, even though sampling continues.
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * 10);
     expect(onStalled).toHaveBeenCalledTimes(1);
+    expect(watch.stalled()).toBe(true);
+  });
+
+  it("keeps sampling after a latch, and lets the counter take it back", () => {
+    // The latch used to be permanent, and the project's own control run shows a
+    // HEALTHY vault can earn one: `inProgressTaskCount` held still for twenty
+    // seconds in a run that finished in 27.4 s. A wrong verdict has to cost one
+    // repair, not the session.
+    let count = 11;
+    const { clock, onStalled, watch } = watcher(() => count);
+    watch.arm();
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * PROPERTY_STALL_SAMPLES_AGREED);
+    expect(watch.stalled()).toBe(true);
+    expect(onStalled).toHaveBeenCalledTimes(1);
+
+    // Obsidian was busy, not dead.
+    count = 10;
+    clock.advance(PROPERTY_STALL_SAMPLE_MS);
+    expect(watch.stalled()).toBe(false);
+  });
+
+  it("un-latches when the queue drains, and stops", () => {
+    let count = 4;
+    const { clock, watch } = watcher(() => count);
+    watch.arm();
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * PROPERTY_STALL_SAMPLES_AGREED);
+    expect(watch.stalled()).toBe(true);
+    count = 0;
+    clock.advance(PROPERTY_STALL_SAMPLE_MS);
+    expect(watch.stalled()).toBe(false);
+    expect(clock.pending()).toBe(0); // healthy; nothing left to watch
+  });
+
+  it("earns a SECOND verdict, and a second callback, after one is taken back", () => {
+    // One repair per verdict, not one per session. `main.ts` hangs the
+    // clearing of its own "we tried these and got nowhere" memory off exactly
+    // this second callback.
+    let count = 11;
+    const { clock, onStalled, watch } = watcher(() => count);
+    watch.arm();
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * PROPERTY_STALL_SAMPLES_AGREED);
+    expect(onStalled).toHaveBeenCalledTimes(1);
+    count = 9;
+    clock.advance(PROPERTY_STALL_SAMPLE_MS);
+    expect(watch.stalled()).toBe(false);
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * PROPERTY_STALL_SAMPLES_AGREED);
+    expect(watch.stalled()).toBe(true);
+    expect(onStalled).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-arming after the cap does NOT un-latch, because an empty window is not evidence", () => {
+    // `arm()` clears the samples, and `main.ts` calls it on every ask that
+    // finds unparsed files. Past the sample cap sampling has stopped, so that
+    // arm really does start a fresh window — and if a short window counted as
+    // the counter having moved, the first sample of it would take back the
+    // verdict that is about to serve the very user who asked.
+    const { clock, watch } = watcher(() => 11);
+    watch.arm();
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * (PROPERTY_STALL_MAX_SAMPLES + 2));
+    expect(watch.stalled()).toBe(true);
     expect(clock.pending()).toBe(0);
+
+    watch.arm();
+    clock.advance(PROPERTY_STALL_SAMPLE_MS);
+    expect(watch.stalled()).toBe(true);
+    clock.advance(PROPERTY_STALL_SAMPLE_MS);
+    expect(watch.stalled()).toBe(true);
+  });
+
+  it("a build that stops reporting progress does not un-latch it either", () => {
+    let count: number | null = 11;
+    const { clock, watch } = watcher(() => count);
+    watch.arm();
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * PROPERTY_STALL_SAMPLES_AGREED);
+    expect(watch.stalled()).toBe(true);
+    count = null;
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * 3);
+    expect(watch.stalled()).toBe(true);
+  });
+
+  it("still gives up at the sample cap while latched, so no timer runs all session", () => {
+    const { clock, watch } = watcher(() => 11);
+    watch.arm();
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * (PROPERTY_STALL_MAX_SAMPLES + 5));
+    expect(clock.pending()).toBe(0);
+    expect(watch.stalled()).toBe(true); // the verdict survives; only the timer stops
   });
 
   it("never latches on a vault that is merely cold and still working", () => {

@@ -8,18 +8,38 @@ import type { PropertyEntry, PropertyWalk } from "./ObsidianPropertyIndex";
  */
 
 /**
- * 200 files, and this is the number that makes the whole design safe.
+ * 200 files. What this bounds, exactly, and what it does not.
  *
- * AT COLD START EVERY FILE IS UNPARSED. A repair that answered that by reading
- * the vault off disk would be far worse than the outage it exists to fix, and
- * the trigger alone is not enough to guarantee it cannot happen — a trigger is
- * a judgement about timing, and this is an absolute bound. Any vault bigger
- * than 200 notes is therefore structurally incapable of having its cold start
- * read from disk by this code, whatever the trigger decides.
+ * IT BOUNDS THE UNPARSED LIST AT THE MOMENT OF THE ASK. Vault size never
+ * enters it. So the guarantee is: a single mistaken verdict from
+ * `lifecycle/parseStall.ts` costs at most 200 head reads of 16 KB, once. It is
+ * a blast radius.
  *
- * It is also the right number on its own terms: the measured jams held 2 to 14
- * unparsed files, a vault where thousands are unparsed is broken in a way to
- * REPORT rather than paper over, and 200 heads at 16 KB is 3 MB read once.
+ * It is NOT a proof that a cold start can never be read off disk. An earlier
+ * version of this comment said any vault over 200 notes was "structurally
+ * incapable" of that, and it was wrong: a 5,000-note vault mid-index with 150
+ * files still outstanding plans a `"repair"` and reads those 150, because 150
+ * is under the cap. What makes that affordable is the cost of being wrong —
+ * 150 heads, once, answers identical to what the cache would have given — and
+ * not the cap making it unreachable.
+ *
+ * The number is right on its own terms, and the measurement behind it is in
+ * `sdd/property-members/jam-scale-report.md`. A jam leaves unparsed exactly the
+ * suffix of Obsidian's vault walk from the jamming file onward:
+ *
+ *  - WARM — a vault Obsidian has opened before, into which an oversized note
+ *    then arrives or syncs in, which is the case a real user meets — leaves
+ *    **one file unparsed, and that file is the jammer**. 1 of 501 and 1 of
+ *    5,001, `inProgressTaskCount` 1. It does not scale with vault size.
+ *  - COLD, with the jammer at the vault root, leaves **everything**: 501 of 501
+ *    and 5,001 of 5,001, and zero `resolve` events for the whole run. That is
+ *    an Obsidian-level outage far past anything 200 head reads could paper
+ *    over, and the honest answer is the one this cap produces: `"too-many"`,
+ *    nothing read, the snapshot left unavailable.
+ *
+ * Two runs at each size agreed exactly. 200 sits two orders of magnitude above
+ * the warm case and more than one below the cold one, which is where a bound of
+ * this kind belongs. 200 heads at 16 KB is 3 MB read once.
  */
 export const PROPERTY_REPAIR_MAX_FILES = 200;
 

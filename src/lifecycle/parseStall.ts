@@ -35,18 +35,32 @@
  * This file is the judgement: it can be wrong about timing. The guard that
  * cannot be wrong is `PROPERTY_REPAIR_MAX_FILES` in `visibility/
  * propertyRepair.ts` — more than 200 unparsed files is not a jam and is never
- * read from disk, which makes a cold start of any real vault structurally
- * unreachable from here whatever this file decides.
+ * read from disk, which bounds what a mistaken verdict here can cost to 200
+ * files. It bounds the LIST AT THE MOMENT OF THE ASK and not the vault, so it
+ * is a blast radius and not a proof that a cold start can never be read; see
+ * that file for what it does and does not guarantee.
+ *
+ * And because this judgement can be wrong, it is not permanent. Sampling
+ * continues past a latch and a counter that moves or drains takes it back —
+ * `stallCleared` below.
  */
 
 /**
  * 5 seconds between samples.
  *
  * Bounded below by what a healthy vault does between samples. The healthy
- * control run parsed 17 files in 27.4 s, and a single 8 MB file held
- * `inProgressTaskCount` at the same value for twenty seconds in the middle of
- * it — so no sampling interval short enough to be useful can prove the queue
- * is dead rather than busy. This interval does not try to.
+ * control run parsed 17 files in 27.4 s, and `inProgressTaskCount` held at the
+ * same value for twenty seconds in the middle of it — so no sampling interval
+ * short enough to be useful can prove the queue is dead rather than busy. This
+ * interval does not try to.
+ *
+ * The plateau belongs to the file the run was ON, not to the largest file in
+ * the vault: `jam-questions-report.md`, question 2, session 3, puts the
+ * 20-second gap BEFORE `09 huge-frontmatter.md` (437,811 B), with the 8 MB
+ * `10 long-line.md` accounting for the following 6.4 s (+20,650 ms to
+ * +27,073 ms). The plateau is the stronger fact, because it is what makes a
+ * false latch reachable on a healthy vault at all — which is why the latch is
+ * provisional. See `stallCleared`.
  *
  * Bounded above by the outage it is sitting through: while this waits, a
  * property space shows the whole vault. Three samples at 5 s is a 15-second
@@ -111,6 +125,31 @@ export function stallVerdict(samples: readonly (number | null)[]): StallVerdict 
   return window.every((s) => s === last) ? "stalled" : "working";
 }
 
+/**
+ * Whether a latched verdict has been CONTRADICTED by the newest reading.
+ *
+ * A latch is a verdict about a moment, not about the session, and the project's
+ * own control run shows a healthy vault can earn one: `jam-questions-report.md`
+ * records `inProgressTaskCount` holding still for twenty seconds in a run that
+ * completed in 27.4 s, which is longer than the two intervals this file latches
+ * on. So a wrong verdict has to be able to cost ONE repair rather than the rest
+ * of the session.
+ *
+ * Exactly two readings contradict "the counter has stopped": one that has
+ * MOVED, and one that has reached zero. Everything else leaves the latch alone
+ * — in particular a window too short to judge, so that re-arming (which clears
+ * the samples) cannot un-latch by itself, and a null, so that a build which
+ * stops exposing the counter cannot either.
+ */
+export function stallCleared(samples: readonly (number | null)[]): boolean {
+  const last = samples[samples.length - 1];
+  if (last === undefined || last === null) return false;
+  if (last === 0) return true;
+  const previous = samples[samples.length - 2];
+  if (previous === undefined || previous === null) return false;
+  return last !== previous;
+}
+
 /** The injected clock, the shape `eventCoalescer.ts` uses. */
 export interface StallTimer {
   set(fn: () => void, ms: number): number;
@@ -119,11 +158,18 @@ export interface StallTimer {
 
 export interface ParseStallWatch {
   /**
-   * Start sampling. A no-op while already sampling or once stalled; otherwise
-   * it starts a fresh run, so a give-up is recoverable.
+   * Start sampling. A no-op while already sampling; otherwise it starts a
+   * fresh run, so a give-up is recoverable. Re-arming never un-latches by
+   * itself — see `stallCleared`.
    */
   arm(): void;
-  /** True once the samples have said Obsidian has stopped. Latched. */
+  /**
+   * Whether the samples currently say Obsidian has stopped.
+   *
+   * Latched but NOT permanent: sampling continues past a latch, and a counter
+   * that moves or reaches zero clears it. A wrong verdict therefore costs one
+   * repair rather than the rest of the session.
+   */
   stalled(): boolean;
   /** Drop any pending sample so no timer outlives the plugin. */
   cancel(): void;
@@ -139,7 +185,12 @@ export function createParseStallWatch(args: {
   timer: StallTimer;
   /** `inProgressTaskCount`, through the quarantine module, or null. */
   progress: () => number | null;
-  /** Called once, when the verdict first turns "stalled". */
+  /**
+   * Called when the verdict TURNS "stalled" — on the transition, so a run that
+   * stays stalled calls it once. A latch that is cleared and earned again
+   * calls it again, which is the point: the second verdict is about a second
+   * situation.
+   */
   onStalled: () => void;
   sampleMs?: number;
   maxSamples?: number;
@@ -153,20 +204,24 @@ export function createParseStallWatch(args: {
   let cancelled = false;
 
   const schedule = (): void => {
-    if (cancelled || latched) return;
+    if (cancelled) return;
     handle = args.timer.set(tick, sampleMs);
   };
 
   const tick = (): void => {
     handle = null;
-    if (cancelled || latched) return;
+    if (cancelled) return;
     samples.push(args.progress());
+    // SAMPLING CONTINUES PAST A LATCH, which is what keeps the verdict
+    // provisional. A healthy vault can earn a latch — a 20-second plateau in a
+    // 27.4-second run, in the project's own control measurement — and before
+    // this, nothing ever took it back for the rest of the session.
+    if (latched && stallCleared(samples)) latched = false;
     const verdict = stallVerdict(samples);
     if (verdict === "drained") return; // healthy; stop until re-armed
-    if (verdict === "stalled") {
+    if (verdict === "stalled" && !latched) {
       latched = true;
       args.onStalled();
-      return;
     }
     if (samples.length >= maxSamples) return; // give up; `arm()` may restart
     schedule();
@@ -174,7 +229,7 @@ export function createParseStallWatch(args: {
 
   return {
     arm(): void {
-      if (cancelled || latched || handle !== null) return;
+      if (cancelled || handle !== null) return;
       samples = [];
       schedule();
     },
