@@ -128,7 +128,14 @@ function splitBatch(
   return { added, already };
 }
 
-const STILL_READING = "Spaces has not read this vault's properties yet. Try again in a moment.";
+/**
+ * Prefixed like every other refusal this plugin raises, and worded as what is
+ * happening rather than as what the plugin has not done. Exported because the
+ * contents dialog refuses the same situation and must not say it twice in two
+ * ways.
+ */
+export const STILL_READING =
+  "Spaces: this vault's properties are still loading. Try again in a moment.";
 
 /**
  * The property index for a space about to be written to, or `"unknown"` when

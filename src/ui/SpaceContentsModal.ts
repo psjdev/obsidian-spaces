@@ -571,15 +571,17 @@ export class SpaceContentsModal extends Modal {
       new Set(keys.map((k) => k.key))
     );
     if (read.outcome === "blank") {
-      new Notice("Type a property name to add.");
+      new Notice("Spaces: type a property name to add.");
       return;
     }
     if (read.outcome === "spaced") {
-      new Notice("No property in the vault is spelled with spaces at the ends. Remove them.");
+      new Notice(
+        "Spaces: no property in the vault is spelled with spaces at the ends. Remove them."
+      );
       return;
     }
     if (read.outcome === "tags") {
-      new Notice("Tags are added in the tag field above.");
+      new Notice("Spaces: tags are added in the tag field above.");
       return;
     }
     if (read.outcome === "held") {

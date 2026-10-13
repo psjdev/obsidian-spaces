@@ -97,7 +97,7 @@ describe("a note a property member shows is still held after the snapshot goes c
     const before = notices().length;
     await addToSpace({ defs, controller }, "p", [aFile]);
     expect(notices().slice(before)).toEqual([
-      "Spaces has not read this vault's properties yet. Try again in a moment.",
+      "Spaces: this vault's properties are still loading. Try again in a moment.",
     ]);
     expect(defs.get().spaces[0].members).toEqual([{ kind: "property", key: "status", value: "active" }]);
   });
