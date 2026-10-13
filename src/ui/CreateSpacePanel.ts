@@ -800,6 +800,12 @@ export class CreateSpacePanel {
     // A handle left running would reach for a filter box that is no longer
     // in any document.
     this.cancelSigilFlash();
+    // The Properties body's plan, which holds a row per value of every key
+    // anyone opened. Nothing can repaint it now that the scroller it belongs
+    // to is off the document, and holding it would keep those rows reachable
+    // from a torn-down panel.
+    this.propertyPaint = null;
+    this.propertyRange = null;
     this.releasePropertySubscription();
     // After `el.remove()`, not before: this call is unguarded, and a throw
     // here must not leave our own element still attached, contradicting this
