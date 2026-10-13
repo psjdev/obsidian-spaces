@@ -258,15 +258,27 @@ describe("a property space whose snapshot has never been ready", () => {
   it("releases the index it kept when the controller is disposed", async () => {
     // The kept index is a whole vault's frontmatter keys plus the buckets of
     // everything anyone expanded. Teardown must not leave it reachable.
-    const { controller, setProperties } = await build(PROPERTY_MEMBERS, COLD, {
+    //
+    // THE SNAPSHOT STAYS READY HERE, which is the point. The controller holds
+    // two references to that index: `lastReadyIndex`, and the lazy accessor
+    // the plugin installed, which memoizes the snapshot it built and hands the
+    // same index back forever after. An earlier version of this test made the
+    // snapshot unavailable first, which is the one state in which dropping the
+    // kept reference alone LOOKS like a release, so it passed against a
+    // `dispose` that freed nothing in any case anyone would meet.
+    const { controller, propertyAsks } = await build(PROPERTY_MEMBERS, COLD, {
       ready: true,
       properties: readyProperties(),
     });
     await controller.switchTo({ kind: "space", id: "research" });
-    setProperties({ status: "unavailable" });
     expect(controller.drawnPropertyIndex()).not.toBeNull();
     controller.dispose();
     expect(controller.drawnPropertyIndex()).toBeNull();
+    // And the accessor is let go of rather than merely ignored: nothing the
+    // controller does afterwards reaches the closure that holds the index.
+    const asked = propertyAsks();
+    controller.drawnPropertyIndex();
+    expect(propertyAsks()).toBe(asked);
   });
 });
 

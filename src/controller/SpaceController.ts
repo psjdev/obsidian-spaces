@@ -13,6 +13,15 @@ import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex, PropertySnapshot } from "../visibility/PropertyIndex";
 import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from "../types";
 
+/**
+ * The property accessor a disposed controller is left with.
+ *
+ * A constant, so teardown does not mint a closure, and an accessor rather than
+ * a flag so `drawnPropertyIndex` and the recompute arm keep their one way of
+ * asking. See `dispose`.
+ */
+const UNAVAILABLE_PROPERTIES = (): PropertySnapshot => ({ status: "unavailable" });
+
 interface ControllerHost {
   apply(snapshot: VisibilitySnapshot | null): void;
   /**
@@ -345,7 +354,17 @@ export class SpaceController {
     // vault's frontmatter keys, and the value buckets of everything anyone
     // expanded. Nothing asks after this, so holding it would keep megabytes
     // reachable from a torn-down controller for the rest of the session.
+    //
+    // BOTH REFERENCES TO IT, not just this one. `this.properties` is the
+    // plugin's lazy snapshot accessor and it MEMOIZES: once anything has
+    // asked, that closure holds the very index `lastReadyIndex` holds, so
+    // dropping one of the two freed nothing in the common case, which is
+    // every case where a property member was ever resolved. It is replaced
+    // with the accessor a controller that has not been handed one starts
+    // with, so a late caller gets the same "nothing available" answer it
+    // would have got before teardown rather than a throw.
     this.lastReadyIndex = null;
+    this.properties = UNAVAILABLE_PROPERTIES;
   }
 
   /**
