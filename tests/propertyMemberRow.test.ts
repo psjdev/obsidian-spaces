@@ -183,8 +183,10 @@ describe("adding a property member to a space that already exists", () => {
     exclude: ["b.md"],
   };
 
+  const none: ReadonlySet<string> = new Set();
+
   function addTyped(space: SpaceDefinition, key: string, value = ""): SpaceDefinition {
-    const read = readPropertyAdd(space.members, key, value);
+    const read = readPropertyAdd(space.members, key, value, none);
     if (read.outcome !== "add") throw new Error(`expected an add, got ${read.outcome}`);
     return addPropertyMember(space, read.member);
   }
@@ -215,11 +217,11 @@ describe("adding a property member to a space that already exists", () => {
   });
 
   it("reaches both shapes: has the property, and equals a value", () => {
-    expect(readPropertyAdd(before.members, "due", "")).toEqual({
+    expect(readPropertyAdd(before.members, "due", "", none)).toEqual({
       outcome: "add",
       member: { kind: "property", key: "due" },
     });
-    expect(readPropertyAdd(before.members, "status", "active")).toEqual({
+    expect(readPropertyAdd(before.members, "status", "active", none)).toEqual({
       outcome: "add",
       member: { kind: "property", key: "status", value: "active" },
     });
@@ -230,8 +232,21 @@ describe("adding a property member to a space that already exists", () => {
     expect(both.members.filter((m) => m.kind === "property")).toHaveLength(2);
   });
 
-  it("trims what was typed, because keys match exactly and a stray blank matches nothing", () => {
-    expect(readPropertyAdd([], "  status ", " active ")).toEqual({
+  it("uses the key exactly as typed, so a vault key with spaces is added as the vault spells it", () => {
+    const vault = new Set([" status "]);
+    expect(readPropertyAdd([], " status ", "", vault)).toEqual({
+      outcome: "add",
+      member: { kind: "property", key: " status " },
+    });
+  });
+
+  it("refuses a spaced key the vault does not hold, rather than storing a different one", () => {
+    expect(readPropertyAdd([], " status ", "", none).outcome).toBe("spaced");
+    expect(readPropertyAdd([], "status ", "x", new Set(["status"])).outcome).toBe("spaced");
+  });
+
+  it("trims the value, since a stray blank in it is never meant", () => {
+    expect(readPropertyAdd([], "status", " active ", none)).toEqual({
       outcome: "add",
       member: { kind: "property", key: "status", value: "active" },
     });
@@ -240,9 +255,9 @@ describe("adding a property member to a space that already exists", () => {
   it("adding something already held is a no-op that says so, by memberIdentity", () => {
     const once = addTyped(before, "status", "active");
     // `normalizeValue` folds case and blanks, so this is the same member.
-    const again = readPropertyAdd(once.members, "status", " Active ");
+    const again = readPropertyAdd(once.members, "status", " Active ", none);
     expect(again).toEqual({ outcome: "held", label: "status: Active" });
-    expect(readPropertyAdd(once.members, "status", "active").outcome).toBe("held");
+    expect(readPropertyAdd(once.members, "status", "active", none).outcome).toBe("held");
 
     // And the pure adder itself refuses a second identical row, for a caller
     // that raced the check.
@@ -251,7 +266,7 @@ describe("adding a property member to a space that already exists", () => {
     expect(raced.members).toHaveLength(once.members.length);
   });
 
-  it("does not treat a path or tag spelled like the key as holding it", () => {
+  it("does not treat a path or tag spelled like the key as holding it (memberIdentity's kind namespacing)", () => {
     const lookalikes: SpaceDefinition = {
       ...before,
       members: [
@@ -259,26 +274,28 @@ describe("adding a property member to a space that already exists", () => {
         { kind: "tag", tag: "status" },
       ],
     };
-    expect(readPropertyAdd(lookalikes.members, "status", "").outcome).toBe("add");
+    expect(readPropertyAdd(lookalikes.members, "status", "", none).outcome).toBe("add");
   });
 
   it("never offers a key the schema rejects or the picker hides", () => {
-    expect(readPropertyAdd([], "", "x").outcome).toBe("blank");
-    expect(readPropertyAdd([], "   ", "").outcome).toBe("blank");
-    for (const key of ["tags", "tag", "Tags", "TAG", " tags "]) {
-      expect(readPropertyAdd([], key, "").outcome).toBe("tags");
-      expect(readPropertyAdd([], key, "x").outcome).toBe("tags");
+    expect(readPropertyAdd([], "", "x", none).outcome).toBe("blank");
+    expect(readPropertyAdd([], "   ", "", none).outcome).toBe("blank");
+    // Not an alias of tags (Obsidian reads `/^tags?$/i`), and not a vault key: refused as spaced.
+    expect(readPropertyAdd([], " tags ", "", none).outcome).toBe("spaced");
+    for (const key of ["tags", "tag", "Tags", "TAG"]) {
+      expect(readPropertyAdd([], key, "", none).outcome).toBe("tags");
+      expect(readPropertyAdd([], key, "x", none).outcome).toBe("tags");
     }
   });
 
   it("agrees with the picker's rule for every key, because it is the same rule", () => {
     for (const key of ["status", "tagline", "tags", "Tag", "", " ", "due date", "TAGS"]) {
-      const adds = readPropertyAdd([], key, "").outcome === "add";
+      const adds = readPropertyAdd([], key, "", none).outcome === "add";
       expect(adds).toBe(isPickableKey(key.trim()));
     }
   });
 
-  it("shows the new member as a row, with the count the index gives it", () => {
+  it("shows the new member as a row, counted from the index", () => {
     const after = addTyped(before, "status", "active");
     const rows = memberRows(
       after,
@@ -287,6 +304,11 @@ describe("adding a property member to a space that already exists", () => {
       (m) => propertyMemberCount(m, ready, after)
     );
     const row = rows.find((r) => r.kind === "property");
-    expect(row).toMatchObject({ kind: "property", label: "status: active" });
+    expect(row).toMatchObject({
+      kind: "property",
+      label: "status: active",
+      matchCount: 3,
+      status: "present",
+    });
   });
 });

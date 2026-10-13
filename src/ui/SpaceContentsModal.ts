@@ -531,9 +531,19 @@ export class SpaceContentsModal extends Modal {
   private async addProperty(keyText: string, valueText: string): Promise<void> {
     const space = this.defs.get().spaces.find((s) => s.id === this.spaceId);
     if (!space) return;
-    const read = readPropertyAdd(space.members, keyText, valueText);
+    const keys = this.propertyIndex()?.listKeys() ?? [];
+    const read = readPropertyAdd(
+      space.members,
+      keyText,
+      valueText,
+      new Set(keys.map((k) => k.key))
+    );
     if (read.outcome === "blank") {
       new Notice("Type a property name to add.");
+      return;
+    }
+    if (read.outcome === "spaced") {
+      new Notice("No property in the vault is spelled with spaces at the ends. Remove them.");
       return;
     }
     if (read.outcome === "tags") {

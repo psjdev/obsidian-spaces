@@ -84,12 +84,13 @@ export function equalsMember(key: string, value: string): MemberEntry {
 /**
  * Whether the space already holds this property member, by `memberIdentity`,
  * so `" Active "` and `"active"` are the one member the loader would keep.
- * A non-property member never matches.
+ * A non-property member never matches, with no guard here saying so:
+ * `memberIdentity` namespaces every identity by kind, so a file, folder or tag
+ * spelled like the key cannot share one with a property member.
  */
 export function holdsProperty(items: readonly MemberEntry[], member: MemberEntry): boolean {
-  if (member.kind !== "property") return false;
   const id = memberIdentity(member);
-  return items.some((m) => m.kind === "property" && memberIdentity(m) === id);
+  return items.some((m) => memberIdentity(m) === id);
 }
 
 /**
@@ -114,32 +115,42 @@ export type PropertyAdd =
   | { outcome: "add"; member: MemberEntry }
   | { outcome: "held"; label: string }
   | { outcome: "blank" }
-  | { outcome: "tags" };
+  | { outcome: "tags" }
+  | { outcome: "spaced" };
 
 /**
  * Reads the adder's two fields.
  *
- * The key and the value are trimmed: a space typed before or after either is
- * never what the person meant, and the key would otherwise match nothing,
- * because keys match exactly. An empty value means "has this property"; a
- * value means "equals it". A value cannot be only blanks, so "equals the empty
- * string" is not reachable from here, though the create panel's picker offers
- * it.
+ * The KEY is used exactly as typed, because keys match exactly and the key
+ * field suggests vault keys that can carry surrounding blanks: trimming would
+ * turn a suggested `" status "` into a different member that matches nothing.
+ * `knownKeys` is the vault's own spelling of every key it holds. A key with
+ * surrounding blanks that the vault does not hold is refused as "spaced"
+ * rather than stored, since it would match nothing and the person most likely
+ * typed a stray blank. A key that is empty after trimming is "blank", the
+ * schema's rule.
+ *
+ * The VALUE is trimmed, and an empty one means "has this property" while text
+ * means "equals it". "Equals the empty string" is therefore not addable here;
+ * the create panel's picker lists the vault's real empty-string value and adds
+ * it from there.
  *
  * Eligibility is `isPickableKey`, the picker's own rule, so a key the schema
  * would reject and the tag keys are refused the same way in both places.
- * Which of the two it was is told apart only for tags, because that is the
- * one a person might type on purpose and who has somewhere else to go.
+ * Tags are told apart because that is the one a person might type on purpose
+ * and who has somewhere else to go.
  */
 export function readPropertyAdd(
   members: readonly MemberEntry[],
   keyText: string,
-  valueText: string
+  valueText: string,
+  knownKeys: ReadonlySet<string>
 ): PropertyAdd {
-  const key = keyText.trim();
+  const key = keyText;
   const value = valueText.trim();
   if (!isEligiblePropertyKey(key)) return { outcome: "blank" };
   if (!isPickableKey(key)) return { outcome: "tags" };
+  if (key !== key.trim() && !knownKeys.has(key)) return { outcome: "spaced" };
   const member = value === "" ? existsMember(key) : equalsMember(key, value);
   if (holdsProperty(members, member)) {
     return { outcome: "held", label: value === "" ? key : `${key}: ${value}` };
