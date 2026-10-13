@@ -17,7 +17,19 @@ import { hasOwnKey, normalizeValue } from "./propertyValues";
  * so it is bounded by total key occurrences across the vault.
  */
 export interface PropertyIndex {
-  /** Which snapshot this answer came from. Readers compare it; they never ignore it. */
+  /**
+   * Which snapshot this answer came from.
+   *
+   * CARRIED, NOT COMPARED. It said "readers compare it; they never ignore
+   * it", and no reader exists: the only reads anywhere are two tests
+   * asserting the field is carried. It is threaded from `main.ts`, which
+   * stamps each installed snapshot with the next number, so a future
+   * staleness check — "is the answer I am holding from the snapshot in
+   * force?" — has a hook that does not need the walk or the install path
+   * changed to get one. Nothing compares it TODAY. Keep this sentence true:
+   * a comment claiming a check nobody runs is worse than a field nobody
+   * reads, because it is the one a reviewer believes.
+   */
   readonly generation: number;
   pathsWithKey(key: string): string[];
   pathsMatching(key: string, value: string): string[];

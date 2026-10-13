@@ -294,7 +294,8 @@ export default class SpacesPlugin extends Plugin {
   private metadataResolved = false;
   /**
    * Stamps each property snapshot so one can be told from the one it replaced.
-   * Only ever incremented, and only by `newPropertySnapshot`.
+   * Only ever incremented, and only by `newPropertySnapshot`. Nothing
+   * compares the stamp yet; `PropertyIndex.generation` says what it is for.
    */
   private propertyGeneration = 0;
   /** Open property pickers, each owned by the panel that opened it. */
