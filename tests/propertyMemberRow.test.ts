@@ -7,6 +7,7 @@ import {
   type PropertyMemberRow,
 } from "../src/ui/memberList";
 import { memberIdentity } from "../src/definitions/schema";
+import { addPropertyMember, isPickableKey, readPropertyAdd } from "../src/ui/propertyRows";
 import { resolveMembers } from "../src/controller/resolveMembers";
 import { createPropertyIndex, type PropertyIndex } from "../src/visibility/PropertyIndex";
 import type { MemberEntry, SpaceDefinition } from "../src/types";
@@ -165,5 +166,127 @@ describe("a property member's row", () => {
     expect(withoutPropertyMember(members, memberIdentity(members[3]))).toEqual(
       members.slice(0, 3)
     );
+  });
+});
+
+describe("adding a property member to a space that already exists", () => {
+  const before: SpaceDefinition = {
+    id: "s",
+    name: "Active",
+    icon: "star",
+    color: "#aa0000",
+    members: [
+      { kind: "folder", path: "Work" },
+      { kind: "file", path: "a.md" },
+      { kind: "tag", tag: "project" },
+    ],
+    exclude: ["b.md"],
+  };
+
+  function addTyped(space: SpaceDefinition, key: string, value = ""): SpaceDefinition {
+    const read = readPropertyAdd(space.members, key, value);
+    if (read.outcome !== "add") throw new Error(`expected an add, got ${read.outcome}`);
+    return addPropertyMember(space, read.member);
+  }
+
+  it("adds one member at the end and changes nothing else about the space", () => {
+    const snapshot = structuredClone(before);
+    const after = addTyped(before, "status", "active");
+
+    expect(after.members).toEqual([
+      ...snapshot.members,
+      { kind: "property", key: "status", value: "active" },
+    ]);
+    expect(after.id).toBe("s");
+    expect(after.name).toBe("Active");
+    expect(after.icon).toBe("star");
+    expect(after.color).toBe("#aa0000");
+    expect(after.exclude).toEqual(["b.md"]);
+    // Every field the space has, so one this test did not think to name cannot
+    // be dropped or added unnoticed.
+    expect(Object.keys(after).sort()).toEqual(Object.keys(snapshot).sort());
+    // The input is not edited in place.
+    expect(before).toEqual(snapshot);
+  });
+
+  it("leaves an absent exclude absent", () => {
+    const { exclude: _dropped, ...noExclude } = before;
+    expect("exclude" in addTyped(noExclude, "status")).toBe(false);
+  });
+
+  it("reaches both shapes: has the property, and equals a value", () => {
+    expect(readPropertyAdd(before.members, "due", "")).toEqual({
+      outcome: "add",
+      member: { kind: "property", key: "due" },
+    });
+    expect(readPropertyAdd(before.members, "status", "active")).toEqual({
+      outcome: "add",
+      member: { kind: "property", key: "status", value: "active" },
+    });
+  });
+
+  it("holds both shapes of one key side by side, since they are different members", () => {
+    const both = addTyped(addTyped(before, "status"), "status", "active");
+    expect(both.members.filter((m) => m.kind === "property")).toHaveLength(2);
+  });
+
+  it("trims what was typed, because keys match exactly and a stray blank matches nothing", () => {
+    expect(readPropertyAdd([], "  status ", " active ")).toEqual({
+      outcome: "add",
+      member: { kind: "property", key: "status", value: "active" },
+    });
+  });
+
+  it("adding something already held is a no-op that says so, by memberIdentity", () => {
+    const once = addTyped(before, "status", "active");
+    // `normalizeValue` folds case and blanks, so this is the same member.
+    const again = readPropertyAdd(once.members, "status", " Active ");
+    expect(again).toEqual({ outcome: "held", label: "status: Active" });
+    expect(readPropertyAdd(once.members, "status", "active").outcome).toBe("held");
+
+    // And the pure adder itself refuses a second identical row, for a caller
+    // that raced the check.
+    const raced = addPropertyMember(once, { kind: "property", key: "status", value: "ACTIVE" });
+    expect(raced).toBe(once);
+    expect(raced.members).toHaveLength(once.members.length);
+  });
+
+  it("does not treat a path or tag spelled like the key as holding it", () => {
+    const lookalikes: SpaceDefinition = {
+      ...before,
+      members: [
+        { kind: "file", path: "status" },
+        { kind: "tag", tag: "status" },
+      ],
+    };
+    expect(readPropertyAdd(lookalikes.members, "status", "").outcome).toBe("add");
+  });
+
+  it("never offers a key the schema rejects or the picker hides", () => {
+    expect(readPropertyAdd([], "", "x").outcome).toBe("blank");
+    expect(readPropertyAdd([], "   ", "").outcome).toBe("blank");
+    for (const key of ["tags", "tag", "Tags", "TAG", " tags "]) {
+      expect(readPropertyAdd([], key, "").outcome).toBe("tags");
+      expect(readPropertyAdd([], key, "x").outcome).toBe("tags");
+    }
+  });
+
+  it("agrees with the picker's rule for every key, because it is the same rule", () => {
+    for (const key of ["status", "tagline", "tags", "Tag", "", " ", "due date", "TAGS"]) {
+      const adds = readPropertyAdd([], key, "").outcome === "add";
+      expect(adds).toBe(isPickableKey(key.trim()));
+    }
+  });
+
+  it("shows the new member as a row, with the count the index gives it", () => {
+    const after = addTyped(before, "status", "active");
+    const rows = memberRows(
+      after,
+      () => true,
+      undefined,
+      (m) => propertyMemberCount(m, ready, after)
+    );
+    const row = rows.find((r) => r.kind === "property");
+    expect(row).toMatchObject({ kind: "property", label: "status: active" });
   });
 });

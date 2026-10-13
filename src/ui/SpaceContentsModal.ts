@@ -13,6 +13,7 @@ import {
   type TagMemberRow,
 } from "./memberList";
 import { memberIdentity } from "../definitions/schema";
+import { addPropertyMember, pickableKeys, readPropertyAdd } from "./propertyRows";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { normalizeTag } from "../visibility/tagMatch";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
@@ -75,6 +76,9 @@ function propertyRowDescription(row: PropertyMemberRow): string {
   const notes = row.matchCount === 1 ? "note" : "notes";
   return `Property. ${row.matchCount} ${notes}.`;
 }
+
+/** Gives each drawn key list its own id, since a re-render replaces the old one. */
+let propertyListSeq = 0;
 
 export class SpaceContentsModal extends Modal {
   /**
@@ -178,6 +182,11 @@ export class SpaceContentsModal extends Modal {
     // Above the list, so it is still reachable on a space with no members:
     // that is the space most in need of one.
     this.renderTagAdder(contentEl, space);
+    this.renderPropertyAdder(
+      contentEl,
+      space,
+      properties === undefined ? this.propertyIndex() : properties
+    );
 
     if (rows.length === 0) {
       this.renderEmpty(contentEl);
@@ -270,6 +279,70 @@ export class SpaceContentsModal extends Modal {
           void this.addTag(t.getValue());
         });
       });
+  }
+
+  /**
+   * The add-a-property fields: a key, an optional value, and an Add button.
+   *
+   * An empty value adds "has this property"; a value adds "equals this value".
+   * What the two fields mean, which keys are refused and what counts as
+   * already held is all `readPropertyAdd`, so this method draws and does not
+   * decide. The key field suggests the vault's pickable keys through a
+   * `datalist`; typing a key the vault does not hold yet is allowed, as for
+   * tags.
+   *
+   * `index` null is the only case that says the properties are still loading.
+   * An index with no keys draws no suggestions and says nothing, because the
+   * vault having no properties is not the same as not knowing yet.
+   */
+  private renderPropertyAdder(
+    containerEl: HTMLElement,
+    space: SpaceDefinition,
+    index: PropertyIndex | null
+  ): void {
+    const setting = new Setting(containerEl)
+      .setName("Add a property")
+      .setDesc(
+        (index === null ? "Suggestions appear once the vault's properties have loaded. " : "") +
+          "Type a property to add every note that has it. Add a value to add only " +
+          "the notes where the property equals it."
+      );
+
+    const listId = `spaces-property-keys-${++propertyListSeq}`;
+    const list = setting.controlEl.createEl("datalist", { attr: { id: listId } });
+    if (index !== null) {
+      for (const { key } of pickableKeys(index.listKeys(), "")) {
+        list.createEl("option", { attr: { value: key } });
+      }
+    }
+
+    let keyEl!: HTMLInputElement;
+    let valueEl!: HTMLInputElement;
+    setting.addText((t) => {
+      t.setPlaceholder("Property");
+      t.inputEl.setAttribute("aria-label", `Property to add to ${space.name}`);
+      t.inputEl.setAttribute("list", listId);
+      keyEl = t.inputEl;
+    });
+    setting.addText((t) => {
+      t.setPlaceholder("Value (optional)");
+      t.inputEl.setAttribute("aria-label", `Property value to add to ${space.name}`);
+      valueEl = t.inputEl;
+    });
+
+    const commit = (): void => {
+      void this.addProperty(keyEl.value, valueEl.value);
+    };
+    for (const el of [keyEl, valueEl]) {
+      el.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        commit();
+      });
+    }
+    setting.addButton((b) =>
+      b.setButtonText("Add").setTooltip(`Add the property to ${space.name}`).onClick(commit)
+    );
   }
 
   /**
@@ -445,6 +518,36 @@ export class SpaceContentsModal extends Modal {
       const held = target.members.some((m) => m.kind === "tag" && m.tag === normalized);
       if (!held) target.members.push({ kind: "tag", tag: normalized });
     }, `could not add #${normalized}`);
+  }
+
+  /**
+   * Adds a property member to this space and touches nothing else.
+   *
+   * Read against the space as it is NOW, not as it was drawn, so a member
+   * added in another window since the last render is still seen as held.
+   * Nothing is written for a refusal or a held member: the person is told, and
+   * what they typed stays in the fields.
+   */
+  private async addProperty(keyText: string, valueText: string): Promise<void> {
+    const space = this.defs.get().spaces.find((s) => s.id === this.spaceId);
+    if (!space) return;
+    const read = readPropertyAdd(space.members, keyText, valueText);
+    if (read.outcome === "blank") {
+      new Notice("Type a property name to add.");
+      return;
+    }
+    if (read.outcome === "tags") {
+      new Notice("Tags are added in the tag field above.");
+      return;
+    }
+    if (read.outcome === "held") {
+      new Notice(`${read.label} is already in ${space.name}.`);
+      return;
+    }
+    const { member } = read;
+    await this.write((target) => {
+      target.members = addPropertyMember(target, member).members;
+    }, "could not add the property");
   }
 
   /**

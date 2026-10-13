@@ -7,7 +7,7 @@
  */
 
 import { isEligiblePropertyKey, memberIdentity } from "../definitions/schema";
-import type { MemberEntry } from "../types";
+import type { MemberEntry, SpaceDefinition } from "../types";
 
 /**
  * Keys the picker never offers although the vault holds them.
@@ -90,4 +90,59 @@ export function holdsProperty(items: readonly MemberEntry[], member: MemberEntry
   if (member.kind !== "property") return false;
   const id = memberIdentity(member);
   return items.some((m) => m.kind === "property" && memberIdentity(m) === id);
+}
+
+/**
+ * The space with `member` appended, and nothing else about it changed.
+ *
+ * Returns a new object that shares every other field with `space` (name, icon,
+ * color, exclusions, existing members and their order), so the one thing that
+ * differs is the end of `members`. Appending rather than sorting is what keeps
+ * the order the person arranged.
+ *
+ * A property member the space already holds, by `memberIdentity`, returns the
+ * space unchanged, so a caller that raced a second add cannot store two rows
+ * the loader would collapse into one.
+ */
+export function addPropertyMember(space: SpaceDefinition, member: MemberEntry): SpaceDefinition {
+  if (member.kind !== "property" || holdsProperty(space.members, member)) return space;
+  return { ...space, members: [...space.members, member] };
+}
+
+/** What typing a property into the contents dialog's adder amounts to. */
+export type PropertyAdd =
+  | { outcome: "add"; member: MemberEntry }
+  | { outcome: "held"; label: string }
+  | { outcome: "blank" }
+  | { outcome: "tags" };
+
+/**
+ * Reads the adder's two fields.
+ *
+ * The key and the value are trimmed: a space typed before or after either is
+ * never what the person meant, and the key would otherwise match nothing,
+ * because keys match exactly. An empty value means "has this property"; a
+ * value means "equals it". A value cannot be only blanks, so "equals the empty
+ * string" is not reachable from here, though the create panel's picker offers
+ * it.
+ *
+ * Eligibility is `isPickableKey`, the picker's own rule, so a key the schema
+ * would reject and the tag keys are refused the same way in both places.
+ * Which of the two it was is told apart only for tags, because that is the
+ * one a person might type on purpose and who has somewhere else to go.
+ */
+export function readPropertyAdd(
+  members: readonly MemberEntry[],
+  keyText: string,
+  valueText: string
+): PropertyAdd {
+  const key = keyText.trim();
+  const value = valueText.trim();
+  if (!isEligiblePropertyKey(key)) return { outcome: "blank" };
+  if (!isPickableKey(key)) return { outcome: "tags" };
+  const member = value === "" ? existsMember(key) : equalsMember(key, value);
+  if (holdsProperty(members, member)) {
+    return { outcome: "held", label: value === "" ? key : `${key}: ${value}` };
+  }
+  return { outcome: "add", member };
 }
