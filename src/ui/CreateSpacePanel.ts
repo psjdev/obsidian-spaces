@@ -1919,6 +1919,16 @@ export class CreateSpacePanel {
    * frontmatter matches, before any space's exclusions and before the global
    * ignore. A row here is choosing a property, not previewing a space. The
    * member row in a space's contents counts after exclusions.
+   *
+   * THE TWO ORDERS IN THIS LIST ARE DIFFERENT ON PURPOSE. Key rows are in
+   * name order (`pickableKeys`), because someone scanning for a property they
+   * know by name is better served by a stable order than by counts that shift
+   * as notes change, and the filter box narrows keys by name so the two agree.
+   * Value rows are in count order (`listValues`), because a key's values are
+   * unknown until it is opened, there is nothing to type to narrow them, and
+   * only the first `MAX_PICKER_ROWS` are drawn — so busiest-first is what
+   * decides WHICH values a person can reach, and name order would hide the
+   * common ones behind the rare.
    */
   private renderPropertyBody(host: HTMLElement): void {
     const doc = host.ownerDocument;
