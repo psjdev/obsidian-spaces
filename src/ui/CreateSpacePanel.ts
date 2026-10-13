@@ -1929,12 +1929,17 @@ export class CreateSpacePanel {
       return count;
     };
     const pick = (member: MemberEntry, focusControl: string): void => {
-      if (holdsProperty(held, member)) {
-        // Not a second identical row, and not a silent nothing either.
-        new Notice("Spaces: already selected.");
-        return;
-      }
-      this.state = { ...this.state, items: [...this.state.items, member] };
+      // The Vault and Tags bodies' own toggle, not a parallel path beside it.
+      // `toggleItem` already tells property members apart by
+      // `memberIdentity`, and no property member covers another, so it does
+      // the right thing with one unchanged.
+      //
+      // A second click on a held member takes it off, so a mis-click is
+      // undoable without leaving the picker, which is what the other two
+      // bodies promise and what the summary row's wording assumes. The
+      // "already selected" notice it replaces had nothing to report that the
+      // row was not already showing.
+      this.state = toggleItem(this.state, member);
       this.clearFault("root");
       this.renderSummary();
       this.redrawProperties(focusControl);
@@ -1985,7 +1990,10 @@ export class CreateSpacePanel {
       select.textContent = "Has property";
       select.setAttribute("aria-label", `Has property ${key}`);
       select.setAttribute("aria-pressed", String(heldKey));
-      if (heldKey) select.title = "Already selected";
+      // On the row, not on the button, so it answers a hover anywhere on the
+      // control. Says what a second click DOES, the way the tag rows do,
+      // rather than restating the mark the row is already carrying.
+      if (heldKey) el.title = `Remove ${key}`;
       // Stopped, then picks: without this the row would pick a second time on
       // the same click and the two would cancel out.
       select.addEventListener("click", (e) => {
@@ -2020,7 +2028,7 @@ export class CreateSpacePanel {
         // The value alone is ambiguous once two keys share one such as done,
         // so the name carries its key.
         btn.setAttribute("aria-label", `${key} equals ${valueLabel(v.value)}`);
-        if (heldValue) btn.title = "Already selected";
+        if (heldValue) vr.title = `Remove ${key}: ${valueLabel(v.value)}`;
         const label = doc.win.createSpan();
         label.className = "spaces-create-tree-name";
         label.classList.toggle("is-empty-label", v.value.trim() === "");
