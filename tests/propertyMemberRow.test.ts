@@ -7,7 +7,6 @@ import {
   type PropertyMemberRow,
 } from "../src/ui/memberList";
 import { memberIdentity } from "../src/definitions/schema";
-import { compileIgnore } from "../src/visibility/glob";
 import { createPropertyIndex, type PropertyIndex } from "../src/visibility/PropertyIndex";
 import type { MemberEntry, SpaceDefinition } from "../src/types";
 
@@ -26,7 +25,6 @@ function rowFor(
   opts: {
     exclude?: string[];
     members?: MemberEntry[];
-    ignore?: string[];
     properties?: PropertyIndex | null;
   } = {}
 ): PropertyMemberRow {
@@ -39,12 +37,11 @@ function rowFor(
     ...(opts.exclude === undefined ? {} : { exclude: opts.exclude }),
   };
   const index = opts.properties === undefined ? ready : opts.properties;
-  const ignore = compileIgnore(opts.ignore ?? []);
   const rows = memberRows(
     space,
     () => true,
     undefined,
-    (m) => propertyMemberCount(m, index, space.exclude ?? [], ignore)
+    (m) => propertyMemberCount(m, index, space)
   );
   const row = rows[0];
   if (row.kind !== "property") throw new Error("expected a property row first");
@@ -85,12 +82,10 @@ describe("a property member's row", () => {
     expect(row.matchCount).toBe(3);
   });
 
-  it("counts after the global ignore", () => {
-    const row = rowFor(
-      { kind: "property", key: "status", value: "active" },
-      { ignore: ["Work/c.md"] }
-    );
-    expect(row.matchCount).toBe(2);
+  it("is not filtered by the global ignore, because the tree shows those notes", () => {
+    // includedPaths: seeds bypass globalIgnore. A property match is a seed.
+    const row = rowFor({ kind: "property", key: "status", value: "active" });
+    expect(row.matchCount).toBe(3);
   });
 
   it("reports an unavailable count distinctly from zero", () => {

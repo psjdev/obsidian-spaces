@@ -13,7 +13,8 @@
 
 import { inheritedFromFolder } from "../actions/membershipMenu";
 import { isVaultRoot } from "../visibility/folderSpace";
-import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
+import type { TagIndex } from "../visibility/TagIndex";
+import { resolveMembers } from "../controller/resolveMembers";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { memberIdentity } from "../definitions/schema";
 import type { MemberEntry, MemberKind, SpaceDefinition } from "../types";
@@ -93,35 +94,34 @@ export type MemberRow = PathMemberRow | TagMemberRow | PropertyMemberRow;
 /**
  * How many notes a property member contributes to a space.
  *
- * Counts what THIS member brings in, so a note a hand-named file member also
- * holds still counts, and a note this space excludes does not, even though
- * the tree shows it through that file member. Both are true at once because
- * the tree asks "is it in the space" and this asks "what does this member
- * bring". The global ignore applies here, as the contract for a member count
- * says, although the tree lets a member's own matches bypass it.
+ * ASKS THE RESOLVER rather than restating its exclusion rule: the member is
+ * resolved alone, by `resolveMembers`, against this space's exclusions, so
+ * the count and the tree cannot decide the same question two ways. It counts
+ * what THIS member brings, so a note a hand-named file member also holds still
+ * counts, and a note this space excludes does not, even though the tree shows
+ * it through that file member.
+ *
+ * NOT FILTERED BY THE GLOBAL IGNORE, on purpose. A property match arrives as a
+ * seed, and `includedPaths` says "seeds bypass globalIgnore entirely": the
+ * ignore applies only to descendants inherited from a folder seed. The tree
+ * shows an ignored note a property member matches, so a count that dropped it
+ * would omit a row the user can see. Tag members behave the same. It follows
+ * that a has-the-key member can pull notes out of an ignored folder; that is
+ * the existing behavior for every member kind. Do not add the filter back.
  *
  * Null when `index` is null, which is "unavailable", not zero.
  */
 export function propertyMemberCount(
   member: PropertyMember,
   index: PropertyIndex | null,
-  exclude: readonly string[],
-  ignore: IgnoreMatcher
+  space: SpaceDefinition
 ): number | null {
   if (index === null) return null;
-  const matched =
-    member.value === undefined
-      ? index.pathsWithKey(member.key)
-      : index.pathsMatching(member.key, member.value);
-  const excluded = new Set(exclude.map(canonicalPath));
-  const distinct = new Set<string>();
-  for (const path of matched) {
-    const key = canonicalPath(path);
-    if (excluded.has(key) || ignore.matches(path)) continue;
-    distinct.add(key);
-  }
-  return distinct.size;
+  return resolveMembers({ ...space, members: [member] }, NO_TAGS, index).length;
 }
+
+// A property member never reads the tag index, so the resolver gets an empty one.
+const NO_TAGS: TagIndex = { pathsMatching: () => [] };
 
 /**
  * One row per stored member, in definition order.

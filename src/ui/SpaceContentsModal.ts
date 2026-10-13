@@ -13,7 +13,6 @@ import {
   type TagMemberRow,
 } from "./memberList";
 import { memberIdentity } from "../definitions/schema";
-import { compileIgnore } from "../visibility/glob";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { normalizeTag } from "../visibility/tagMatch";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
@@ -168,11 +167,10 @@ export class SpaceContentsModal extends Modal {
 
     // Taken once per render, like the tag index above, and only asked of when
     // a property row is counted.
-    const ignore = compileIgnore(this.defs.get().settings.globalIgnore);
     let properties: PropertyIndex | null | undefined;
     const propertyCount = (m: Parameters<typeof propertyMemberCount>[0]): number | null => {
       properties = properties === undefined ? this.propertyIndex() : properties;
-      return propertyMemberCount(m, properties, space.exclude ?? [], ignore);
+      return propertyMemberCount(m, properties, space);
     };
 
     const rows = memberRows(space, exists, matchCount, propertyCount);
