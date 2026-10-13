@@ -8,6 +8,7 @@
 
 import { isEligiblePropertyKey, memberIdentity } from "../definitions/schema";
 import type { MemberEntry, PropertyMember, SpaceDefinition } from "../types";
+import type { PropertyKeyCount } from "../visibility/PropertyIndex";
 import { normalizeValue } from "../visibility/propertyValues";
 
 /**
@@ -54,12 +55,18 @@ export function isPickableKey(key: string): boolean {
  * non-empty, so a closed key is never a reason to build value buckets — that
  * work stays deferred until a key is expanded, which is what the caller's
  * predicate tests first.
+ *
+ * The rows are the index's own `PropertyKeyCount`, in and out. The ARRAY is a
+ * new one, because filtering and sorting make one, but the rows in it belong
+ * to the memo every other reader shares, so they keep the `readonly` that says
+ * so: re-declaring them as `{ key: string; count: number }` quietly handed
+ * every caller permission to write to the memo.
  */
 export function pickableKeys(
-  all: ReadonlyArray<{ key: string; count: number }>,
+  all: ReadonlyArray<PropertyKeyCount>,
   query: string,
   keepUnmatched: (key: string) => boolean = () => false
-): Array<{ key: string; count: number }> {
+): PropertyKeyCount[] {
   const q = query.trim().toLowerCase();
   return all
     .filter(

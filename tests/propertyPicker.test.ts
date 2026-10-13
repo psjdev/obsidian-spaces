@@ -535,16 +535,27 @@ const overflowText = (): string[] => overflowRows().map((r) => r.textContent ?? 
 
 describe("the filter reaches an open key's values", () => {
   const notes: Notes = {
-    "a.md": { status: "active", owner: "stan" },
+    // `archive` is the CLOSED key the first test is about, and it is built to
+    // be able to show the thing being claimed: its own name matches the query
+    // used there, so it stays in the list rather than being dropped before the
+    // question arises, and its value matches too, so a body that listed a
+    // closed key's values would visibly draw one. The key it replaces (`owner`
+    // holding `stan`) could do neither, which made that half of the test
+    // unobservable.
+    "a.md": { status: "active", archive: "arcadia" },
     "b.md": { status: "archived" },
     "c.md": { status: "done" },
   };
 
-  it("narrows the open key's values while leaving a closed key's alone", () => {
+  it("narrows the open key's values, and lists none of a closed key's", () => {
     openProperties({ properties: ready(indexOf(notes)) });
     expandBtn("status").click();
     expect(valueLabels()).toEqual(["active", "archived", "done"]);
     type("arc");
+    // `archive` is still offered, by its name, and its value `arcadia` matches
+    // the same query — and no value row of its own is drawn, because a closed
+    // key's values are never listed. That is what keeps its buckets unbuilt.
+    expect(offered()).toEqual(["archive", "status"]);
     expect(valueLabels()).toEqual(["archived"]);
   });
 
