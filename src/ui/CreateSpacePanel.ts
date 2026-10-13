@@ -1849,7 +1849,14 @@ export class CreateSpacePanel {
     // vault text, which must never be interpolated into one.
     for (const el of Array.from(host.querySelectorAll<HTMLElement>("[data-control]"))) {
       if (el.dataset.control === control) {
-        el.focus();
+        // `preventScroll`, then a scroll of our own. A plain `focus()` scrolls
+        // EVERY ancestor scroller, and on a vault with enough keys to overflow
+        // the list that moves rows under the pointer between one click and the
+        // next. `block: "nearest"` is a no-op while the control is already in
+        // view, so the list moves only when the control would otherwise be off
+        // it, which is what `renderItemBody` already does with the same call.
+        el.focus({ preventScroll: true });
+        el.scrollIntoView({ block: "nearest" });
         return;
       }
     }
