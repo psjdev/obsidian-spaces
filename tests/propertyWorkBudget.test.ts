@@ -15,6 +15,7 @@ import {
   submitMetadataWork,
   submitVaultWork,
 } from "../src/visibility/PropertyRefreshHub";
+import { createObsidianTagIndex } from "../src/visibility/ObsidianTagIndex";
 import { createLazyTagIndex, createMapTagIndex, type TagIndex } from "../src/visibility/TagIndex";
 import { createPropertyIndex, type PropertySnapshot } from "../src/visibility/PropertyIndex";
 import { normalizeValue } from "../src/visibility/propertyValues";
@@ -27,7 +28,13 @@ import { normalizeValue } from "../src/visibility/propertyValues";
  * `getFileCache`, `getRoot`) and of value normalizations, which are the same
  * on every machine and fail loudly when somebody regresses them:
  *
- *   1. One metadata event costs AT MOST ONE vault walk, whatever burst made it.
+ *   1. One metadata event costs at most ONE WALK PER METADATA-DRIVEN INDEX
+ *      (the tag index, the property snapshot), whatever burst made it, and
+ *      none for the vault tree. A space holding both a tag member and a
+ *      property member therefore pays two walks, not one: each index does its
+ *      own listing and its own `getFileCache` per file. That is the budget as
+ *      it stands; sharing one pass between the two is a design change that
+ *      touches the tag feature and is not made here.
  *   2. A vault with no property member and no open picker pays NOTHING.
  *   3. Opening the picker expands NO value buckets.
  *   4. A space naming one key pays for one key, not every key in the vault.
@@ -35,13 +42,31 @@ import { normalizeValue } from "../src/visibility/propertyValues";
  * "A vault walk" is a `getMarkdownFiles` listing OR a `getRoot` tree walk.
  *
  * WHAT IS REAL AND WHAT IS NOT. The hub, the coalescer, `RefreshFlushState`,
- * `submitVaultWork`, `metadataNotifyRoute`, the vault walk, the property
- * snapshot, `resolveMembers` and the membership gates are the production
- * modules. The plugin class is not (it needs an Obsidian runtime), so the
- * handler glue below is a MIRROR of `onMetadataEvent`, `onVaultChange` and the
- * coalescer's flush in main.ts. A change to that glue in main.ts is not seen
- * here; the parts that decide what a flush DOES are shared (see `runFlush`).
+ * `runFlush`, `submitVaultWork`, `submitMetadataWork`, `metadataNotifyRoute`,
+ * the vault tree walk, the real tag index (`createObsidianTagIndex`, with only
+ * `getAllTags` stubbed to read a `tags` field), the property snapshot,
+ * `resolveMembers` and the membership gates are the production modules, all
+ * against a counting `App`. The plugin class is not (it needs an Obsidian
+ * runtime), so the glue below is a MIRROR of `onMetadataEvent`,
+ * `onVaultChange` and `SpaceController.membersForSnapshot`. A change to that
+ * glue in main.ts is not seen here: the routing fork in `onMetadataEvent` is
+ * gated by `tagIndexInvalidation.test.ts`, which runs the real method. The
+ * mirror also asks the property snapshot whenever it recomputes, where the
+ * real controller skips the recompute while the cache is cold and the space
+ * watches metadata; the cold cases below are therefore an upper bound.
+ *
+ * ONE-SIZE COUNTS CANNOT SEE A CONSTANT FACTOR. A count is the same on every
+ * machine but it does not know that a pass costs 8 ms. What it can see is a
+ * change in asymptotic class, so the sizes below run at 500 and 5,000 notes
+ * and assert the counts equal the note count at both.
  */
+
+vi.mock("obsidian", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("obsidian")>()),
+  // The stub offers no `getAllTags`. This reads the `tags` the counting app's
+  // cache carries, the one thing the real tag index needs from it.
+  getAllTags: (cache: { tags?: Array<{ tag: string }> }) => cache.tags?.map((t) => t.tag) ?? null,
+}));
 
 vi.mock("../src/visibility/propertyValues", async () => {
   const actual = await vi.importActual<typeof import("../src/visibility/propertyValues")>(
@@ -93,7 +118,13 @@ interface Counts {
  * key, `created`, with a value distinct per note. Counts every call the
  * property feature can make into Obsidian.
  */
-function countingApp(notes: number): { app: App; counts: Counts } {
+function countingApp(
+  notes: number,
+  opts: { cold?: boolean } = {}
+): { app: App; counts: Counts; warm: () => void } {
+  // A cold cache reports `null` for every file, as Obsidian does before it
+  // has parsed them (startup, and the busiest moment).
+  let cold = opts.cold === true;
   const counts: Counts = { listings: 0, treeWalks: 0, cacheReads: 0 };
   const root = new TFolder();
   root.path = "/";
@@ -125,11 +156,13 @@ function countingApp(notes: number): { app: App; counts: Counts } {
     metadataCache: {
       getFileCache: (f: TFile) => {
         counts.cacheReads++;
-        return { frontmatter: frontmatter(Number(f.path.slice(1, 6))) };
+        if (cold) return null;
+        const i = Number(f.path.slice(1, 6));
+        return { frontmatter: frontmatter(i), ...(i % 4 === 0 ? { tags: [{ tag: "#inbox" }] } : {}) };
       },
     },
   } as unknown as App;
-  return { app, counts };
+  return { app, counts, warm: () => void (cold = false) };
 }
 
 const space = (members: SpaceDefinition["members"], root?: string): SpaceDefinition => ({
@@ -145,16 +178,18 @@ const space = (members: SpaceDefinition["members"], root?: string): SpaceDefinit
  * main.ts's handlers over the real coordination pieces, against a counting
  * vault. `flush` is what the shared coalescer runs.
  */
-function fakePlugin(notes: number, active: SpaceDefinition | null) {
-  const { app, counts } = countingApp(notes);
+function fakePlugin(notes: number, active: SpaceDefinition | null, opts: { cold?: boolean } = {}) {
+  const { app, counts, warm } = countingApp(notes, opts);
   const hub = new PropertyRefreshHub();
   const clock = manualTimer();
   const state = new RefreshFlushState();
-  const tagBuilds = { n: 0 };
+  /** Every tag index handed to the controller, and who handed it over. */
+  const tagInstalls: Array<{ from: "event" | "flush"; index: TagIndex }> = [];
+  let installer: "event" | "flush" = "event";
   let generation = 0;
   let vault = createObsidianVaultIndex(app.vault);
   counts.treeWalks = 0; // construction is startup, not an event
-  let tags: TagIndex;
+  let tags: TagIndex = createLazyTagIndex(() => createObsidianTagIndex(app));
   const newSnapshot = () => {
     const g = ++generation;
     return createLazyPropertySnapshot(() => createObsidianPropertySnapshot(app, g));
@@ -175,15 +210,26 @@ function fakePlugin(notes: number, active: SpaceDefinition | null) {
     members = resolveMembers(active, tags, index);
   };
 
-  const freshTags = () =>
-    createLazyTagIndex(() => {
-      tagBuilds.n++;
-      return createMapTagIndex(new Map());
-    });
+  // The REAL tag index, lazy as in main.ts: a listing plus a `getFileCache`
+  // per file, paid when a tag member asks.
+  const freshTags = () => {
+    const index = createLazyTagIndex(() => createObsidianTagIndex(app));
+    tagInstalls.push({ from: installer, index });
+    return index;
+  };
 
   const vaultChanges = createVaultChangeCoalescer({
     timer: clock.timer,
-    flush: () =>
+    flush: () => {
+      installer = "flush";
+      try {
+        flushOnce();
+      } finally {
+        installer = "event";
+      }
+    },
+  });
+  const flushOnce = () =>
       runFlush(state, {
         replaceVaultIndex: () => {
           vault = createObsidianVaultIndex(app.vault);
@@ -196,8 +242,7 @@ function fakePlugin(notes: number, active: SpaceDefinition | null) {
         },
         notifyPickers: () => hub.notify(),
         refresh,
-      }),
-  });
+      });
 
   const vaultEvent = () => {
     void submitVaultWork((w) => vaultChanges.submit(w), state, async () => undefined);
@@ -215,7 +260,8 @@ function fakePlugin(notes: number, active: SpaceDefinition | null) {
   return {
     app,
     counts,
-    tagBuilds,
+    warm,
+    tagInstalls,
     hub,
     state,
     get recomputes() {
@@ -270,15 +316,98 @@ describe("budget 1: one metadata event costs at most one vault walk", () => {
     expect(total(plugin.counts)).toBeLessThanOrEqual(1);
   });
 
-  it("a space that watches metadata through a TAG walks no files for a property", async () => {
+  it("a space that watches metadata through a TAG pays one walk, for the tag index", async () => {
     const plugin = fakePlugin(500, space([{ kind: "tag", tag: "inbox" }]));
     for (let i = 0; i < 50; i++) plugin.metadataEvent();
     await tick();
     plugin.settle();
     expect(plugin.recomputes).toBe(1);
+    expect(plugin.members).toHaveLength(125);
     expect(plugin.counts.treeWalks).toBe(0);
-    expect(plugin.counts.listings).toBe(0);
-    expect(plugin.counts.cacheReads).toBe(0);
+    expect(plugin.counts.listings).toBe(1);
+    expect(plugin.counts.cacheReads).toBe(500);
+  });
+
+  it("a space holding a tag AND a property member pays one walk per index, two in all", async () => {
+    // Stated as the budget, not hidden: each metadata-driven index does its own
+    // listing and its own cache read per file. A vault pass shared between them
+    // would make this 1 and 500, and is a separate design change.
+    const plugin = fakePlugin(
+      500,
+      space([
+        { kind: "tag", tag: "inbox" },
+        { kind: "property", key: "status", value: "done" },
+      ])
+    );
+    for (let i = 0; i < 50; i++) plugin.metadataEvent();
+    await tick();
+    plugin.settle();
+    expect(plugin.recomputes).toBe(1);
+    expect(plugin.counts.treeWalks).toBe(0);
+    expect(plugin.counts.listings).toBe(2);
+    expect(plugin.counts.cacheReads).toBe(1000);
+  });
+
+  it("a cold cache costs one listing and one cache read for the snapshot, however many events", async () => {
+    // Startup. An unavailable snapshot is not kept, so every ask rebuilds; the
+    // walk stops at the first unparsed file, so it is cheap, and one recompute
+    // asks once.
+    const plugin = fakePlugin(500, space([{ kind: "property", key: "status" }]), { cold: true });
+    for (let i = 0; i < 50; i++) plugin.metadataEvent();
+    await tick();
+    plugin.settle();
+    expect(plugin.recomputes).toBe(1);
+    expect(plugin.members).toEqual([]);
+    expect(plugin.counts.treeWalks).toBe(0);
+    expect(plugin.counts.listings).toBe(1);
+    expect(plugin.counts.cacheReads).toBe(1);
+    // The cache finishes parsing; the next burst is ready and walks once more.
+    plugin.warm();
+    for (let i = 0; i < 50; i++) plugin.metadataEvent();
+    await tick();
+    plugin.settle();
+    expect(plugin.members.length).toBe(500);
+    expect(plugin.counts.listings).toBe(2);
+    expect(plugin.counts.cacheReads).toBe(501);
+  });
+
+  it("a cold cache with a picker open builds once per burst, however many the picker asks", async () => {
+    const plugin = fakePlugin(500, null, { cold: true });
+    let asks = 0;
+    plugin.hub.subscribe(() => {
+      asks++;
+      plugin.snapshot();
+    });
+    for (let i = 0; i < 50; i++) plugin.metadataEvent();
+    await tick();
+    plugin.settle();
+    expect(asks).toBe(1);
+    expect(plugin.counts.listings).toBe(1);
+    expect(plugin.counts.cacheReads).toBe(1);
+  });
+
+  it("a full flush installs a NEW tag index; a metadata-only burst installs none from the flush", async () => {
+    // The tag feature's central invariant, carried by `runFlush`: a recompute
+    // reading a fresh vault against a stale tag index shows a note the vault
+    // has and the tags do not.
+    const tagSpace = space([{ kind: "tag", tag: "inbox" }]);
+    const vaultBurst = fakePlugin(50, tagSpace);
+    const before = vaultBurst.tagInstalls.length;
+    vaultBurst.vaultEvent();
+    await tick();
+    vaultBurst.settle();
+    const fromFlush = vaultBurst.tagInstalls.slice(before).filter((t) => t.from === "flush");
+    expect(fromFlush).toHaveLength(1);
+    expect(vaultBurst.tagInstalls.slice(0, before).map((t) => t.index)).not.toContain(fromFlush[0].index);
+
+    const metadataBurst = fakePlugin(50, tagSpace);
+    for (let i = 0; i < 50; i++) metadataBurst.metadataEvent();
+    await tick();
+    metadataBurst.settle();
+    expect(metadataBurst.tagInstalls.filter((t) => t.from === "flush")).toHaveLength(0);
+    // The events themselves installed one each, which is what keeps the tag
+    // index fresh without the flush.
+    expect(metadataBurst.tagInstalls.filter((t) => t.from === "event")).toHaveLength(50);
   });
 
   it("a note creation (vault event, then metadata event) walks each thing once", async () => {
@@ -305,7 +434,6 @@ describe("budget 2: a vault with no property member and no picker pays nothing",
     await tick();
     plugin.settle();
     expect(plugin.counts).toEqual({ listings: 0, treeWalks: 0, cacheReads: 0 });
-    expect(plugin.tagBuilds.n).toBe(0);
   });
 
   it("a vault event pays its tree walk and nothing for properties", async () => {
@@ -387,6 +515,30 @@ describe("budget 4: a space naming one key pays for one key", () => {
       idx
     );
     expect(vi.mocked(normalizeValue)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the counts are linear in the vault at two sizes", () => {
+  // A count cannot see a constant factor, but it does see a change of
+  // asymptotic class: a quadratic pass would not give cacheReads === notes.
+  it.each([500, 5000])("at %i notes: one read per note, one normalization per note per key opened", async (notes) => {
+    const plugin = fakePlugin(notes, space([{ kind: "property", key: "status", value: "done" }]));
+    for (let i = 0; i < 50; i++) plugin.metadataEvent();
+    await tick();
+    plugin.settle();
+    expect(plugin.counts.listings).toBe(1);
+    expect(plugin.counts.cacheReads).toBe(notes);
+    // `status` is on every note, plus the query.
+    expect(vi.mocked(normalizeValue)).toHaveBeenCalledTimes(notes + 1);
+
+    const snap = plugin.snapshot();
+    if (snap.status !== "ready") throw new Error("expected ready");
+    vi.mocked(normalizeValue).mockClear();
+    snap.index.listValues("created");
+    expect(vi.mocked(normalizeValue)).toHaveBeenCalledTimes(notes);
+    vi.mocked(normalizeValue).mockClear();
+    snap.index.listKeys();
+    expect(vi.mocked(normalizeValue)).not.toHaveBeenCalled();
   });
 });
 

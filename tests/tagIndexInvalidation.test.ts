@@ -45,6 +45,8 @@ interface Harness {
   /** How many times a coalesced recompute was requested. */
   requested: () => number;
   fire: () => void;
+  /** What the coming flush would do, from the plugin's own `flushState`. */
+  pending: () => Promise<{ full: boolean; recompute: boolean; rebuild: boolean }>;
 }
 
 function harness(active: SpaceDefinition | null): Harness {
@@ -68,12 +70,16 @@ function harness(active: SpaceDefinition | null): Harness {
     setPropertySnapshot: (get: () => unknown) => void propertyInstalled.push(get),
   };
   // Shadows the shared coalescer: the coalescer itself is `eventCoalescer.ts`'s
-  // business and is tested there. A metadata event in a space that watches
-  // metadata submits its recompute here; it no longer goes through
-  // `onVaultChange`, which is for vault events.
+  // business and is tested there. This sits BELOW the routing fork in
+  // `onMetadataEvent` (`onVaultChange` versus `submitMetadataWork`), so
+  // counting submits cannot tell the routes apart. It therefore RUNS the
+  // submitted work, and the tests below read the plugin's real
+  // `flushState`, which is what differs: a vault event marks the burst full
+  // (the O(vault) tree re-index), a metadata event marks it for a recompute.
   record.vaultChanges = {
-    submit: async () => {
+    submit: async (work: () => Promise<unknown>) => {
       requested++;
+      await work();
     },
   };
   return {
@@ -82,8 +88,36 @@ function harness(active: SpaceDefinition | null): Harness {
     propertyInstalled,
     requested: () => requested,
     fire: () => (plugin as unknown as { onMetadataEvent(): void }).onMetadataEvent(),
+    /** What the coming flush would do, read from the plugin's own state. */
+    pending: async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+      return (
+        plugin as unknown as {
+          flushState: { take(): { full: boolean; recompute: boolean; rebuild: boolean } };
+        }
+      ).flushState.take();
+    },
   };
 }
+
+describe("what a metadata event asks the flush to do", () => {
+  it("is a recompute and not a vault re-index, for a space that watches metadata", async () => {
+    // Routing a metadata event through `onVaultChange` marks the burst full,
+    // and the flush then rebuilds the vault tree for a change that cannot have
+    // moved it. That is the defect Task 13 fixed; this is its gate.
+    const h = harness(TAG_SPACE);
+    h.fire();
+    expect(await h.pending()).toEqual({ full: false, recompute: true, rebuild: false });
+  });
+
+  it("asks for nothing when no space watches metadata and no picker is open", async () => {
+    for (const active of [null, FOLDER_SPACE, PATH_SPACE]) {
+      const h = harness(active);
+      h.fire();
+      expect(await h.pending()).toEqual({ full: false, recompute: false, rebuild: false });
+    }
+  });
+});
 
 describe("a metadata-cache event", () => {
   it("replaces the property snapshot as well, whichever space is active", () => {
