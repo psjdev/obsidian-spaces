@@ -1704,5 +1704,15 @@ body.spaces-claims-drop .drag-ghost-action {
   padding: 0;
   text-align: left;
 }
+/* A long key or value name SHRINKS; the count and the button do not.
+
+   A flex item's `min-width` is `auto`, which is its own content, so the
+   `overflow: hidden` and `text-overflow: ellipsis` the name already carries
+   could never fire inside a row: the name never got small enough to overflow
+   itself, and a long one pushed the count and the "Has property" button out of
+   the row instead. The same defect the mode buttons had, with the same fix.
+   The count and both buttons stay `flex: 0 0 auto` above, so the name is what
+   gives. Scoped to this body, exactly as the tag rows scope their own. */
+.spaces-create-property-row .spaces-create-tree-name { min-width: 0; }
 .spaces-create-property-row.is-note { cursor: default; color: var(--text-muted); }
 .spaces-create-tree-name.is-empty-label { font-style: italic; color: var(--text-muted); }
