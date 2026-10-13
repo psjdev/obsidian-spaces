@@ -22,7 +22,7 @@ export interface PropertyIndex {
   pathsWithKey(key: string): string[];
   pathsMatching(key: string, value: string): string[];
   listKeys(): Array<{ key: string; count: number }>;
-  listValues(key: string): Array<{ value: string; normalized: string; count: number }>;
+  listValues(key: string): ReadonlyArray<{ value: string; normalized: string; count: number }>;
 }
 
 /**
@@ -102,6 +102,27 @@ export function createPropertyIndex(
     return found;
   };
 
+  // Memoized beside the buckets, and for the same reason. `bucketsFor` stops
+  // the WALK being repeated; this stops the mapping and the SORT being
+  // repeated, which the picker pays per open key per draw and therefore per
+  // keystroke in its filter box. On the branch's own 5,000-note fixture
+  // `created` holds 4,035 distinct values: one sort of those to show the
+  // first 200, not one per keystroke.
+  //
+  // The memo is handed out, not copied, which is why the type is a
+  // `ReadonlyArray`: the rows are the snapshot's own and a caller that sorted
+  // them in place would reorder what every later reader sees.
+  const listed = new Map<string, ReadonlyArray<{ value: string; normalized: string; count: number }>>();
+  const listValues = (key: string): ReadonlyArray<{ value: string; normalized: string; count: number }> => {
+    let found = listed.get(key);
+    if (found !== undefined) return found;
+    found = [...bucketsFor(key).entries()]
+      .map(([normalized, b]) => ({ value: b.value, normalized, count: b.paths.length }))
+      .sort((a, b) => b.count - a.count || (a.normalized < b.normalized ? -1 : 1));
+    listed.set(key, found);
+    return found;
+  };
+
   return {
     generation,
     pathsWithKey: (key) => [...(byKey.get(key) ?? [])],
@@ -110,9 +131,6 @@ export function createPropertyIndex(
       [...byKey.entries()]
         .map(([key, paths]) => ({ key, count: paths.length }))
         .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
-    listValues: (key) =>
-      [...bucketsFor(key).entries()]
-        .map(([normalized, b]) => ({ value: b.value, normalized, count: b.paths.length }))
-        .sort((a, b) => b.count - a.count || (a.normalized < b.normalized ? -1 : 1)),
+    listValues,
   };
 }

@@ -53,13 +53,7 @@ import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { MemberEntry } from "../types";
-import {
-  equalsMember,
-  existsMember,
-  holdsProperty,
-  pickableKeys,
-  valueLabel,
-} from "./propertyRows";
+import { equalsMember, existsMember, pickableKeys, valueLabel } from "./propertyRows";
 import { memberIdentity } from "../definitions/schema";
 
 import {
@@ -1916,6 +1910,14 @@ export class CreateSpacePanel {
     }
 
     const held = this.state.folderMode ? [] : this.state.items;
+    // The identities ONCE per draw, not once per row. `holdsProperty` is a
+    // `some()` with a `JSON.stringify` inside it, and this body asked it for
+    // every key row and every value row: 200 rows against 20 selections is
+    // about 8,400 stringifies, redone on every keystroke in the filter box.
+    // The tag body answers the same question from a `Set` (`chosenTags`), and
+    // so does this one now. `holdsProperty` keeps its signature for its
+    // callers in `propertyRows.ts`, which ask about one member at a time.
+    const heldIds = new Set(held.map(memberIdentity));
     const row = (depth: number, extra: string): HTMLElement => {
       const el = doc.win.createDiv();
       el.className = `spaces-create-tree-row spaces-create-property-row ${extra}`.trim();
@@ -1957,7 +1959,7 @@ export class CreateSpacePanel {
       const keyMember = existsMember(key);
       const id = memberIdentity(keyMember);
       const open = this.expandedProperties.has(key);
-      const heldKey = holdsProperty(held, keyMember);
+      const heldKey = heldIds.has(id);
 
       const el = row(0, heldKey ? "is-selected" : "");
       el.dataset.propertyKey = key;
@@ -2022,7 +2024,7 @@ export class CreateSpacePanel {
       for (const v of values.slice(0, MAX_PICKER_ROWS)) {
         const valueMember = equalsMember(key, v.value);
         const valueId = memberIdentity(valueMember);
-        const heldValue = holdsProperty(held, valueMember);
+        const heldValue = heldIds.has(valueId);
         const vr = row(1, heldValue ? "is-selected" : "");
         // The whole value row, including the indent gutter left of the button,
         // which was inert while the button was the only target.
