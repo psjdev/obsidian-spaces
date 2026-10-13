@@ -7,6 +7,7 @@ import {
   type PropertyMemberRow,
 } from "../src/ui/memberList";
 import { memberIdentity } from "../src/definitions/schema";
+import { resolveMembers } from "../src/controller/resolveMembers";
 import { createPropertyIndex, type PropertyIndex } from "../src/visibility/PropertyIndex";
 import type { MemberEntry, SpaceDefinition } from "../src/types";
 
@@ -82,10 +83,32 @@ describe("a property member's row", () => {
     expect(row.matchCount).toBe(3);
   });
 
-  it("is not filtered by the global ignore, because the tree shows those notes", () => {
-    // includedPaths: seeds bypass globalIgnore. A property match is a seed.
-    const row = rowFor({ kind: "property", key: "status", value: "active" });
-    expect(row.matchCount).toBe(3);
+  it("returns the same notes the resolver does for a space holding only that member", () => {
+    // Pins the sharing: the count is the resolver's answer, exclusions
+    // included, so the two cannot decide one question two ways. The global
+    // ignore is not exercised here because neither side can see it (it lives in
+    // includedPaths, which a property match bypasses as a seed).
+    for (const member of [
+      { kind: "property", key: "status", value: "active" },
+      { kind: "property", key: "status" },
+      { kind: "property", key: "due" },
+      { kind: "property", key: "nothing" },
+    ] as PropertyMember[]) {
+      for (const exclude of [[], ["Work/a.md"], ["WORK/B.MD", "Work/c.md"]]) {
+        const space: SpaceDefinition = {
+          id: "s",
+          name: "S",
+          icon: "box",
+          color: "#808080",
+          members: [member],
+          exclude,
+        };
+        const noTags = { pathsMatching: () => [] };
+        expect(propertyMemberCount(member, ready, space)).toBe(
+          resolveMembers(space, noTags, ready).length
+        );
+      }
+    }
   });
 
   it("reports an unavailable count distinctly from zero", () => {
