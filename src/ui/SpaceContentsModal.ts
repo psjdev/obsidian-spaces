@@ -111,10 +111,10 @@ export class SpaceContentsModal extends Modal {
      * The property index to draw, reached rather than built: the ready one,
      * the last ready one while the cache is cold, and null only when none was
      * ever ready. Null is what makes a property row's count unavailable.
-     * Optional so a caller with no property members to draw can omit it, which
-     * reads as unavailable.
+     * Required, so a caller that forgets it fails to compile instead of
+     * silently drawing every property count as unavailable.
      */
-    private propertyIndex: () => PropertyIndex | null = () => null
+    private propertyIndex: () => PropertyIndex | null
   ) {
     super(app);
   }

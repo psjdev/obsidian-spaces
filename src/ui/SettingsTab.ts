@@ -606,7 +606,9 @@ export class SpacesSettingTab extends PluginSettingTab {
     return spaces.map((space) => {
       // One row per stored member, tags included. `missing` is unaffected: a
       // tag row is never missing.
-      const rows = memberRows(space, exists);
+      // No property count either, for the tag reason above: unavailable,
+      // stated explicitly. A property row is then `present` with a null count.
+      const rows = memberRows(space, exists, undefined, () => null);
       const missing = missingCount(rows);
       return {
         name: space.name,
@@ -638,7 +640,10 @@ export class SpacesSettingTab extends PluginSettingTab {
                     this.defs,
                     space.id,
                     this.getTagIndex,
-                    this.getPropertyIndex
+                    // Explicit rather than defaulted inside the dialog: a tab built
+                    // without the accessor (the tests) draws counts as
+                    // unavailable, and says so here.
+                    this.getPropertyIndex ?? ((): null => null)
                   ).open();
                 })
             );

@@ -78,8 +78,10 @@ export interface PropertyMemberRow {
   status: "present" | "matches-nothing";
   /**
    * The distinct notes this member contributes to THIS space after the
-   * space's exclusions and the global ignore, counted whether or not another
-   * member also brings them in. Scaffold folders are never counted.
+   * space's exclusions, counted whether or not another member also brings them
+   * in. NOT filtered by the global ignore, because the tree does not filter a
+   * seed either (see `propertyMemberCount`). Scaffold folders are never
+   * counted.
    *
    * NULL IS NOT ZERO and must never be drawn as one. It means the count is
    * unavailable: the caller did not count, or no property index has ever been
@@ -108,6 +110,17 @@ export type MemberRow = PathMemberRow | TagMemberRow | PropertyMemberRow;
  * would omit a row the user can see. Tag members behave the same. It follows
  * that a has-the-key member can pull notes out of an ignored folder; that is
  * the existing behavior for every member kind. Do not add the filter back.
+ *
+ * THAT IS GUARANTEED BY CONSTRUCTION, NOT BY A TEST: this function,
+ * `PropertyIndex`, `ObsidianPropertyIndex` and `resolveMembers` have no
+ * ignore surface, so no test here can observe one. Three edits would break it
+ * without failing a test:
+ *  1. Pre-filtering entries before `createPropertyIndex`. An ignore-aware
+ *     index still type-checks, and the count would inherit it.
+ *  2. Adding an ignore parameter to `resolveMembers`. The sharing test follows
+ *     the resolver, so it stays green while the count changes.
+ *  3. Post-filtering the result inside this function.
+ * Any of the three makes the count omit notes the tree shows.
  *
  * Null when `index` is null, which is "unavailable", not zero.
  */

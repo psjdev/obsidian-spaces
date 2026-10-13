@@ -75,12 +75,24 @@ describe("a property member's row", () => {
     expect(row.matchCount).toBe(2);
   });
 
-  it("counts a note another member also brings in", () => {
-    const row = rowFor(
-      { kind: "property", key: "status", value: "active" },
-      { members: [{ kind: "file", path: "Work/b.md" }] }
-    );
-    expect(row.matchCount).toBe(3);
+  it("counts a note another member also brings in, whichever member comes first", () => {
+    // Dedupe is first-wins, so the order is what could hide the note from the
+    // property member's count. Both orders must give the same number.
+    const property: PropertyMember = { kind: "property", key: "status", value: "active" };
+    const file: MemberEntry = { kind: "file", path: "Work/b.md" };
+    for (const members of [[property, file], [file, property]]) {
+      const space: SpaceDefinition = {
+        id: "s",
+        name: "S",
+        icon: "box",
+        color: "#808080",
+        members,
+      };
+      const row = memberRows(space, () => true, undefined, (m) =>
+        propertyMemberCount(m, ready, space)
+      ).find((r) => r.kind === "property");
+      expect(row).toMatchObject({ kind: "property", matchCount: 3 });
+    }
   });
 
   it("returns the same notes the resolver does for a space holding only that member", () => {
