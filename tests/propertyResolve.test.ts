@@ -245,11 +245,16 @@ describe("SpaceController with a property space", () => {
     expect(visibleNotes(controller)).toEqual(["Work/a.md"]);
   });
 
-  it("contributes nothing on a first start, then fills when the snapshot is ready", async () => {
+  it("holds rather than rendering empty on a first start, then fills when ready", async () => {
+    // It used to publish itself EMPTY here: `resolveMembers` was handed
+    // `null`, the property member contributed nothing, and "not known yet"
+    // reached the tree as "matches nothing". The controller now holds the
+    // recompute back (`stillReading`) and the tree falls open until an index
+    // has been ready once.
     const { controller, set } = await build(ACTIVE);
     set(unavailable);
     await controller.switchTo({ kind: "space", id: "p" });
-    expect(visibleNotes(controller)).toEqual([]);
+    expect(controller.currentSnapshot()).toBeNull();
     set(ready);
     controller.refresh();
     expect(visibleNotes(controller)).toEqual(["Work/a.md"]);

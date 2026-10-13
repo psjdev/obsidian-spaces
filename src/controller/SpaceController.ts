@@ -52,6 +52,19 @@ interface LayoutHooks {
   onOutcome?(outcome: SwitchOutcome | TransitionAborted): void;
 }
 
+/**
+ * Whether this space's membership actually depends on the property index.
+ *
+ * Holding a property member is not enough: a FOLDER SPACE renders from its
+ * root and never reads its member list, so a leftover property member in one
+ * changes nothing, and it must neither wait for an index nor pay for the walk
+ * that builds one. `membersForSnapshot` makes the same distinction, in the
+ * same order.
+ */
+function resolvesPropertyMembers(space: SpaceDefinition): boolean {
+  return !hasRoot(space) && holdsPropertyMember(space);
+}
+
 export class SpaceController {
   private snapshot: VisibilitySnapshot | null = null;
   private queue: Promise<unknown> = Promise.resolve();
@@ -365,14 +378,16 @@ export class SpaceController {
    *
    * Storage is left alone — only what is handed to the engine changes.
    */
-  private membersForSnapshot(space: SpaceDefinition): readonly PathMember[] {
+  private membersForSnapshot(
+    space: SpaceDefinition,
+    // Read ONCE per recompute by `propertiesFor` and handed down, because the
+    // readiness gate above needs the same answer and two asks could differ.
+    properties: PropertyIndex | null
+  ): readonly PathMember[] {
     if (hasRoot(space)) {
       const root = rootOf(space);
       return root === null ? [] : [{ path: root, kind: "folder" }];
     }
-    // Asked ONCE per resolve, and only for a space that holds a property
-    // member: the first ask after a metadata event is a frontmatter walk of
-    // the whole vault, and a space with no property member must not pay it.
     // UNAVAILABLE IS NOT EMPTY. `drawnPropertyIndex` falls back to the last
     // READY index, because resolving property members against nothing would
     // blank a property space's rows whenever the cache is cold. EVERYTHING
@@ -381,12 +396,25 @@ export class SpaceController {
     // says instead of missing a cache and emptying the space. Nothing is keyed
     // on the definition for that reason. The property matches themselves may
     // be stale until the parse event that makes the snapshot ready recomputes
-    // the space. With no ready index yet this is not reached at all for a
-    // space holding a property member: `stillReading` holds the recompute
-    // back, because publishing members resolved against nothing would publish
-    // "not known yet" as "matches nothing".
-    const index = holdsPropertyMember(space) ? this.drawnPropertyIndex() : null;
-    return resolveMembers(space, this.tags, index);
+    // the space. With no ready index yet this is not reached at all for such a
+    // space: `stillReading` holds the recompute back, because publishing
+    // members resolved against nothing would publish "not known yet" as
+    // "matches nothing".
+    return resolveMembers(space, this.tags, properties);
+  }
+
+  /**
+   * The property index this recompute resolves against, read ONCE and handed
+   * to both readers, so the gate and the resolve cannot disagree.
+   *
+   * `null` without asking at all unless the space's membership actually
+   * depends on it: the first ask after a metadata event is a frontmatter walk
+   * of the whole vault, and neither a space with no property member nor a
+   * folder space — which renders from its root and never reads its member
+   * list — may pay for one.
+   */
+  private propertiesFor(space: SpaceDefinition): PropertyIndex | null {
+    return resolvesPropertyMembers(space) ? this.drawnPropertyIndex() : null;
   }
 
   /**
@@ -404,20 +432,17 @@ export class SpaceController {
    * a caller publishing the result as a membership must hold its previous
    * answer instead.
    *
-   * The property arm asks ONLY for a space that holds a property member, so a
-   * tag space pays nothing for it; and it reads `drawnPropertyIndex`, so it is
-   * false as soon as any index has EVER been ready, which is what keeps a
-   * cold cache mid-session from blanking or re-opening a space that already
-   * has a good answer. Reachable only before the first ready index of a
-   * session, which is why the fall-open below is the right posture for it.
-   *
-   * Asking here costs no extra walk: the accessor answers every ask in a
-   * burst from one build, and `membersForSnapshot` asks the same accessor a
-   * moment later.
+   * The property arm reads the index this recompute already has, so it costs
+   * nothing and asks nothing for a space that resolves no property member.
+   * `drawnPropertyIndex` keeps the last READY index, so this is false as soon
+   * as one has EVER been ready: a cache going cold mid-session neither blanks
+   * a space that already has a good answer nor re-opens the tree. Reachable
+   * only before the first ready index of a session, which is why the
+   * fall-open below is the right posture for it.
    */
-  private stillReading(space: SpaceDefinition): boolean {
+  private stillReading(space: SpaceDefinition, properties: PropertyIndex | null): boolean {
     if (this.host.metadataReady?.() === false) return true;
-    return holdsPropertyMember(space) && this.drawnPropertyIndex() === null;
+    return properties === null && resolvesPropertyMembers(space);
   }
 
   /**
@@ -480,7 +505,8 @@ export class SpaceController {
     // render empty. "No matches yet" and "no matches" are different answers,
     // which is why this reads a readiness signal and not the member count.
     // `stillReading` carries both signals and what each one knows.
-    if (watchesMetadata(space) && this.stillReading(space)) {
+    const properties = this.propertiesFor(space);
+    if (watchesMetadata(space) && this.stillReading(space, properties)) {
       this.snapshot = null;
       this.host.apply(null);
       return;
@@ -492,7 +518,7 @@ export class SpaceController {
     const visitors = settings.revealVisitors ? revealed : new Set<string>();
     this.snapshot = buildVisibilitySnapshot(
       this.vault,
-      { ...space, members: [...this.membersForSnapshot(space)] },
+      { ...space, members: [...this.membersForSnapshot(space, properties)] },
       visitors,
       ignore,
       new Set((space.exclude ?? []).map(canonicalPath))
