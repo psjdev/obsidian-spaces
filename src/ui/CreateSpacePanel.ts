@@ -1637,6 +1637,7 @@ export class CreateSpacePanel {
     ic.className = "spaces-create-theme-icon";
     setIcon(ic, icon);
     const text = doc.win.createSpan();
+    text.className = "spaces-create-body-label";
     text.textContent = label;
     btn.appendChild(ic);
     btn.appendChild(text);

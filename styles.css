@@ -462,8 +462,25 @@
   display: flex;
   gap: 6px;
 }
+/* Sized to the label, then given an equal share of what is left over,
+   rather than three equal thirds (`flex: 1 1 0`). Thirds are even and wrong:
+   the three labels are not the same length, so an equal split starves the
+   longest while the shortest keeps air it has no use for.
+
+   Measured in the left sidebar at Obsidian's own default width of 300px,
+   with the panel mounted in the file-explorer leaf. Each button came out at
+   88px, which is 64px of room inside 12px of padding either side. Vault's
+   icon and word need 51px and Tags 47px, so both had room to spare, while
+   Properties needs 80px and was CUT BY 16px. The word was being clipped at
+   the default width, not merely in a narrowed pane, and `overflow: hidden`
+   on the button is what hid the evidence.
+
+   A minimum width on the panel is not the fix: it is mounted inside
+   Obsidian's sidebar, so a floor wider than the sidebar overflows it and
+   trades a cut word for a cut panel. With `auto` the same 300px gives
+   79 / 76 / 109 and all three words are whole. */
 .spaces-create-body {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -471,6 +488,12 @@
   gap: 6px;
   overflow: hidden;
   white-space: nowrap;
+}
+/* Narrower than the label and the word is cut mid-letter, which reads as a
+   rendering fault. An ellipsis says the label is shortened. */
+.spaces-create-body-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .spaces-create-body.is-active,
 .spaces-create-body.is-active:hover {
