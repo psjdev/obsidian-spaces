@@ -3,10 +3,11 @@ import { canonicalPath } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceController } from "../controller/SpaceController";
 import type { MemberEntry, SpaceDefinition } from "../types";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { TagIndex } from "../visibility/TagIndex";
 import { decorate as decorateMenu } from "./membershipMenu";
 import { removeMembers } from "./definitionWrites";
-import { heldBy, pathMembers, resolvedPaths } from "../definitions/membership";
+import { heldBy, holdsPropertyMember, pathMembers, resolvedPaths } from "../definitions/membership";
 
 interface MembershipContext {
   defs: DefinitionStore;
@@ -103,11 +104,17 @@ export function addOutcomeMessage(
 function splitBatch(
   files: readonly TAbstractFile[],
   space: SpaceDefinition | undefined,
-  tags: TagIndex
+  tags: TagIndex,
+  // Already read by the caller, which has refused an unknown answer for a
+  // space holding a property member. `null` here therefore only ever means
+  // the space has none.
+  properties: PropertyIndex | null
 ): { added: TAbstractFile[]; already: TAbstractFile[] } {
   // Built once for the whole batch, never once per file: expanding a tag
   // member costs a pass over the vault's notes.
-  const resolved = space ? resolvedPaths(space, tags) : new Set<string>();
+  const resolved = space
+    ? resolvedPaths(space, tags, properties)
+    : new Set<string>();
   const seen = new Set<string>();
   const added: TAbstractFile[] = [];
   const already: TAbstractFile[] = [];
@@ -121,6 +128,31 @@ function splitBatch(
   return { added, already };
 }
 
+/**
+ * Prefixed like every other refusal this plugin raises, and worded as what is
+ * happening rather than as what the plugin has not done. Exported because the
+ * contents dialog refuses the same situation and must not say it twice in two
+ * ways.
+ */
+export const STILL_READING =
+  "Spaces: this vault's properties are still loading. Try again in a moment.";
+
+/**
+ * The property index for a space about to be written to, or `"unknown"` when
+ * the space holds a property member and no index has EVER been ready, so
+ * there is nothing to say which notes it already shows. Writing then would
+ * add an exact member for a note the space may already show, and that member
+ * outlives the property member. Once an index has been ready this answers
+ * from it, as the tree does, even while the cache is cold.
+ */
+function propertiesFor(
+  ctx: MembershipContext,
+  space: SpaceDefinition | undefined
+): PropertyIndex | null | "unknown" {
+  if (space === undefined || !holdsPropertyMember(space)) return null;
+  return ctx.controller.drawnPropertyIndex() ?? "unknown";
+}
+
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
   const space = ctx.controller.activeSpace();
   if (!space) return;
@@ -128,7 +160,12 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
   // reason as in `addToSpace`: reading it back afterwards cannot tell a path
   // this call added from one that was already there.
   const current = ctx.defs.get().spaces.find((s) => s.id === space.id);
-  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex());
+  const props = propertiesFor(ctx, current);
+  if (props === "unknown") {
+    new Notice(STILL_READING);
+    return;
+  }
+  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex(), props);
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === space.id);
@@ -172,7 +209,12 @@ export async function addToSpace(
   // afterwards cannot tell a path this call added from one that was already
   // there.
   const current = ctx.defs.get().spaces.find((s) => s.id === spaceId);
-  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex());
+  const props = propertiesFor(ctx, current);
+  if (props === "unknown") {
+    new Notice(STILL_READING);
+    return;
+  }
+  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex(), props);
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === spaceId);
@@ -220,6 +262,10 @@ export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFil
     // `createLazyTagIndex`, so a vault whose spaces hold no tag member pays
     // nothing for opening a context menu.
     tags: (): TagIndex => ctx.controller.tagIndex(),
+    // Asked only when some space holds a property member, so a vault with
+    // none pays no metadata walk for opening a context menu.
+    properties: (): PropertyIndex | null =>
+      ctx.defs.get().spaces.some(holdsPropertyMember) ? ctx.controller.drawnPropertyIndex() : null,
   };
   decorateMenu(menu, decorateCtx, files, {
     addAll: (fs) => void addAll(ctx, fs),

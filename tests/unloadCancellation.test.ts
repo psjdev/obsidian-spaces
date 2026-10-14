@@ -88,7 +88,7 @@ describe("a switch parked on an await must not outlive unload", () => {
       release = resolve;
     });
     const onOutcome = vi.fn();
-    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), () => ({ status: "unavailable", unparsed: [] }), {
       transition: async (): Promise<SwitchOutcome> => {
         await parked;
         return { kind: "restored" };
@@ -123,6 +123,7 @@ describe("a switch parked on an await must not outlive unload", () => {
       vault,
       host,
       createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] }),
       { transition }
     );
 
@@ -144,7 +145,7 @@ describe("a switch parked on an await must not outlive unload", () => {
     // kind of decoration this project has shipped before, so it is pinned
     // here rather than trusted.
     const { store, rt, apply, host } = await base();
-    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), () => ({ status: "unavailable", unparsed: [] }), {
       transition: async (): Promise<SwitchOutcome> => ({ kind: "restored" }),
     });
     await controller.switchTo(RESEARCH);
@@ -162,7 +163,7 @@ describe("a switch parked on an await must not outlive unload", () => {
     // dispose" would also pass against a controller that never works at all.
     const { store, rt, apply, host } = await base();
     const onOutcome = vi.fn();
-    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), {
+    const controller = new SpaceController(store, rt, vault, host, createMapTagIndex(new Map()), () => ({ status: "unavailable", unparsed: [] }), {
       transition: async (): Promise<SwitchOutcome> => ({ kind: "restored" }),
       onOutcome,
     });

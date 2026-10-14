@@ -27,21 +27,21 @@ function defs(): SpacesDefinitions {
 describe("repairOnRename", () => {
   it("rewrites an exact match", () => {
     const out = repairOnRename(defs(), "Papers/Attention.md", "Papers/Focus.md");
-    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
     expect(paths).toContain("Papers/Focus.md");
     expect(paths).not.toContain("Papers/Attention.md");
   });
 
   it("rewrites descendant prefixes when a folder moves", () => {
     const out = repairOnRename(defs(), "Papers", "Research Papers");
-    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
     expect(paths).toContain("Research Papers");
     expect(paths).toContain("Research Papers/Attention.md");
   });
 
   it("does not rewrite a sibling that shares a string prefix", () => {
     const out = repairOnRename(defs(), "Papers", "Research Papers");
-    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    const paths = out.spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
     expect(paths).toContain("Papers-old/Legacy.md");
   });
 
@@ -54,7 +54,7 @@ describe("repairOnRename", () => {
     const d = defs();
     d.spaces[0].members.push({ path: "Papers/Focus.md", kind: "file" });
     const out = repairOnRename(d, "Papers/Attention.md", "Papers/Focus.md");
-    const focus = out.spaces[0].members.filter((m) => m.kind !== "tag" && m.path === "Papers/Focus.md");
+    const focus = out.spaces[0].members.filter((m) => (m.kind === "file" || m.kind === "folder") && m.path === "Papers/Focus.md");
     expect(focus).toHaveLength(1);
   });
 
@@ -281,7 +281,7 @@ describe("repairRenameIn — repairs computed from the DRAFT, not from a snapsho
   };
 
   const membersOf = (store: DefinitionStore) =>
-    store.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    store.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
 
   it("keeps BOTH repairs when two renames overlap", async () => {
     // The exact case the review reproduced: repairing a.md and b.md at the
@@ -431,5 +431,40 @@ describe("exclusions survive path changes", () => {
   it("drops the key rather than storing an empty list", () => {
     const out = repairOnRename(excluding(), "Papers", "Journals");
     expect("exclude" in out.spaces[0]).toBe(false);
+  });
+});
+
+describe("repairOnRename de-duplication of property members", () => {
+  const withMembers = (members: SpacesDefinitions["spaces"][number]["members"]): SpacesDefinitions => {
+    const d = defs();
+    d.spaces[0] = { ...d.spaces[0], members };
+    return d;
+  };
+  // A rename that touches nothing, so only de-duplication runs.
+  const run = (members: SpacesDefinitions["spaces"][number]["members"]) =>
+    repairOnRename(withMembers(members), "Nowhere/x.md", "Nowhere/y.md").spaces[0].members;
+
+  it("keeps existence and equality-to-empty apart", () => {
+    expect(run([{ kind: "property", key: "a" }, { kind: "property", key: "a", value: "" }])).toHaveLength(2);
+  });
+
+  it("collapses values equal under normalization, keeping the first spelling", () => {
+    expect(
+      run([
+        { kind: "property", key: "s", value: "Active" },
+        { kind: "property", key: "s", value: " active " },
+      ])
+    ).toEqual([{ kind: "property", key: "s", value: "Active" }]);
+  });
+
+  it("keeps the four members a concatenated key would merge", () => {
+    expect(
+      run([
+        { kind: "property", key: "a=b" },
+        { kind: "property", key: "a", value: "b" },
+        { kind: "property", key: "a=b", value: "c" },
+        { kind: "property", key: "a", value: "b=c" },
+      ])
+    ).toHaveLength(4);
   });
 });

@@ -448,11 +448,11 @@
 }
 .spaces-create-mode.is-active .spaces-create-theme-icon { color: inherit; }
 
-/* The two buttons that choose what the window below them shows, sitting under
-   the filter box they share a column with. The same segmented shape as the
-   Curated / Folder pinned pair above, but the active one is OUTLINED rather
-   than filled: two filled pairs on one pane read as one control with four
-   states, and the outline keeps them apart. The ring is an inset box-shadow
+/* The three buttons that choose what the window below them shows, sitting
+   under the filter box they share a column with. The same segmented shape as
+   the Curated / Folder pinned pair above, but the active one is OUTLINED
+   rather than filled: two filled groups on one pane read as one control with
+   five states, and the outline keeps them apart. The ring is an inset box-shadow
    so it takes no space (a border appearing on the active button would move its
    neighbour), and it replaces Obsidian's own button shadow, so the inactive
    button keeps the stock chrome and reads as inactive. Text takes
@@ -462,8 +462,25 @@
   display: flex;
   gap: 6px;
 }
+/* Sized to the label, then given an equal share of what is left over,
+   rather than three equal thirds (`flex: 1 1 0`). Thirds are even and wrong:
+   the three labels are not the same length, so an equal split starves the
+   longest while the shortest keeps air it has no use for.
+
+   Measured in the left sidebar at Obsidian's own default width of 300px,
+   with the panel mounted in the file-explorer leaf. Each button came out at
+   88px, which is 64px of room inside 12px of padding either side. Vault's
+   icon and word need 51px and Tags 47px, so both had room to spare, while
+   Properties needs 80px and was CUT BY 16px. The word was being clipped at
+   the default width, not merely in a narrowed pane, and `overflow: hidden`
+   on the button is what hid the evidence.
+
+   A minimum width on the panel is not the fix: it is mounted inside
+   Obsidian's sidebar, so a floor wider than the sidebar overflows it and
+   trades a cut word for a cut panel. With `auto` the same 300px gives
+   79 / 76 / 109 and all three words are whole. */
 .spaces-create-body {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -471,6 +488,12 @@
   gap: 6px;
   overflow: hidden;
   white-space: nowrap;
+}
+/* Narrower than the label and the word is cut mid-letter, which reads as a
+   rendering fault. An ellipsis says the label is shortened. */
+.spaces-create-body-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .spaces-create-body.is-active,
 .spaces-create-body.is-active:hover {
@@ -700,6 +723,21 @@
   color: var(--text-muted);
   font-size: 0.9em;
 }
+/* Stands in for rows a windowed list did not build.
+
+   The Properties body builds only the rows its viewport shows -- about 14 of
+   them for a key holding four thousand values -- and puts one of these above
+   what it drew and one below, each as tall as the rows it replaces. That is
+   what keeps the scrollbar describing the whole list, and every drawn row at
+   the offset it would have had.
+
+   Inert on purpose: it is not a row, so it must not take a pointer, show a
+   hover or draw anything. Its `height` is written per draw and is the only
+   thing about it that varies. */
+.spaces-create-tree-spacer {
+  pointer-events: none;
+  flex: 0 0 auto;
+}
 
 /* §: the tag tree, drawn in the same box as the item tree and reached by the
    Tags button above it.
@@ -740,8 +778,10 @@
 }
 /* A selected row goes accent-colored and semibold; the count must not follow
    it there, or the hint becomes the loudest thing on the row it is hinting
-   about. */
-.spaces-create-tag-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
+   about. On the ROW class rather than the tag row's own: the property key and
+   value rows draw this same count span, and a selected one was taking the
+   accent, which is the thing this rule exists to stop. */
+.spaces-create-tree-row.is-selected .spaces-create-tag-count { color: var(--text-muted); }
 
 /* The theme button replaces the old swatch row: full width under the name,
    so it reads as an action rather than seven unexplained circles. The brush
@@ -1649,3 +1689,47 @@ body.spaces-claims-drop .drag-ghost-action {
 .spaces-strip-drop-zone.is-active {
   opacity: 0.35;
 }
+
+/* The properties body. A key row is the tree row's own layout with a
+   disclosure button in the caret slot and a "Has property" button at the right
+   edge; a value row is one button across the row. Both buttons are bare so the
+   row's hover and selected marks are what show. */
+.spaces-create-property-row .spaces-create-property-disclose,
+.spaces-create-property-row .spaces-create-property-select,
+.spaces-create-property-row .spaces-create-property-value {
+  background: none;
+  box-shadow: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.spaces-create-property-row .spaces-create-property-disclose { padding: 0; height: auto; }
+.spaces-create-property-row .spaces-create-property-select {
+  flex: 0 0 auto;
+  height: auto;
+  padding: 0 6px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+.spaces-create-property-row .spaces-create-property-select:hover { color: var(--text-normal); }
+.spaces-create-property-row .spaces-create-property-value {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  text-align: left;
+}
+/* A long key or value name SHRINKS; the count and the button do not.
+
+   A flex item's `min-width` is `auto`, which is its own content, so the
+   `overflow: hidden` and `text-overflow: ellipsis` the name already carries
+   could never fire inside a row: the name never got small enough to overflow
+   itself, and a long one pushed the count and the "Has property" button out of
+   the row instead. The same defect the mode buttons had, with the same fix.
+   The count and both buttons stay `flex: 0 0 auto` above, so the name is what
+   gives. Scoped to this body, exactly as the tag rows scope their own. */
+.spaces-create-property-row .spaces-create-tree-name { min-width: 0; }
+.spaces-create-property-row.is-note { cursor: default; color: var(--text-muted); }
+.spaces-create-tree-name.is-empty-label { font-style: italic; color: var(--text-muted); }

@@ -11,6 +11,7 @@ import {
 } from "../types";
 import { normalizeTag } from "../visibility/tagMatch";
 import { canonicalPath } from "../visibility/glob";
+import { normalizeValue } from "../visibility/propertyValues";
 
 export type ValidationResult =
   | { ok: true; value: SpacesDefinitions }
@@ -68,6 +69,59 @@ export function isSafeVaultPath(p: unknown): p is string {
   return !p.split("/").some((seg) => seg === ".." || seg === ".");
 }
 
+/**
+ * A member's identity, as structure rather than as a concatenated string.
+ *
+ * `"y:" + key + "=" + value` cannot encode this: "has the key `a=b`" and "key
+ * `a` equals `b`" produce the same string, so the loader discards one of two
+ * different members and the space quietly holds different notes. JSON of a
+ * tuple with an explicit operation has no such collision, because the encoder
+ * escapes the separator.
+ *
+ * Property members are keyed by this where members are de-duplicated (the
+ * loader below and `pathRepair`). File, folder and tag members keep the keys
+ * those two places already use; this function's file, folder and tag cases
+ * are for the picker, member list and contents dialog to adopt. NOTE THE ONE
+ * WAY THEY DIFFER before adopting it for a dedupe: the loader's file and
+ * folder key is `"p:" + path`, which is not namespaced by kind, so it
+ * collapses a file and a folder member at the same path into one; this
+ * separates them, and `tests/propertyMember.test.ts` pins that separation.
+ * Swapping one for the other changes what survives a write.
+ *
+ * OPAQUE. It holds arbitrary vault text, so it is never interpolated into a
+ * CSS selector or markup; rows carry it in a dataset value or a Map.
+ */
+export function memberIdentity(m: MemberEntry): string {
+  switch (m.kind) {
+    case "file":
+    case "folder":
+      // The path as STORED, not case-folded: the loader keeps `Notes/A.md` and
+      // `notes/a.md` as two members, so folding here would give two stored
+      // members one identity. Case folding belongs to the matching layer.
+      return JSON.stringify([m.kind, m.path]);
+    case "tag":
+      return JSON.stringify(["tag", normalizeTag(m.tag)]);
+    case "property":
+      return m.value === undefined
+        ? JSON.stringify(["property", m.key, "exists"])
+        : JSON.stringify(["property", m.key, "equals", normalizeValue(m.value)]);
+  }
+}
+
+/**
+ * Whether a property key can be stored in a member at all. The ONE rule: the
+ * loader below rejects the whole document for a key that fails it, and the
+ * create panel's picker filters what it offers through it, so the picker
+ * cannot produce a member that stops the document from loading.
+ *
+ * Only an empty or whitespace-only key fails. Surrounding whitespace on a key
+ * with text in it is eligible and stored exactly as spelled, because keys
+ * match exactly.
+ */
+export function isEligiblePropertyKey(key: string): boolean {
+  return key.trim().length > 0;
+}
+
 function validateMembers(raw: unknown): MemberEntry[] | null {
   if (!Array.isArray(raw)) return null;
   const seen = new Set<string>();
@@ -94,6 +148,20 @@ function validateMembers(raw: unknown): MemberEntry[] | null {
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ kind: "tag", tag: normalized });
+      continue;
+    }
+    if (kind === "property") {
+      const { key, value } = m as Record<string, unknown>;
+      if (typeof key !== "string" || !isEligiblePropertyKey(key)) return null;
+      if (value !== undefined && typeof value !== "string") return null;
+      // Stored exactly as spelled. Keys match exactly, so repairing one here
+      // produces a member that matches a different property or nothing.
+      const member: MemberEntry =
+        value === undefined ? { kind: "property", key } : { kind: "property", key, value };
+      const id = memberIdentity(member);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(member);
       continue;
     }
     // An unrecognised kind is still fatal, which rejects the whole document
@@ -262,6 +330,7 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
 /**
  * The version to stamp on a document about to be written.
  *
+ * Version 3 added property members; a document earns it by holding one.
  * Version 2 added tag members and per-space exclusions. A build that only
  * understands version 1 rejects the whole document rather than dropping what
  * it does not recognise, which is the safe behaviour, but it is also a
@@ -272,15 +341,15 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
  * of them first.
  *
  * Recomputed from current content every call, deliberately, rather than
- * remembering the version a document arrived with: removing the last tag
- * member or exclusion returns a document to version 1, so an older install
- * can open it again. That is why the incoming version is never consulted
+ * remembering the version a document arrived with: removing the last member
+ * kind or exclusion that earns a stamp returns a document to the lowest
+ * version that can hold it, so an older install can open it again. That is why the incoming version is never consulted
  * here — considering it would quietly remove that recovery path.
  */
 /*
  * Scope, so the next person to add a SETTING sees this before they need it:
- * this reads `spaces` and nothing else, so only a tag member or an exclusion
- * can raise the stamp. A release that adds a setting and no new member kind
+ * this reads `spaces` and nothing else, so only a tag member, a property member
+ * or an exclusion can raise the stamp. A release that adds a setting and no new member kind
  * still writes version 1, an older install accepts the document, and
  * `validateDefinitions` rebuilds `settings` from its fixed key list and drops
  * the key it does not know. On two devices through Sync that erases the
@@ -293,6 +362,8 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
  * to remember to gate each new key.
  */
 export function schemaVersionFor(spaces: readonly SpaceDefinition[]): number {
+  const usesV3 = spaces.some((s) => s.members.some((m) => m.kind === "property"));
+  if (usesV3) return 3;
   const usesV2 = spaces.some(
     (s) => s.members.some((m) => m.kind === "tag") || (s.exclude?.length ?? 0) > 0
   );

@@ -32,6 +32,8 @@
  * Widening the stub is fine — widening it by guessing is not.
  */
 
+import { parse } from "yaml";
+
 /** Thrown for any surface this stub deliberately declines to invent. */
 function notModelled(what: string, why: string): never {
   throw new Error(
@@ -562,4 +564,81 @@ export class WorkspaceLeaf {
   constructor() {
     notModelled("new WorkspaceLeaf()", "Build the small structural shape your code actually reads.");
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Frontmatter
+ *
+ * `getFrontMatterInfo` and `parseYaml` are what `src/visibility/
+ * frontmatterHead.ts` reads a file's properties with when Obsidian has not
+ * parsed it. Both are MEASURED here, not guessed, which is what the rule at
+ * the top of this file requires:
+ *
+ * `e2e/wave6-yaml-shapes.mjs`, run against a real Obsidian 1.13.7 through the
+ * module registry, recorded what the real pair does for 27 inputs — every row
+ * of the spec's boundary table plus seven malformed or edge documents. The
+ * readings are quoted at each decision below. `e2e/wave6-cache-vs-head.mjs`
+ * then compared the pair against `metadataCache.getFileCache().frontmatter`
+ * for all 5,000 files of the property fixture: 4,513 carried frontmatter and
+ * none disagreed.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Obsidian's own, modelled on the recorded offsets.
+ *
+ * Measured behaviour, all of it quoted from the probe output:
+ *
+ *  - `---\nk: Active\n---\nbody\n` gives
+ *    `{ exists: true, from: 4, to: 14, contentStart: 18, frontmatter: "k: Active\n" }`.
+ *    So `from` is just past the opening `---\n`, `to` is the index of the
+ *    newline before the closing `---`, `frontmatter` is the text between, and
+ *    `contentStart` is just past the closing `---\n`.
+ *  - An UNTERMINATED block — `---\nk: Active\n` — gives
+ *    `{ exists: false, contentStart: 0 }`. This is the fact the window-growing
+ *    in `createFrontmatterSource` turns on, so it is the single most important
+ *    row here.
+ *  - A leading BOM (`\uFEFF---\n…`) gives `exists: false`. So does a leading
+ *    blank line. So does a file with no block at all, and the empty file.
+ *  - `---\n---\nbody\n` gives `{ exists: true, from: 4, to: 4 }` — an empty
+ *    block exists.
+ */
+export function getFrontMatterInfo(content: string): {
+  exists: boolean;
+  frontmatter: string;
+  from: number;
+  to: number;
+  contentStart: number;
+} {
+  const none = { exists: false, frontmatter: "", from: 0, to: 0, contentStart: 0 };
+  // The opening delimiter must be the very first thing in the file: measured
+  // false for a BOM and for a leading newline alike.
+  const open = /^---\r?\n/.exec(content);
+  if (!open) return none;
+  const from = open[0].length;
+  // The closing delimiter is a line that is exactly `---`.
+  const close = /\n---(\r?\n|$)/.exec(content.slice(from - 1));
+  if (!close) return none;
+  const to = from - 1 + (close.index ?? 0);
+  const contentStart = from - 1 + (close.index ?? 0) + close[0].length;
+  return { exists: true, frontmatter: content.slice(from, to + 1), from, to: to + 1, contentStart };
+}
+
+/**
+ * Obsidian's own YAML, which the probe identifies as the `yaml` package at its
+ * default (1.2) schema.
+ *
+ * Identified rather than assumed, two ways. A malformed block raises
+ * `YAMLParseError`, which is that package's error class and not js-yaml's.
+ * And all 23 boundary-table rows produced byte-identical shapes between the
+ * real `parseYaml` and `YAML.parse` at the default version — including the
+ * three that discriminate between the candidates and between schema versions:
+ * `k: 02` is the number 2, `k: 2026-08-31` is the STRING (a 1.1 schema makes
+ * it a `Date`), and `k: 12:30` is the STRING (a 1.1 schema makes it 750).
+ *
+ * `yaml` is a devDependency for exactly this. It is not in the plugin's
+ * `dependencies`, which `tests/noNetwork.test.ts` asserts stays empty, and it
+ * is not in the bundle.
+ */
+export function parseYaml(yaml: string): unknown {
+  return parse(yaml);
 }

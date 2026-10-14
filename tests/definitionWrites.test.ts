@@ -46,7 +46,7 @@ const RESEARCH = {
 
 function membersOf(defs: DefinitionStore, id: string): string[] {
   return (defs.get().spaces.find((s) => s.id === id)?.members ?? []).flatMap((m) =>
-    m.kind === "tag" ? [] : [m.path]
+    m.kind === "file" || m.kind === "folder" ? [m.path] : []
   );
 }
 

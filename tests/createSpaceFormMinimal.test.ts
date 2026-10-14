@@ -5,7 +5,8 @@ import type { MemberEntry } from "../src/types";
 const pick = (entries: MemberEntry[]) =>
   entries.reduce((s, e) => toggleItem(s, e), emptyForm("#000"));
 
-const key = (m: MemberEntry) => (m.kind === "tag" ? `#${m.tag}` : `${m.kind}:${m.path}`);
+const key = (m: MemberEntry) =>
+  m.kind === "tag" ? `#${m.tag}` : m.kind === "property" ? `prop:${m.key}` : `${m.kind}:${m.path}`;
 const sortedKeys = (items: readonly MemberEntry[]) => items.map(key).sort();
 
 /** Every ordering of a small array. */

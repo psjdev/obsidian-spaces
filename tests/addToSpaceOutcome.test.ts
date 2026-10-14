@@ -55,7 +55,7 @@ async function noticeFrom(files: TAbstractFile[]): Promise<string[]> {
 }
 
 function stored(): string[] {
-  return defs.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+  return defs.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
 }
 
 describe("addToSpace reports what it changed", () => {
@@ -144,7 +144,7 @@ describe("addToSpace dedupes against what the space shows", () => {
   }
 
   function members(d: DefinitionStore): string[] {
-    return d.get().spaces[0].members.flatMap((m) => (m.kind === "tag" ? [] : [m.path]));
+    return d.get().spaces[0].members.flatMap((m) => (m.kind === "file" || m.kind === "folder" ? [m.path] : []));
   }
 
   it("writes nothing for a note the space holds through a member folder", async () => {

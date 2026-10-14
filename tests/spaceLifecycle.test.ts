@@ -191,7 +191,7 @@ describe("createSpace", () => {
     const stored = s.get().spaces.find((x) => x.id === id)!.members;
     expect(stored).toHaveLength(1);
     const first = stored[0];
-    if (first.kind === "tag") throw new Error("expected a path member");
+    if (first.kind !== "file" && first.kind !== "folder") throw new Error("expected a path member");
     expect(first.path).toBe("Papers");
   });
 

@@ -40,9 +40,17 @@ interface Harness {
   plugin: SpacesPlugin;
   /** Every tag index handed to the controller, newest last. */
   installed: TagIndex[];
+  /** Every property snapshot accessor handed to the controller, newest last. */
+  propertyInstalled: Array<() => unknown>;
   /** How many times a coalesced recompute was requested. */
   requested: () => number;
   fire: () => void;
+  /** A VAULT event, through the plugin's own `onVaultChange`. */
+  fireVault: () => Promise<void>;
+  /** Subscribes to the plugin's REAL hub, as an open picker does. */
+  openPicker: () => () => void;
+  /** What the coming flush would do, from the plugin's own `flushState`. */
+  pending: () => Promise<{ full: boolean; recompute: boolean; rebuild: boolean }>;
 }
 
 function harness(active: SpaceDefinition | null): Harness {
@@ -58,25 +66,112 @@ function harness(active: SpaceDefinition | null): Harness {
     metadataCache: { getFileCache: () => null },
   };
   const installed: TagIndex[] = [];
+  const propertyInstalled: Array<() => unknown> = [];
   let requested = 0;
   record.controller = {
     activeSpace: () => active,
     setTagIndex: (index: TagIndex) => void installed.push(index),
+    setPropertySnapshot: (get: () => unknown) => void propertyInstalled.push(get),
   };
-  // Shadows the private method: the coalescer itself is `eventCoalescer.ts`'s
-  // business and is tested there.
-  record.onVaultChange = async () => {
-    requested++;
+  // Shadows the shared coalescer: the coalescer itself is `eventCoalescer.ts`'s
+  // business and is tested there. This sits BELOW the routing fork in
+  // `onMetadataEvent` (`onVaultChange` versus `submitMetadataWork`), so
+  // counting submits cannot tell the routes apart. It therefore RUNS the
+  // submitted work, and the tests below read the plugin's real
+  // `flushState`, which is what differs: a vault event marks the burst full
+  // (the O(vault) tree re-index), a metadata event marks it for a recompute.
+  record.vaultChanges = {
+    submit: async (work: () => Promise<unknown>) => {
+      requested++;
+      await work();
+    },
   };
   return {
     plugin,
     installed,
+    propertyInstalled,
     requested: () => requested,
     fire: () => (plugin as unknown as { onMetadataEvent(): void }).onMetadataEvent(),
+    fireVault: () =>
+      (
+        plugin as unknown as { onVaultChange(fn: () => Promise<unknown>): Promise<void> }
+      ).onVaultChange(async () => undefined),
+    openPicker: () => plugin.subscribePropertyRefresh(() => undefined),
+    /** What the coming flush would do, read from the plugin's own state. */
+    pending: async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+      return (
+        plugin as unknown as {
+          flushState: { take(): { full: boolean; recompute: boolean; rebuild: boolean } };
+        }
+      ).flushState.take();
+    },
   };
 }
 
+describe("what a metadata event asks the flush to do", () => {
+  it("is a recompute and not a vault re-index, for a space that watches metadata", async () => {
+    // Routing a metadata event through `onVaultChange` marks the burst full,
+    // and the flush then rebuilds the vault tree for a change that cannot have
+    // moved it. That is the defect Task 13 fixed; this is its gate.
+    const h = harness(TAG_SPACE);
+    h.fire();
+    expect(await h.pending()).toEqual({ full: false, recompute: true, rebuild: false });
+  });
+
+  it("asks for nothing when no space watches metadata and no picker is open", async () => {
+    for (const active of [null, FOLDER_SPACE, PATH_SPACE]) {
+      const h = harness(active);
+      h.fire();
+      expect(await h.pending()).toEqual({ full: false, recompute: false, rebuild: false });
+    }
+  });
+
+  it("flushes for an open picker alone, and asks that flush for nothing else", async () => {
+    // The THIRD route, which nothing drove against the real method: the two
+    // other harnesses in the suite never subscribe, so `propertyRefresh.size`
+    // was always 0 and `metadataNotifyRoute`'s second argument was never
+    // exercised here. A picker open over a space that watches nothing still
+    // needs the flush, to be told the snapshot was replaced — and the flush
+    // must not re-index the tree or recompute a space that cannot have
+    // changed.
+    const h = harness(PATH_SPACE);
+    const release = h.openPicker();
+    h.fire();
+    expect(h.requested()).toBe(1);
+    expect(await h.pending()).toEqual({ full: false, recompute: false, rebuild: false });
+    release();
+    h.fire();
+    expect(h.requested()).toBe(1);
+  });
+
+  it("does not install a second snapshot over the one the event just installed", async () => {
+    // A vault event, then a metadata event that routes to NOTHING. The event
+    // installs a snapshot either way, so the flush behind the vault event
+    // must not install another: `rebuild` is `full && !fresh`, and the flag
+    // tracks the install rather than the route it took afterwards.
+    const h = harness(PATH_SPACE);
+    await h.fireVault();
+    h.fire();
+    expect(h.propertyInstalled.length).toBe(1);
+    expect(await h.pending()).toEqual({ full: true, recompute: true, rebuild: false });
+  });
+});
+
 describe("a metadata-cache event", () => {
+  it("replaces the property snapshot as well, whichever space is active", () => {
+    // The same staleness the tag index had: a property member would otherwise
+    // go on answering from the frontmatter as it was when the snapshot was
+    // first read.
+    for (const active of [null, FOLDER_SPACE, PATH_SPACE, TAG_SPACE]) {
+      const h = harness(active);
+      h.fire();
+      h.fire();
+      expect(h.propertyInstalled.length).toBe(2);
+      expect(h.propertyInstalled[0]).not.toBe(h.propertyInstalled[1]);
+    }
+  });
+
   it("replaces the tag index while All is active", () => {
     // The reported repro: tag a note with All active, switch to the tag
     // space, and the note is missing. Nothing else in the session replaces

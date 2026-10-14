@@ -63,6 +63,8 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
       kindOf: (path) => VAULT[path] ?? null,
     },
     tags: { knownTags: () => [...VAULT_TAGS] },
+    properties: () => null,
+    subscribePropertyRefresh: () => () => undefined,
     tagIndex: () => {
       reached += 1;
       return {
@@ -99,7 +101,8 @@ export function makeHarness(over: Partial<CreateSpacePanelDeps> = {}): Harness {
         compileIgnore([]),
         {
           pathsMatching: (tag) => deps.tagIndex().pathsMatching(tag),
-        }
+        },
+        () => null
       )(members),
     customColors: [],
     useThemeIconColor: () => false,

@@ -23,6 +23,7 @@ import { resolveLivePath } from "../visibility/resolveLivePath";
 import { hasRoot } from "../visibility/folderSpace";
 import { normalizeTag } from "../visibility/tagMatch";
 import { resolveMembers } from "../controller/resolveMembers";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { TagIndex } from "../visibility/TagIndex";
 
 /**
@@ -173,10 +174,29 @@ export function coveringTagIn(
  * Most callers ask "is this path a member" or "which paths did the user
  * pick", and neither question has an answer for a tag. Narrowing here keeps
  * that narrowing in one place instead of a `m.kind !== "tag"` guard at each
- * of the eighteen call sites.
+ * caller.
  */
 export function pathMembers(space: SpaceDefinition): PathMember[] {
-  return space.members.filter((m): m is PathMember => m.kind !== "tag");
+  return space.members.filter(isPathMember);
+}
+
+function isPathMember(m: MemberEntry): m is PathMember {
+  switch (m.kind) {
+    case "file":
+    case "folder":
+      return true;
+    case "tag":
+    case "property":
+      return false;
+    default: {
+      // A member kind with no case above. Adding one to `MemberEntry` fails
+      // HERE, at compile time, instead of reaching the callers of
+      // `pathMembers` as a member with no `path`. The `never` is what checks
+      // the list; the predicate on its own would be taken on trust.
+      const unreached: never = m;
+      return unreached;
+    }
+  }
 }
 
 /**
@@ -195,9 +215,17 @@ export function pathMembers(space: SpaceDefinition): PathMember[] {
 export function watchesMetadata(space: SpaceDefinition | null): boolean {
   if (space === null) return false;
   if (hasRoot(space)) return false;
-  return space.members.some((m) => m.kind === "tag");
+  return space.members.some((m) => m.kind === "tag" || m.kind === "property");
 }
 
+
+/**
+ * Whether this space holds a property member, so a caller can skip asking for
+ * the property index at all when it does not. Asking can cost a vault walk.
+ */
+export function holdsPropertyMember(space: SpaceDefinition): boolean {
+  return space.members.some((m) => m.kind === "property");
+}
 
 /**
  * Every path this space RESOLVES to, canonical.
@@ -216,8 +244,14 @@ export function watchesMetadata(space: SpaceDefinition | null): boolean {
  * member costs a pass over the vault's notes to expand, and a selection of
  * fifty files would otherwise pay for fifty of them.
  */
-export function resolvedPaths(space: SpaceDefinition, tags: TagIndex): Set<string> {
-  return new Set(resolveMembers(space, tags).map((m) => canonicalPath(m.path)));
+export function resolvedPaths(
+  space: SpaceDefinition,
+  tags: TagIndex,
+  // `null` when no property snapshot is ready: a property member then
+  // contributes nothing here, so a note it would have held reads as not held.
+  properties: PropertyIndex | null
+): Set<string> {
+  return new Set(resolveMembers(space, tags, properties).map((m) => canonicalPath(m.path)));
 }
 
 /**

@@ -103,7 +103,8 @@ async function build(withHeader = true) {
       apply: vi.fn(),
       livePaths: () => new Set<string>(),
     },
-    createMapTagIndex(new Map())
+    createMapTagIndex(new Map()),
+    () => ({ status: "unavailable", unparsed: [] })
   );
   const switcher = new SwitcherView(
     defs,

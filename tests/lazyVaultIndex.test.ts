@@ -96,7 +96,8 @@ describe("what a recompute in All costs", () => {
         return tree;
       }),
       { apply: vi.fn(), livePaths: () => new Set<string>() },
-      createMapTagIndex(new Map())
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] })
     );
     return { controller, builds: () => builds };
   }

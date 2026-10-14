@@ -1,12 +1,17 @@
 import { includedPaths } from "../visibility/includedPaths";
-import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
+import { expandMembers, type MemberTags } from "../controller/resolveMembers";
+import type { IgnoreMatcher } from "../visibility/glob";
 import type { VaultIndex } from "../visibility/VaultIndex";
 import type { MemberEntry } from "../types";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 
-/** The slice of the tag index this needs. `TagIndex` satisfies it structurally. */
-export interface PreviewTags {
-  pathsMatching(tag: string): readonly string[];
-}
+/**
+ * The slice of the tag index this needs. `TagIndex` satisfies it structurally.
+ *
+ * The expansion's own type, re-exported under the name this seam has always
+ * used, so there is one shape to satisfy rather than two identical ones.
+ */
+export type PreviewTags = MemberTags;
 
 export interface Preview {
   /**
@@ -25,11 +30,12 @@ export interface Preview {
  *
  * The panel used to answer this itself, with a case-sensitive prefix scan that
  * consulted no ignore patterns and pruned no empty folders, so the number
- * under the picker could promise notes the space would never contain. This
- * expands tag members into the notes carrying them and de-duplicates on the
- * folded path, both as `resolveMembers` does,
- * and hands the result to `includedPaths`, which is the same expansion,
- * ignore and pruning a recompute runs.
+ * under the picker could promise notes the space would never contain. It now
+ * runs `expandMembers`, THE expansion a recompute runs rather than a copy of
+ * it, and hands the seeds to `includedPaths`, which is the same ignore and
+ * pruning a recompute runs. A copy lived here and had drifted: its chain had
+ * no exhaustive tail, so a fifth member kind would have gone missing from
+ * every preview without a compile error.
  *
  * One step of a recompute is NOT repeated here: resolving a stored spelling to
  * the live path (`resolveLivePath`). Every member the panel holds was picked
@@ -40,6 +46,10 @@ export interface Preview {
  * and a note carried by two members is in the set once, so the count agrees
  * with the rows.
  *
+ * A property member contributes nothing while `properties()` answers `null`
+ * (the metadata cache is cold). That is "not known yet", not "matches
+ * nothing", so a count taken then can be low and a later preview corrects it.
+ *
  * Curried: `main.ts` binds the vault, the compiled ignore and the tag index,
  * and the panel calls a function of its members alone.
  */
@@ -47,33 +57,31 @@ export function buildPreview(
   vault: VaultIndex,
   ignore: IgnoreMatcher,
   tags: PreviewTags,
+  // A function, called at most ONCE per preview and only when the members
+  // hold a property member, which `expandMembers` is what guarantees: a
+  // selection with no property member must not ask the controller for an
+  // index at all.
+  properties: () => PropertyIndex | null,
   excluded: ReadonlySet<string> = new Set()
 ): (members: readonly MemberEntry[]) => Preview {
   return (members) => {
+    // The seeds, in member order, de-duplicated on the folded path by the
+    // expansion itself. `includedPaths` de-duplicates seeds EXACTLY, so
+    // without that a case-sensitive vault holding `Docs/a.md` and `docs/a.md`
+    // would count 2 here where a recompute, which keeps the first spelling,
+    // counts 1. Exclusions drop a tag or property match and never a
+    // hand-picked path, which is the expansion's precedence and not this
+    // seam's to choose.
     const seeds: string[] = [];
-    // One `seen` over tag matches and path members alike, keyed on the folded
-    // path and filled in member order, exactly as `resolveMembers` does it.
-    // `includedPaths` de-duplicates seeds exactly, so without this a
-    // case-sensitive vault holding `Docs/a.md` and `docs/a.md` would count
-    // 2 here where a recompute, which keeps the first spelling, counts 1.
-    const seen = new Set<string>();
-    const add = (path: string, key: string): void => {
-      if (seen.has(key)) return;
-      seen.add(key);
-      seeds.push(path);
-    };
-    for (const m of members) {
-      if (m.kind === "tag") {
-        // A tag match is dropped by an exclusion; a hand-picked path is not,
-        // the same precedence `resolveMembers` gives them.
-        for (const p of tags.pathsMatching(m.tag)) {
-          const key = canonicalPath(p);
-          if (!excluded.has(key)) add(p, key);
-        }
-        continue;
-      }
-      add(m.path, canonicalPath(m.path));
-    }
+    expandMembers(
+      members,
+      tags,
+      properties,
+      // Null rather than an empty Set for the common case, the same fast path
+      // `resolveMembers` takes.
+      excluded.size === 0 ? null : excluded,
+      (m) => seeds.push(m.path)
+    );
     const { included } = includedPaths(vault, seeds, ignore, excluded);
     let notes = 0;
     for (const p of included) if (vault.kindOf(p) === "file") notes += 1;

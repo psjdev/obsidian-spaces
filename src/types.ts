@@ -3,9 +3,9 @@ import type { OrderMap } from "./order/orderModel";
 export type { OrderMap };
 
 /**
- * What a vault object is. Deliberately NOT widened to include `"tag"`:
- * `VaultIndex.kindOf` returns this, and a tag is not something the vault
- * holds.
+ * What a vault object is. Deliberately NOT widened to include `"tag"` or
+ * `"property"`: `VaultIndex.kindOf` returns this, and neither a tag nor a
+ * frontmatter property is something the vault holds.
  */
 export type MemberKind = "file" | "folder";
 
@@ -14,19 +14,28 @@ export type MemberKind = "file" | "folder";
  *
  * A discriminated union rather than `{ path, kind }` with an optional `tag`
  * beside it. `path` exists only on the kinds where it means something, so
- * reading `m.path` on a tag member is a compile error rather than
- * `undefined` reaching a vault lookup at runtime.
+ * reading `m.path` on a tag or property member is a compile error rather
+ * than `undefined` reaching a vault lookup at runtime.
  *
  * Members were always selectors: a `folder` member expands to everything
- * inside it on every render. `tag` is the same idea with a different source.
+ * inside it on every render. `tag` is the same idea with a different source,
+ * and `property` is a third: a frontmatter key, with or without a value.
  */
 export type MemberEntry =
   | { kind: "file"; path: string }
   | { kind: "folder"; path: string }
-  | { kind: "tag"; tag: string };
+  | { kind: "tag"; tag: string }
+  | { kind: "property"; key: string; value?: string };
 
 /** The members that name a vault path. See `pathMembers`. */
 export type PathMember = Extract<MemberEntry, { path: string }>;
+
+/**
+ * A stored property member. Narrower than `MemberEntry` wherever a function
+ * only ever handles one, so the kind check is the compiler's rather than a
+ * runtime guard no caller can reach.
+ */
+export type PropertyMember = Extract<MemberEntry, { kind: "property" }>;
 
 export interface SpaceDefinition {
   id: string;
@@ -285,11 +294,11 @@ export type SwitchOutcome =
  * The highest document version this build understands.
  *
  * NOT what every write stamps. See `schemaVersionFor`: a document is marked 2
- * only once it uses something a version 1 build cannot represent, so someone
- * who never adds a tag member or an exclusion keeps a document an older
- * install can still open.
+ * or 3 only once it uses something an older build cannot represent, so someone
+ * who never adds a tag member, an exclusion or a property member keeps a
+ * document an older install can still open.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
   // Literal 1, not `SCHEMA_VERSION`. An empty document holds no spaces, so
@@ -405,12 +414,12 @@ export interface SpacesApi {
    * - A path under a member folder answers true, unless the space's
    *   `exclude` names it, in which case it answers false — which is what
    *   the space shows.
-   * - **A note the space holds only through a TAG member answers false**,
-   *   even though the space visibly contains it. Which notes a tag reaches
-   *   is computed against Obsidian's metadata cache, which this surface
-   *   does not read: answering would make a `data.json` projection depend
-   *   on live vault state, and a stale true is worse than a documented
-   *   false.
+   * - **A note the space holds only through a TAG or PROPERTY member
+   *   answers false**, even though the space visibly contains it. Which
+   *   notes a tag or a frontmatter property reaches is computed against
+   *   Obsidian's metadata cache, which this surface does not read:
+   *   answering would make a `data.json` projection depend on live vault
+   *   state, and a stale true is worse than a documented false.
    *
    * A consumer that needs what the space currently SHOWS wants the
    * visibility snapshot, not this.
@@ -422,10 +431,11 @@ export interface SpacesApi {
    * never stored — so a descendant of a member folder is a member without
    * appearing here. Empty for *All* and for an unknown id.
    *
-   * TAG members are omitted entirely. A tag names no path, so it has nothing
-   * to contribute to a list of paths, and the notes it reaches are not
-   * stored anywhere to be listed. A space whose members are all tags returns
-   * an empty array, which is not the same as a space with no members.
+   * TAG and PROPERTY members are omitted entirely. Neither names a path, so
+   * neither has anything to contribute to a list of paths, and the notes
+   * they reach are not stored anywhere to be listed. A space whose members
+   * are all tags or all properties returns an empty array, which is not the
+   * same as a space with no members.
    */
   memberPaths(spaceId?: string): string[];
   /**

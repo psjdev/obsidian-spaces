@@ -1,4 +1,5 @@
 import {
+  FileSystemAdapter,
   FileView,
   Menu,
   Notice,
@@ -25,6 +26,25 @@ import { nativeKnownTags } from "./ui/nativeTagCounts";
 import type { VaultSource } from "./ui/createSpaceForm";
 import { createObsidianVaultIndex } from "./visibility/ObsidianVaultIndex";
 import { createObsidianTagIndex } from "./visibility/ObsidianTagIndex";
+import {
+  createLazyPropertySnapshot,
+  snapshotFromWalk,
+  walkPropertyCache,
+  type PropertyWalk,
+} from "./visibility/ObsidianPropertyIndex";
+import {
+  createFrontmatterSource,
+  memoizeFrontmatterSource,
+  type FrontmatterRead,
+  type FrontmatterSource,
+} from "./visibility/frontmatterHead";
+import { createNodeHeadReader } from "./visibility/nodeHeadReader";
+import { mergeRepairedWalk, planRepair } from "./visibility/propertyRepair";
+import { createParseStallWatch, type ParseStallWatch } from "./lifecycle/parseStall";
+import { nativeParseProgress } from "./visibility/nativeParseProgress";
+import { PropertyRefreshHub } from "./ui/PropertyRefreshHub";
+import { RefreshFlushState, metadataNotifyRoute, runFlush, submitMetadataWork, submitVaultWork } from "./lifecycle/refreshFlush";
+import type { PropertySnapshot } from "./visibility/PropertyIndex";
 import { createLazyTagIndex } from "./visibility/TagIndex";
 import { createLazyVaultIndex } from "./visibility/VaultIndex";
 import { repairOnRename, repairRenameIn } from "./lifecycle/pathRepair";
@@ -286,6 +306,85 @@ export default class SpacesPlugin extends Plugin {
    * later misses it. See the registration for the measurement.
    */
   private metadataResolved = false;
+  /**
+   * Stamps each property snapshot so one can be told from the one it replaced.
+   * Only ever incremented, and only by `newPropertySnapshot`. Nothing
+   * compares the stamp yet; `PropertyIndex.generation` says what it is for.
+   */
+  private propertyGeneration = 0;
+  /** Open property pickers, each owned by the panel that opened it. */
+  private readonly propertyRefresh = new PropertyRefreshHub();
+
+  /**
+   * Watches whether Obsidian is still getting through its parse queue.
+   *
+   * Armed on the first `resolved` and re-armed whenever a property consumer
+   * asks and is told "unavailable". `lifecycle/parseStall.ts` carries the
+   * measurements that rule out every cheaper trigger. Sampling costs one
+   * scalar read and no vault walk, so it is free in the terms
+   * `tests/propertyWorkBudget.test.ts` states the budget in.
+   *
+   * A FIELD INITIALIZER, like the coalescer, so it is alive from construction
+   * and its `cancel` can be registered in `onload` before anything that may
+   * throw.
+   */
+  private readonly parseStall: ParseStallWatch = createParseStallWatch({
+    timer: {
+      set: (fn, ms) => window.setTimeout(fn, ms),
+      clear: (handle) => window.clearTimeout(handle),
+    },
+    progress: () => nativeParseProgress(this.app),
+    // The verdict alone repairs nothing. It makes the NEXT unavailable answer
+    // trigger a repair, and pokes the current one so a user who is already
+    // staring at a fallen-open space does not wait for an event that a jammed
+    // vault will never send.
+    onStalled: () => this.repairPropertiesIfStalled(),
+  });
+
+  /**
+   * Reads a file's frontmatter head off disk, for the files Obsidian has not
+   * parsed. Null until `start()` builds it, which is also what makes the
+   * repair impossible before the vault root is known.
+   */
+  private frontmatter: FrontmatterSource | null = null;
+
+  /** One repair at a time. A second ask while one runs is dropped, not queued. */
+  private repairing = false;
+
+  /**
+   * What the last INSTALLED repair read, and the mtime it read each path at —
+   * empty whenever that repair closed every hole.
+   *
+   * A repair that ran, installed its answer and STILL left holes must not run
+   * again over the same files at the same mtimes: it would read the same bytes
+   * and install the same unavailable snapshot.
+   *
+   * WHY IT IS HERE AND NOT IN THE MEMO. `memoizeFrontmatterSource` deliberately
+   * never caches `"unreadable"`, and that is right: a lock that cleared or a
+   * share that came back must not be remembered as a permanent failure. The
+   * thing worth remembering is one level up and is about the REPAIR, not about
+   * the file — "we just tried exactly these and nothing moved" — so it lives
+   * with the caller that decides whether to try again.
+   *
+   * Without it, every metadata event installs a fresh accessor, the first ask
+   * finds the same holes, and the same repair runs in full: a complete
+   * `PropertyIndex` rebuild, an extra `propertyRefresh.notify()`, an extra
+   * `controller.refresh()`, and — because `"unreadable"` is not memoized — a
+   * real `open`/`read`/`close` per file, up to `PROPERTY_REPAIR_MAX_FILES` of
+   * them, on exactly the disconnected-share case `nodeHeadReader.ts` names in
+   * its own docblock. Measured by the wave 6 reviewer: 20 metadata events, 20
+   * extra index builds, 20 extra recomputes, 20 disk reads per file.
+   *
+   * Keyed on mtime because that is the signal already threaded through
+   * `FrontmatterSource.read`, and dropped wholesale on every fresh stall latch
+   * (`repairPropertiesIfStalled`), which is the one event that says the
+   * situation itself has changed.
+   *
+   * ONLY SET WHEN THE REPAIR INSTALLED. A repair dropped by the generation
+   * guard never produced an answer anybody saw, so remembering it would turn
+   * "superseded" into "do not try again" and leave the feature dark.
+   */
+  private repairedAtMtime: ReadonlyMap<string, number> = new Map();
 
   /**
    * Takes `fileManager.getNewFileParent` back off. Null until `start()`
@@ -457,9 +556,29 @@ export default class SpacesPlugin extends Plugin {
         // The one place readiness is ever granted. From here a tag space
         // matching nothing means nothing matches, not that nobody has looked.
         this.metadataResolved = true;
+        // ARMED HERE, and nowhere earlier. `resolved` is the first moment
+        // Obsidian has done any parsing at all, so sampling before it would
+        // read a queue that has not started. It fires once on a jammed vault
+        // and never again — measured, with two negative experiments behind it
+        // — so this is the only arming the common case gets.
+        this.parseStall.arm();
         this.onMetadataEvent();
       })
     );
+    // HERE, not in `startSteps`, for the same reason the listener above is.
+    // Both are field initializers, alive from construction and reachable from
+    // the handler that listener calls, and `startSteps` is allowed to throw —
+    // `start()` catches it and leaves a half-installed plugin running. A
+    // release registered after the throwing step is a release that never
+    // happens, and a pending flush timer would then outlive `onunload`,
+    // holding the plugin instance and firing one O(vault) re-index after
+    // teardown. The coalescing window is a live timer; the hub holds a
+    // closure over any picker still open.
+    this.register(() => this.vaultChanges.cancel());
+    this.register(() => this.propertyRefresh.clear());
+    // Same reason: a live sampling timer that outlived `onunload` would hold
+    // the plugin instance and go on reading a torn-down app.
+    this.register(() => this.parseStall.cancel());
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -562,7 +681,8 @@ export default class SpacesPlugin extends Plugin {
       // The switcher does not exist yet at this point in `onload()`; deferred
       // the same way the two accessors above are, so it is read when a
       // placement change actually happens rather than now.
-      () => this.switcher?.cancelDrag()
+      () => this.switcher?.cancelDrag(),
+      () => this.controller.drawnPropertyIndex()
     );
     this.addSettingTab(this.settingTab);
 
@@ -638,6 +758,17 @@ export default class SpacesPlugin extends Plugin {
   }
 
   private startSteps(): void {
+    // The reader for the repair, built once. It needs the vault's real
+    // directory, which only a `FileSystemAdapter` has; on anything else — and
+    // the manifest says `isDesktopOnly`, so there should be nothing else —
+    // this stays null and the repair simply never runs, leaving the feature
+    // exactly where it was before this code existed.
+    const adapter = this.app.vault.adapter;
+    if (adapter instanceof FileSystemAdapter) {
+      this.frontmatter = memoizeFrontmatterSource(
+        createFrontmatterSource(createNodeHeadReader(adapter.getBasePath()))
+      );
+    }
     this.adapter.onHealthChange((healthy) => {
       if (healthy) {
         this.explorerHealthWarned = false;
@@ -675,6 +806,7 @@ export default class SpacesPlugin extends Plugin {
         metadataReady: () => this.metadataResolved,
       },
       createLazyTagIndex(() => createObsidianTagIndex(this.app)),
+      this.newPropertySnapshot(),
       {
         transition: (from, to) =>
           this.runMaskedTransition(from, to),
@@ -834,13 +966,13 @@ export default class SpacesPlugin extends Plugin {
     // A note's tags are not vault structure, so no vault event reports them.
     this.registerEvent(this.app.metadataCache.on("changed", () => this.onMetadataEvent()));
 
-    // The coalescing window is a live timer, so it must not outlive the
-    // plugin. `register` runs this on unload with the rest of the teardown.
-    this.register(() => this.vaultChanges.cancel());
-    // The body marker comes off and every API subscriber is dropped.
-    // Through `register` rather than a line in `onunload` for the same reason
-    // the coalescer above uses it — the state is created here, so its release
-    // belongs here.
+    // The coalescer's and the hub's releases are NOT here; they are in
+    // `onload`, beside the listener that can reach them. See the comment
+    // there.
+    //
+    // The body marker comes off and every API subscriber is dropped. Through
+    // `register` rather than a line in `onunload` because the state is created
+    // here, so its release belongs here.
     this.register(() => this.releaseSpaceSurface());
 
     // The right-click half of the gesture. `file-menu` is public and
@@ -1420,27 +1552,249 @@ export default class SpacesPlugin extends Plugin {
       clear: (handle) => window.clearTimeout(handle),
       now: () => Date.now(),
     },
-    flush: () => {
-      // The vault index is a snapshot; replace it in place so every captured
-      // controller reference stays valid. Built at flush time, so it is the
-      // burst's end state rather than any intermediate one.
-      this.controller.setVaultIndex(createObsidianVaultIndex(this.app.vault));
-      // Replaced in the same breath, and LAZY. A recompute reading a fresh
-      // vault against a stale tag index would show a note the vault has and
-      // the tags do not, so the index must not survive this flush — but
-      // building it here unconditionally charged every user an O(vault)
-      // metadata walk per burst of vault events, tags or no tags. The wrapper
-      // keeps the first half and drops the second: the walk happens when
-      // `resolveMembers` expands a tag member and at no other time, and
-      // because it can only happen AFTER the line above, it is never older
-      // than the vault index it is read against.
-      this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
-      this.controller.refresh();
-    },
+    // ONE coalescer, one timer, for vault events and metadata events alike.
+    // A note creation emits both, and two timers flushed twice and notified
+    // pickers twice. What the flush does depends on what the burst held, and
+    // `runFlush` decides that, so the work-budget tests run the same code.
+    //
+    // The vault index replacement is O(vault) and is only for a burst that held
+    // a VAULT event. A metadata burst recomputes and notifies and does not
+    // re-index the tree: a note's metadata is not vault structure.
+    flush: () =>
+      runFlush(this.flushState, {
+        // A snapshot, replaced in place so every captured controller reference
+        // stays valid. Built at flush time, so it is the burst's end state.
+        replaceVaultIndex: () =>
+          this.controller.setVaultIndex(createObsidianVaultIndex(this.app.vault)),
+        // LAZY: the metadata walk happens when `resolveMembers` expands a tag
+        // member and at no other time. Replaced after the vault index, so it is
+        // never older than the vault index it is read against.
+        replaceTagIndex: () =>
+          this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app))),
+        // LAZY for the same reason: the walk happens when a property member
+        // asks. Skipped only when one was installed after the burst's last
+        // vault event, which `RefreshFlushState` explains.
+        installPropertySnapshot: () =>
+          this.controller.setPropertySnapshot(this.newPropertySnapshot()),
+        notifyPickers: () => this.propertyRefresh.notify(),
+        refresh: () => this.controller.refresh(),
+      }),
   });
 
+  /** What the coming flush has to do. See `RefreshFlushState`. */
+  private readonly flushState = new RefreshFlushState();
+
+  /**
+   * An open property picker is a metadata consumer in its own right.
+   *
+   * The space gate (`watchesMetadata`) asks whether a SPACE holds a tag or
+   * property member, which is the wrong question while someone is still
+   * choosing one: a picker opened in a files-and-folders space would never
+   * refresh, because nothing in the vault watches metadata yet. The panel
+   * that opens the picker owns this subscription and must call the returned
+   * function when it closes; a `register` callback clears any still held when
+   * the plugin unloads. `CreateSpacePanel` is the only subscriber: the
+   * contents dialog reads the index through a thunk and redraws from its own
+   * writes, so its counts are a point-in-time reading of the moment it opened
+   * and it is not told when a newer snapshot arrives.
+   *
+   * It fires when the snapshot has been REPLACED, which happens on a metadata
+   * change, on the readiness transition (`resolved`), and on the coalesced
+   * flush after a file is created, deleted or renamed. It does not fire when a
+   * space's `exclude` or the global ignore changes: those leave the
+   * frontmatter, and so the raw snapshot, untouched, though they do change
+   * filtered member counts.
+   *
+   * Both paths are coalesced, so a subscriber need not debounce: one
+   * notification per coalesced flush, arriving up to the coalescing window
+   * after the event. NOT once per burst, for a burst that does not end. The
+   * coalescer's `VAULT_COALESCE_MAX_WAIT_MS` forces a flush every 250 ms
+   * while events keep arriving, so a sync or a `git pull` notifies about four
+   * times a second for as long as it runs. That cadence is the coalescer's
+   * and belongs there if it ever needs changing.
+   */
+  subscribePropertyRefresh(onChange: () => void): () => void {
+    return this.propertyRefresh.subscribe(onChange);
+  }
+
+  /**
+   * A fresh LAZY property snapshot: nothing walks the vault until a property
+   * member asks, and a ready answer is kept until the next replacement.
+   *
+   * The walk is kept beside the snapshot it produced, because the repair needs
+   * the entries it already collected as well as the paths it could not read.
+   * Re-walking after the async read instead would merge two different pictures
+   * of the vault.
+   *
+   * THE REPAIR IS DEMAND-DRIVEN, and that is what keeps it free. It is asked
+   * for only from inside this build — which runs only when a property member
+   * or an open picker actually asks a question — so a vault with neither pays
+   * nothing, exactly as budget 2 in `tests/propertyWorkBudget.test.ts` states.
+   * It is also what makes the repair reach a user who switches into a property
+   * space ten minutes into a jammed session, with no extra wiring for it.
+   */
+  private newPropertySnapshot(): () => PropertySnapshot {
+    const generation = ++this.propertyGeneration;
+    // Kept from the build, so the repair gets the entries this walk already
+    // collected as well as the paths it could not read.
+    let walked: PropertyWalk | null = null;
+    const lazy = createLazyPropertySnapshot(() => {
+      const walk = walkPropertyCache(this.app);
+      walked = walk;
+      return snapshotFromWalk(walk, generation);
+    });
+    // OUTSIDE the memo, deliberately. The memo is what holds a burst to one
+    // walk, and it also means an unavailable answer is handed back without the
+    // build ever running again — so a check placed inside it would fire once
+    // and never again. A jammed vault sends no further metadata events, so
+    // "once" is the difference between a user who selects a property space
+    // before the stall is detected and one who selects it after: without this,
+    // the first is repaired and the second waits forever. The cost on every
+    // other path is two comparisons.
+    return () => {
+      const snapshot = lazy();
+      if (walked !== null && walked.unparsed.length > 0) {
+        // Re-arm even when the stall is not latched yet: the watcher gives up
+        // after two minutes, and this is the signal that somebody still cares.
+        this.parseStall.arm();
+        this.requestPropertyRepair(walked);
+      }
+      return snapshot;
+    };
+  }
+
+  /**
+   * Read the frontmatter of the files Obsidian has not parsed, and install a
+   * complete new snapshot built from the result.
+   *
+   * ## The three things this must not get wrong
+   *
+   * 1. **It must not run on a merely cold cache.** Two guards, one of which
+   *    cannot be wrong. `parseStall.stalled()` is the judgement — see
+   *    `lifecycle/parseStall.ts` for why `resolved` alone was not enough — and
+   *    `planRepair` is the absolute bound: more than 200 unparsed files is not
+   *    a jam and nothing is read.
+   * 2. **It must not tear the snapshot in flight.** A property snapshot build
+   *    is fully synchronous, which is what makes it safe against a metadata
+   *    event or a rename landing mid-walk. This is async, so it computes a
+   *    COMPLETE new walk off to the side and installs it as a constant thunk
+   *    in one assignment. Nothing half-repaired is ever observable, and the
+   *    installed thunk never rebuilds, so it cannot ask for a second repair.
+   * 3. **It must not install over something newer.** `propertyGeneration` is
+   *    stamped by every install; if it moved while we were awaiting, a
+   *    metadata or vault event has superseded this walk and the result is
+   *    dropped. Nothing is lost: the newer accessor is lazy, so the next ask
+   *    rebuilds, finds the holes again and asks for a repair again.
+   */
+  private requestPropertyRepair(walk: PropertyWalk): void {
+    if (!this.parseStall.stalled() || this.repairing) return;
+    const source = this.frontmatter;
+    if (source === null) return;
+    const plan = planRepair(walk.unparsed);
+    // "too-many" and "nothing" both mean: leave the snapshot unavailable and
+    // honest. A vault where thousands of files are unparsed is broken in a way
+    // to report, not to paper over by reading it all off disk.
+    if (plan.kind !== "repair") return;
+    // We have been here before, with these files, at these mtimes, and got
+    // nowhere. Running again would read the same bytes and install the same
+    // unavailable answer. See `repairedAtMtime`.
+    if (this.repairIsARepeat(plan.paths)) return;
+    this.repairing = true;
+    void this.runPropertyRepair(walk, plan.paths, source).finally(() => {
+      this.repairing = false;
+    });
+  }
+
+  /**
+   * TRUE when every file this repair would read was already read, at the same
+   * mtime, by a repair that installed its answer and still left holes.
+   *
+   * EVERY, not any: one path that is new or has changed is a path a repair can
+   * still make progress on, and progress on one file is what turns an
+   * unavailable snapshot into a ready one.
+   */
+  private repairIsARepeat(paths: readonly string[]): boolean {
+    for (const path of paths) {
+      if (this.repairedAtMtime.get(path) !== this.propertyMtime(path)) return false;
+    }
+    return true;
+  }
+
+  /** A file's mtime, or 0 for anything the vault will not call a file. */
+  private propertyMtime(path: string): number {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof TFile ? file.stat.mtime : 0;
+  }
+
+  private async runPropertyRepair(
+    walk: PropertyWalk,
+    paths: readonly string[],
+    source: FrontmatterSource
+  ): Promise<void> {
+    const startedAt = this.propertyGeneration;
+    const repaired = new Map<string, FrontmatterRead>();
+    const stamps = new Map<string, number>();
+    for (const path of paths) {
+      const stamp = this.propertyMtime(path);
+      // Serial, not `Promise.all`. At most 200 files, so the wall-clock saving
+      // is small, and a jam is already a sign of a filesystem or a file that
+      // is misbehaving — 200 concurrent handles into it is not the thing to do
+      // about that.
+      repaired.set(path, await source.read(path, stamp));
+      stamps.set(path, stamp);
+      // Teardown mid-read. Stop before touching a controller that is gone.
+      if (!this.loaded) return;
+    }
+    if (this.propertyGeneration !== startedAt) return;
+    const generation = ++this.propertyGeneration;
+    const merged = mergeRepairedWalk(walk, repaired);
+    const snapshot = snapshotFromWalk(merged, generation);
+    // ONE assignment, over a value that is already complete.
+    this.controller.setPropertySnapshot(() => snapshot);
+    // A WHOLE new map, so it can only ever hold what THIS repair read — at most
+    // `PROPERTY_REPAIR_MAX_FILES` entries, with nothing accumulating across
+    // renames. Empty when every hole closed, because then there is nothing left
+    // to decline to retry. See `repairedAtMtime`.
+    this.repairedAtMtime = merged.unparsed.length > 0 ? stamps : new Map();
+    this.propertyRefresh.notify();
+    this.controller.refresh();
+  }
+
+  /**
+   * The stall watcher's verdict, applied to whatever is on screen now.
+   *
+   * A jammed vault emits no further metadata events of its own, so without
+   * this the repair would wait for a user keystroke before a space that is
+   * currently showing the whole vault got its contents back.
+   */
+  private repairPropertiesIfStalled(): void {
+    // A FRESH latch is the one event that says the situation itself changed,
+    // so it is where "we tried these and got nowhere" stops applying. The
+    // watcher only latches again after its counter has moved or drained
+    // (`lifecycle/parseStall.ts`), so this cannot re-run a repair while
+    // nothing is happening — and it is what lets a share that came back be
+    // read again, which is why `"unreadable"` is not memoized either.
+    this.repairedAtMtime = new Map();
+    if ((this.controller as SpaceController | undefined) === undefined) return;
+    // Budget 2 stands: a vault with no metadata-driven space and no open
+    // picker pays NOTHING here — and has nothing to repair for anyway, since
+    // nothing is reading properties. A tag-only space passes this gate and
+    // still walks nothing, because the snapshot below is lazy and a recompute
+    // that resolves no property member never asks it.
+    if (!watchesMetadata(this.controller.activeSpace()) && this.propertyRefresh.size === 0) return;
+    // No new accessor: ASKING the one in force is enough, because the retry in
+    // `newPropertySnapshot` sits outside the memo. So this costs no vault walk
+    // of its own — the recompute pays the walk it was always going to pay, and
+    // a memoized unavailable answer pays none at all.
+    this.propertyRefresh.notify();
+    this.controller.refresh();
+  }
+
   private async onVaultChange(fn: () => Promise<unknown>): Promise<void> {
-    await this.vaultChanges.submit(fn);
+    // `submitVaultWork` marks the burst full INSIDE the queued work, which is
+    // what makes it safe against an earlier burst's timer firing while this
+    // work is still running. See `RefreshFlushState`.
+    await submitVaultWork((work) => this.vaultChanges.submit(work), this.flushState, fn);
   }
 
   /**
@@ -1463,9 +1817,15 @@ export default class SpacesPlugin extends Plugin {
    *    not vault structure, so nothing about the tree has changed; and the
    *    ordering hazard runs the other way — `TagIndex.ts` documents that a
    *    FRESH vault read against a STALE tag index is what shows a note the
-   *    vault has and the tags do not. The reverse is benign, because
-   *    `resolveLivePath` simply finds nothing for a path the vault index has
-   *    not seen yet, and the create's own coalesced flush replaces both.
+   *    vault has and the tags do not. The reverse is benign FOR THE TREE,
+   *    because `resolveLivePath` simply finds nothing for a path the vault
+   *    index has not seen yet, and the create's own coalesced flush replaces
+   *    both. The member COUNTS are not insulated by that: `propertyMemberCount`
+   *    and the contents dialog's tag count resolve members with no
+   *    vault-existence filter, so a dialog opened inside this window reports
+   *    one more note than the tree is drawing, until the flush lands. Both
+   *    counts are documented as a point-in-time reading, and the window is
+   *    the coalescing window.
    *
    * 2. REQUEST A RECOMPUTE only when the active space's contents can actually
    *    have changed, which is what `watchesMetadata` has always been for. A
@@ -1482,11 +1842,41 @@ export default class SpacesPlugin extends Plugin {
     // reads `metadataResolved`, which the listener has already set.
     if ((this.controller as SpaceController | undefined) === undefined) return;
     this.controller.setTagIndex(createLazyTagIndex(() => createObsidianTagIndex(this.app)));
-    if (!watchesMetadata(this.controller.activeSpace())) return;
-    // No membership work to run first, only the coalesced tail. Submitting an
-    // empty unit of work is how this reuses the existing window and burst
-    // ceiling rather than adding a second timer.
-    void this.onVaultChange(async () => undefined);
+    this.controller.setPropertySnapshot(this.newPropertySnapshot());
+    // Beside the install it reports, and ABOVE the routing, because the
+    // install above is unconditional. It used to sit after the routing, below
+    // the `"none"` early return, where it tracked the ROUTE rather than the
+    // install: a burst holding a vault event and a `"none"`-routed metadata
+    // event left the flag clear, and the flush then installed a second
+    // snapshot over one that already postdated every vault event in the
+    // burst. The snapshot is lazy and read from the metadata cache, so one
+    // installed after a vault event arrived is built from state at least as
+    // new; a vault event arriving afterwards clears the flag again.
+    this.flushState.noteSnapshotInstalled();
+    // Pickers are NOT told here, and that is deliberate. Every route below is
+    // coalesced, and exactly one of them notifies: when the active space
+    // watches metadata the shared flush recomputes and notifies, so a direct
+    // call here would walk the vault twice per event and discard the first
+    // walk; when it does not, a picker-only flush does it, but only while a
+    // picker is open, through the same coalescer. Do not add a direct
+    // `notify()` call here.
+    const route = metadataNotifyRoute(
+      watchesMetadata(this.controller.activeSpace()),
+      this.propertyRefresh.size
+    );
+    if (route === "none") return;
+    if (route === "picker-flush") {
+      // The same coalescer, NOT marked as a vault event, so a burst of only
+      // metadata events gets the notify-only flush.
+      void this.vaultChanges.submit(async () => undefined);
+    } else {
+      // A RECOMPUTE, not a vault event: the flush refreshes the active space
+      // and does not re-index the vault tree, which is O(vault) and which a
+      // note's metadata cannot have changed. Submitting through the shared
+      // coalescer reuses its window and burst ceiling rather than adding a
+      // second timer.
+      void submitMetadataWork((work) => this.vaultChanges.submit(work), this.flushState);
+    }
   }
 
   private async cycle(delta: number): Promise<void> {
@@ -1822,6 +2212,10 @@ export default class SpacesPlugin extends Plugin {
       // for a while would otherwise count against the vault as it was when it
       // opened.
       tagIndex: () => this.controller.tagIndex(),
+      // The property snapshot, reached rather than built, as `tagIndex` is.
+      properties: () => this.controller.drawnPropertyIndex(),
+      // Released by the panel when its picker closes, so nothing here outlives it.
+      subscribePropertyRefresh: (onChange) => this.subscribePropertyRefresh(onChange),
       // What the space would hold, from the engine rather than from the panel.
       // Rebuilt per call so the vault, the ignore rules and the tag index are
       // all read fresh; the panel can stay open across any of them changing.
@@ -1831,7 +2225,9 @@ export default class SpacesPlugin extends Plugin {
           compileIgnore(this.defs.get().settings.globalIgnore),
           // Reached per lookup, so a selection with no tag member never asks
           // the controller for the index at all.
-          { pathsMatching: (tag) => this.controller.tagIndex().pathsMatching(tag) }
+          { pathsMatching: (tag) => this.controller.tagIndex().pathsMatching(tag) },
+          // Called at most once per preview, and only for a property member.
+          () => this.controller.drawnPropertyIndex()
         )(members),
       // The engine's own index, for resolving a stored member to a live path.
       vaultIndex: () => this.controller.vaultIndex(),

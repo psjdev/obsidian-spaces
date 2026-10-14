@@ -143,7 +143,8 @@ async function makeHarness(
       apply: (snap) => plugin["adapter"].apply(snap),
       livePaths: () => new Set(live),
     },
-    createMapTagIndex(new Map())
+    createMapTagIndex(new Map()),
+    () => ({ status: "unavailable", unparsed: [] })
   );
   plugin["switcher"] = {
     mount: () => undefined,

@@ -109,6 +109,7 @@ function ctxWith(
     // Only *All* reads these two; the active-space branches ignore them.
     spaces: () => (s ? [s] : []),
     tags: () => noTags,
+    properties: () => null,
   };
 }
 
@@ -325,6 +326,7 @@ function allCtx(spaces: SpaceDefinition[]) {
     },
     spaces: () => spaces,
     tags: () => noTags,
+    properties: () => null,
   };
 }
 

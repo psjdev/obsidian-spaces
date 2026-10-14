@@ -5,10 +5,17 @@ import {
   exclusionRows,
   memberRows,
   withoutMember,
+  propertyMemberCount,
+  withoutPropertyMember,
   withoutTagMember,
   type PathMemberRow,
+  type PropertyMemberRow,
   type TagMemberRow,
 } from "./memberList";
+import { memberIdentity } from "../definitions/schema";
+import { STILL_READING } from "../actions/membership";
+import { addPropertyMember, pickableKeys, readPropertyAdd } from "./propertyRows";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { normalizeTag } from "../visibility/tagMatch";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { TagIndex } from "../visibility/TagIndex";
@@ -58,6 +65,22 @@ function tagRowDescription(row: TagMemberRow): string {
   return `Tag. ${row.matchCount} ${notes}, nested tags included.`;
 }
 
+/**
+ * What a property row says about its reach.
+ *
+ * Three cases, as for a tag row: an unavailable count (null) says less, never
+ * "no notes", because a cold metadata cache is not an empty vault.
+ */
+function propertyRowDescription(row: PropertyMemberRow): string {
+  if (row.matchCount === null) return "Property.";
+  if (row.status === "matches-nothing") return "Property. No notes match right now.";
+  const notes = row.matchCount === 1 ? "note" : "notes";
+  return `Property. ${row.matchCount} ${notes}.`;
+}
+
+/** Gives each drawn key list its own id, since a re-render replaces the old one. */
+let propertyListSeq = 0;
+
 export class SpaceContentsModal extends Modal {
   /**
    * The live tag suggester, retained for the same reason
@@ -88,7 +111,15 @@ export class SpaceContentsModal extends Modal {
      * in force is replaced under this dialog, which re-renders after every
      * write.
      */
-    private tagIndex: () => TagIndex
+    private tagIndex: () => TagIndex,
+    /**
+     * The property index to draw, reached rather than built: the ready one,
+     * the last ready one while the cache is cold, and null only when none was
+     * ever ready. Null is what makes a property row's count unavailable.
+     * Required, so a caller that forgets it fails to compile instead of
+     * silently drawing every property count as unavailable.
+     */
+    private propertyIndex: () => PropertyIndex | null
   ) {
     super(app);
   }
@@ -139,17 +170,35 @@ export class SpaceContentsModal extends Modal {
     const exists = (path: string): boolean =>
       this.app.vault.getAbstractFileByPath(path) !== null;
 
-    const rows = memberRows(space, exists, matchCount);
+    // Taken AT MOST once per render, like the tag index above, and only when
+    // something actually asks for it: a property row being counted, or the
+    // adder's key field being touched. NOTHING below this line may ask
+    // unconditionally. The index is lazy and its first ask IS a walk of every
+    // note's frontmatter, so a folder, path or tag space in a vault with no
+    // property member must be able to open this dialog and pay nothing.
+    // Taking it once rather than once per asker is what makes every count on
+    // screen describe one picture of the vault.
+    let properties: PropertyIndex | null | undefined;
+    const propertyIndexOnce = (): PropertyIndex | null => {
+      if (properties === undefined) properties = this.propertyIndex();
+      return properties;
+    };
+    const propertyCount = (m: Parameters<typeof propertyMemberCount>[0]): number | null =>
+      propertyMemberCount(m, propertyIndexOnce(), space);
+
+    const rows = memberRows(space, exists, matchCount, propertyCount);
 
     // Above the list, so it is still reachable on a space with no members:
     // that is the space most in need of one.
     this.renderTagAdder(contentEl, space);
+    this.renderPropertyAdder(contentEl, space, propertyIndexOnce);
 
     if (rows.length === 0) {
       this.renderEmpty(contentEl);
     } else {
       for (const row of rows) {
         if (row.kind === "tag") this.renderTagRow(contentEl, space, row);
+        else if (row.kind === "property") this.renderPropertyRow(contentEl, space, row);
         else this.renderMemberRow(contentEl, space, row);
       }
     }
@@ -166,7 +215,7 @@ export class SpaceContentsModal extends Modal {
     containerEl.createEl("p", {
       text:
         "This space is empty. Right-click a note or folder in the explorer and " +
-        "choose “Add to space”, or add a tag above.",
+        "choose “Add to space”, or add a tag or a property above.",
     });
   }
 
@@ -235,6 +284,98 @@ export class SpaceContentsModal extends Modal {
           void this.addTag(t.getValue());
         });
       });
+  }
+
+  /**
+   * The add-a-property fields: a key, an optional value, and an Add button.
+   *
+   * An empty value adds "has this property"; a value adds "equals this value".
+   * What the two fields mean, which keys are refused and what counts as
+   * already held is all `readPropertyAdd`, so this method draws and does not
+   * decide. The key field suggests the vault's pickable keys through a
+   * `datalist`; typing a key the vault does not hold yet is allowed, as for
+   * tags.
+   *
+   * THE SUGGESTIONS ARE FILLED ON FIRST TOUCH OF THE KEY FIELD, not at
+   * render. Filling them at render asked for the property index on every
+   * open, which is a full frontmatter walk of the vault — paid by a folder,
+   * path or tag space that holds no property member at all, which is the one
+   * case the budget says costs nothing. The gate is the user engaging the
+   * control, NOT the space holding a property member: a space with none is
+   * exactly the space whose adder is most needed.
+   *
+   * Focus AND input, because a key can arrive by typing into a field the
+   * pointer never focused (a paste into an already-focused field after the
+   * dialog re-rendered), and because the browser only consults a `datalist`
+   * when the field is engaged. Either way the list is in place before a
+   * suggestion could be shown.
+   *
+   * A null index is the only case that says the properties are still loading,
+   * and it can only be known once asked, so that sentence is added on first
+   * touch rather than drawn with the field. An index with no keys draws no
+   * suggestions and says nothing, because the vault having no properties is
+   * not the same as not knowing yet.
+   */
+  private renderPropertyAdder(
+    containerEl: HTMLElement,
+    space: SpaceDefinition,
+    takeIndex: () => PropertyIndex | null
+  ): void {
+    const instruction =
+      "Type a property to add every note that has it. Add a value to add only " +
+      "the notes where the property equals it.";
+    const setting = new Setting(containerEl).setName("Add a property").setDesc(instruction);
+
+    const listId = `spaces-property-keys-${++propertyListSeq}`;
+    const list = setting.controlEl.createEl("datalist", { attr: { id: listId } });
+    // Once per render. `takeIndex` is the render's own memo, so a dialog whose
+    // rows already counted against the index fills from that same picture and
+    // walks nothing more; a re-render after a write asks afresh.
+    let filled = false;
+    const fillSuggestions = (): void => {
+      if (filled) return;
+      filled = true;
+      const index = takeIndex();
+      if (index === null) {
+        setting.setDesc(
+          "Suggestions appear once the vault's properties have loaded. " + instruction
+        );
+        return;
+      }
+      for (const { key } of pickableKeys(index.listKeys(), "")) {
+        list.createEl("option", { attr: { value: key } });
+      }
+    };
+
+    let keyEl!: HTMLInputElement;
+    let valueEl!: HTMLInputElement;
+    setting.addText((t) => {
+      t.setPlaceholder("Property");
+      t.inputEl.setAttribute("aria-label", `Property to add to ${space.name}`);
+      t.inputEl.setAttribute("list", listId);
+      t.inputEl.addEventListener("focus", fillSuggestions);
+      t.inputEl.addEventListener("input", fillSuggestions);
+      keyEl = t.inputEl;
+    });
+    setting.addText((t) => {
+      t.setPlaceholder("Value (optional)");
+      t.inputEl.setAttribute("aria-label", `Property value to add to ${space.name}`);
+      valueEl = t.inputEl;
+    });
+
+    const commit = (): void => {
+      void this.addProperty(keyEl.value, valueEl.value);
+    };
+    for (const el of [keyEl, valueEl]) {
+      el.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        commit();
+      });
+    }
+    setting.addButton((b) =>
+      b.setButtonText("Add").setTooltip(`Add the property to ${space.name}`).onClick(commit)
+    );
   }
 
   /**
@@ -317,6 +458,37 @@ export class SpaceContentsModal extends Modal {
   }
 
   /**
+   * A property member's row, drawn as the key or `key: value` and removed by
+   * its identity, which is how two spellings of one member are told apart from
+   * two members. It names no path, so it is never dimmed as missing.
+   */
+  private renderPropertyRow(
+    containerEl: HTMLElement,
+    space: SpaceDefinition,
+    row: PropertyMemberRow
+  ): void {
+    const identity = memberIdentity(
+      row.value === undefined
+        ? { kind: "property", key: row.key }
+        : { kind: "property", key: row.key, value: row.value }
+    );
+    const setting = new Setting(containerEl)
+      .setName(row.label)
+      .setDesc(propertyRowDescription(row))
+      .addButton((b) =>
+        b
+          .setButtonText("Remove")
+          .setTooltip(`Remove ${row.label} from ${space.name}`)
+          .onClick(() => {
+            void this.write((target) => {
+              target.members = withoutPropertyMember(target.members, identity);
+            }, `could not remove ${row.label}`);
+          })
+      );
+    setting.settingEl.addClass("spaces-member-row");
+  }
+
+  /**
    * The paths this space leaves out, drawn only when there is at least one.
    *
    * An exclusion is written when a note is removed from a space that no member
@@ -379,6 +551,65 @@ export class SpaceContentsModal extends Modal {
       const held = target.members.some((m) => m.kind === "tag" && m.tag === normalized);
       if (!held) target.members.push({ kind: "tag", tag: normalized });
     }, `could not add #${normalized}`);
+  }
+
+  /**
+   * Adds a property member to this space and touches nothing else.
+   *
+   * Read against the space as it is NOW, not as it was drawn, so a member
+   * added in another window since the last render is still seen as held.
+   * Nothing is written for a refusal or a held member: the person is told, and
+   * what they typed stays in the fields.
+   *
+   * The index is asked for HERE and nowhere else on this path, which is a
+   * walk of the vault's frontmatter the first time after a metadata event.
+   * That is the user asking for it, which is the one thing allowed to pay.
+   */
+  private async addProperty(keyText: string, valueText: string): Promise<void> {
+    const space = this.defs.get().spaces.find((s) => s.id === this.spaceId);
+    if (!space) return;
+    const index = this.propertyIndex();
+    const read = readPropertyAdd(
+      space.members,
+      keyText,
+      valueText,
+      // NULL, not an empty set: "nobody has read the vault" is not "the vault
+      // holds no keys", and only the second one can refuse a padded key.
+      index === null ? null : new Set(index.listKeys().map((k) => k.key))
+    );
+    if (read.outcome === "blank") {
+      new Notice("Spaces: type a property name to add.");
+      return;
+    }
+    if (read.outcome === "unknown-keys") {
+      // A REFUSAL MUST NOT ASSERT A VAULT FACT THE CODE HAS NOT CHECKED. The
+      // spaced refusal below says the vault holds no such key; that is only
+      // sayable once the vault has been read.
+      new Notice(STILL_READING);
+      return;
+    }
+    if (read.outcome === "spaced") {
+      // SAYS WHAT THE CHECK KNOWS, which is that this exact spelling is in no
+      // note. It used to say no property in the vault ends in a blank at all,
+      // which is a wider claim than `knownKeys.has(key)` tested: another
+      // padded key may well exist.
+      new Notice(
+        "Spaces: no property in this vault is spelled that way. Remove the spaces at the ends."
+      );
+      return;
+    }
+    if (read.outcome === "tags") {
+      new Notice("Spaces: tags are added in the tag field above.");
+      return;
+    }
+    if (read.outcome === "held") {
+      new Notice(`${read.label} is already in ${space.name}.`);
+      return;
+    }
+    const { member } = read;
+    await this.write((target) => {
+      target.members = addPropertyMember(target, member).members;
+    }, "could not add the property");
   }
 
   /**

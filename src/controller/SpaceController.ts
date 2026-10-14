@@ -7,10 +7,20 @@ import { compileIgnore, canonicalPath } from "../visibility/glob";
 import { RevealedSet } from "../visibility/RevealedSet";
 import { sameSelection } from "../order/sortOverride";
 import { hasRoot, rootOf } from "../visibility/folderSpace";
-import { watchesMetadata } from "../definitions/membership";
+import { holdsPropertyMember, watchesMetadata } from "../definitions/membership";
 import { resolveMembers } from "./resolveMembers";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { PropertyIndex, PropertySnapshot } from "../visibility/PropertyIndex";
 import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from "../types";
+
+/**
+ * The property accessor a disposed controller is left with.
+ *
+ * A constant, so teardown does not mint a closure, and an accessor rather than
+ * a flag so `drawnPropertyIndex` and the recompute arm keep their one way of
+ * asking. See `dispose`.
+ */
+const UNAVAILABLE_PROPERTIES = (): PropertySnapshot => ({ status: "unavailable", unparsed: [] });
 
 interface ControllerHost {
   apply(snapshot: VisibilitySnapshot | null): void;
@@ -51,6 +61,19 @@ interface LayoutHooks {
   onOutcome?(outcome: SwitchOutcome | TransitionAborted): void;
 }
 
+/**
+ * Whether this space's membership actually depends on the property index.
+ *
+ * Holding a property member is not enough: a FOLDER SPACE renders from its
+ * root and never reads its member list, so a leftover property member in one
+ * changes nothing, and it must neither wait for an index nor pay for the walk
+ * that builds one. `membersForSnapshot` makes the same distinction, in the
+ * same order.
+ */
+function resolvesPropertyMembers(space: SpaceDefinition): boolean {
+  return !hasRoot(space) && holdsPropertyMember(space);
+}
+
 export class SpaceController {
   private snapshot: VisibilitySnapshot | null = null;
   private queue: Promise<unknown> = Promise.resolve();
@@ -89,6 +112,7 @@ export class SpaceController {
     private vault: VaultIndex,
     private host: ControllerHost,
     private tags: TagIndex,
+    private properties: () => PropertySnapshot,
     private layout?: LayoutHooks
   ) {}
 
@@ -106,6 +130,36 @@ export class SpaceController {
    */
   setTagIndex(index: TagIndex): void {
     this.tags = index;
+  }
+
+  /**
+   * The property snapshot accessor is replaced wholesale when a note's
+   * metadata changes, for the reason the tag index is. It is a FUNCTION so a
+   * lazy one costs nothing until a property member asks.
+   */
+  setPropertySnapshot(get: () => PropertySnapshot): void {
+    this.properties = get;
+  }
+
+  /**
+   * The property index the tree is drawn from: the ready one when the
+   * snapshot is ready, otherwise the last one that WAS ready, and `null` only
+   * when none ever has been (a true first start).
+   *
+   * Exposed, as `tagIndex()` is, so a membership question asked outside a
+   * recompute answers from the same picture the tree was drawn from rather
+   * than from a second one that may differ. Not the raw snapshot: while the
+   * cache is cold that is `null`, which would make an add path refuse or
+   * misjudge a note the tree is showing. Each call asks the accessor, which
+   * answers from its own one build, so the cost of asking is a walk only for
+   * the FIRST caller after a metadata event. A caller that needs it for
+   * several spaces still reads it ONCE and passes it down, so every space it
+   * answers for describes one picture.
+   */
+  drawnPropertyIndex(): PropertyIndex | null {
+    const snapshot = this.properties();
+    if (snapshot.status === "ready") this.lastReadyIndex = snapshot.index;
+    return this.lastReadyIndex;
   }
 
   /**
@@ -296,6 +350,21 @@ export class SpaceController {
    */
   dispose(): void {
     this.disposed = true;
+    // The kept index is the one piece of state here that is large: a whole
+    // vault's frontmatter keys, and the value buckets of everything anyone
+    // expanded. Nothing asks after this, so holding it would keep megabytes
+    // reachable from a torn-down controller for the rest of the session.
+    //
+    // BOTH REFERENCES TO IT, not just this one. `this.properties` is the
+    // plugin's lazy snapshot accessor and it MEMOIZES: once anything has
+    // asked, that closure holds the very index `lastReadyIndex` holds, so
+    // dropping one of the two freed nothing in the common case, which is
+    // every case where a property member was ever resolved. It is replaced
+    // with the accessor a controller that has not been handed one starts
+    // with, so a late caller gets the same "nothing available" answer it
+    // would have got before teardown rather than a throw.
+    this.lastReadyIndex = null;
+    this.properties = UNAVAILABLE_PROPERTIES;
   }
 
   /**
@@ -328,11 +397,90 @@ export class SpaceController {
    *
    * Storage is left alone — only what is handed to the engine changes.
    */
-  private membersForSnapshot(space: SpaceDefinition): readonly PathMember[] {
-    if (!hasRoot(space)) return resolveMembers(space, this.tags);
-    const root = rootOf(space);
-    return root === null ? [] : [{ path: root, kind: "folder" }];
+  private membersForSnapshot(
+    space: SpaceDefinition,
+    // Read ONCE per recompute by `propertiesFor` and handed down, because the
+    // readiness gate above needs the same answer and two asks could differ.
+    properties: PropertyIndex | null
+  ): readonly PathMember[] {
+    if (hasRoot(space)) {
+      const root = rootOf(space);
+      return root === null ? [] : [{ path: root, kind: "folder" }];
+    }
+    // UNAVAILABLE IS NOT EMPTY. `drawnPropertyIndex` falls back to the last
+    // READY index, because resolving property members against nothing would
+    // blank a property space's rows whenever the cache is cold. EVERYTHING
+    // ELSE resolves fresh against it: exclusions, file, folder and tag members
+    // all still apply, so removing or adding a note while cold does what it
+    // says instead of missing a cache and emptying the space. Nothing is keyed
+    // on the definition for that reason. The property matches themselves may
+    // be stale until the parse event that makes the snapshot ready recomputes
+    // the space. With no ready index yet this is not reached at all for such a
+    // space: `stillReading` holds the recompute back, because publishing
+    // members resolved against nothing would publish "not known yet" as
+    // "matches nothing".
+    return resolveMembers(space, this.tags, properties);
   }
+
+  /**
+   * The property index this recompute resolves against, read ONCE and handed
+   * to both readers, so the gate and the resolve cannot disagree.
+   *
+   * `null` without asking at all unless the space's membership actually
+   * depends on it: the first ask after a metadata event is a frontmatter walk
+   * of the whole vault, and neither a space with no property member nor a
+   * folder space — which renders from its root and never reads its member
+   * list — may pay for one.
+   */
+  private propertiesFor(space: SpaceDefinition): PropertyIndex | null {
+    return resolvesPropertyMembers(space) ? this.drawnPropertyIndex() : null;
+  }
+
+  /**
+   * Whether this space's membership is still unknown rather than empty.
+   *
+   * TWO signals, not one, because they measure different things.
+   * `metadataReady` is the host's: resolved, and the layout ready. Snapshot
+   * readiness is strictly stricter — ONE unparsed file makes the whole
+   * property snapshot unavailable (`ObsidianPropertyIndex.ts` says why), and
+   * that can outlast `resolved`. Reading only the host's signal let a space
+   * pass this gate with no ready index behind it, so `resolveMembers` was
+   * handed `properties = null`, every property member contributed nothing,
+   * and the space published itself EMPTY. `resolveMembers.ts` states the
+   * contract that breaks: null is "not known yet", not "matches nothing", and
+   * a caller publishing the result as a membership must hold its previous
+   * answer instead.
+   *
+   * Both arms are cheap in the case that matters. `metadataReady` answers on
+   * its own and the index is never asked for, which is why `properties` is a
+   * thunk: reading it before this point made a property space pay for a walk
+   * at first paint that this gate was about to make pointless. A space that
+   * resolves no property member never asks either.
+   * `drawnPropertyIndex` keeps the last READY index, so this is false as soon
+   * as one has EVER been ready: a cache going cold mid-session neither blanks
+   * a space that already has a good answer nor re-opens the tree. Reachable
+   * only before the first ready index of a session, which is why the
+   * fall-open below is the right posture for it.
+   */
+  private stillReading(
+    space: SpaceDefinition,
+    properties: () => PropertyIndex | null
+  ): boolean {
+    if (this.host.metadataReady?.() === false) return true;
+    return resolvesPropertyMembers(space) && properties() === null;
+  }
+
+  /**
+   * The last READY property index this controller saw, used only while the
+   * snapshot is unavailable. Never replaced by an unavailable answer.
+   *
+   * Held for the life of the controller, not for the life of the need: it is
+   * not dropped when the last property member is removed, because the next
+   * ready snapshot would replace it anyway and a space can regain one between
+   * two recomputes. `dispose()` releases it, so teardown does not leave a
+   * vault-sized structure reachable.
+   */
+  private lastReadyIndex: PropertyIndex | null = null;
 
   private recompute(
     opts: { pruneClosed: boolean },
@@ -370,13 +518,14 @@ export class SpaceController {
     // while the main thread is busy.
     //
     // Unfiltered rather than the previous snapshot, on purpose. At FIRST
-    // PAINT — the only moment this branch can be taken — there is no previous
-    // snapshot, so holding one degenerates to this anyway for the case that
-    // matters; and showing everything is this plugin's existing, stated
-    // failure posture ("Showing all files"), whereas holding a frozen tree
-    // over a vault that has since changed on disk is wrong in a way the user
-    // cannot see. It is self-correcting: `resolved` fires, main.ts requests a
-    // recompute, and the tree filters.
+    // PAINT — the only moment either arm of `stillReading` can be true —
+    // there is no previous snapshot, so holding one degenerates to this
+    // anyway for the case that matters; and showing everything is this
+    // plugin's existing, stated failure posture ("Showing all files"),
+    // whereas holding a frozen tree over a vault that has since changed on
+    // disk is wrong in a way the user cannot see. It is self-correcting:
+    // `resolved` fires, or the parse that makes the property snapshot ready
+    // does, main.ts requests a recompute, and the tree filters.
     //
     // Gated on `watchesMetadata`, so a folder space and a curated space of
     // paths still filter normally at first paint — neither has anything to
@@ -386,7 +535,14 @@ export class SpaceController {
     // The hazard: a tag space that genuinely matches nothing MUST still
     // render empty. "No matches yet" and "no matches" are different answers,
     // which is why this reads a readiness signal and not the member count.
-    if (watchesMetadata(space) && this.host.metadataReady?.() === false) {
+    // `stillReading` carries both signals and what each one knows.
+    // At most one read per recompute, and none at all when the gate below can
+    // answer without it: the gate and the snapshot further down must be handed
+    // the same answer, or they can disagree about what this space holds.
+    let asked: PropertyIndex | null | undefined;
+    const properties = (): PropertyIndex | null =>
+      (asked = asked === undefined ? this.propertiesFor(space) : asked);
+    if (watchesMetadata(space) && this.stillReading(space, properties)) {
       this.snapshot = null;
       this.host.apply(null);
       return;
@@ -398,7 +554,7 @@ export class SpaceController {
     const visitors = settings.revealVisitors ? revealed : new Set<string>();
     this.snapshot = buildVisibilitySnapshot(
       this.vault,
-      { ...space, members: [...this.membersForSnapshot(space)] },
+      { ...space, members: [...this.membersForSnapshot(space, properties())] },
       visitors,
       ignore,
       new Set((space.exclude ?? []).map(canonicalPath))

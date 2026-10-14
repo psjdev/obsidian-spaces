@@ -15,7 +15,7 @@ const noTags = createMapTagIndex(new Map());
 const targets = (
   spaces: readonly SpaceDefinition[],
   paths: readonly string[]
-): ReturnType<typeof spaceAddTargets> => spaceAddTargets(spaces, paths, noTags);
+): ReturnType<typeof spaceAddTargets> => spaceAddTargets(spaces, paths, noTags, null);
 
 const space = (over: Partial<SpaceDefinition>): SpaceDefinition => ({
   id: "s",
@@ -129,18 +129,18 @@ describe("spaceAddTargets and tag members", () => {
   );
 
   it("does not offer a note the space already holds through a tag", () => {
-    const out = spaceAddTargets([TAGGED], ["Anywhere/Tagged.md"], index);
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Tagged.md"], index, null);
     expect(out[0]).toMatchObject({ disabled: true, addablePaths: [] });
     expect(out[0].label).toBe("Tagged (already added)");
   });
 
   it("counts a nested tag as held too, matching the engine", () => {
-    const out = spaceAddTargets([TAGGED], ["Anywhere/Nested.md"], index);
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Nested.md"], index, null);
     expect(out[0].disabled).toBe(true);
   });
 
   it("still offers a note the tag does not reach", () => {
-    const out = spaceAddTargets([TAGGED], ["Anywhere/Plain.md"], index);
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Plain.md"], index, null);
     expect(out[0]).toMatchObject({ disabled: false, addablePaths: ["Anywhere/Plain.md"] });
   });
 
@@ -154,7 +154,7 @@ describe("spaceAddTargets and tag members", () => {
       exclude: ["Anywhere/Tagged.md"],
       members: [{ kind: "tag", tag: "project" }],
     });
-    const out = spaceAddTargets([excluding], ["Anywhere/Tagged.md"], index);
+    const out = spaceAddTargets([excluding], ["Anywhere/Tagged.md"], index, null);
     expect(out[0]).toMatchObject({ disabled: false, addablePaths: ["Anywhere/Tagged.md"] });
   });
 
@@ -168,7 +168,7 @@ describe("spaceAddTargets and tag members", () => {
         return index.pathsMatching(tag);
       },
     };
-    spaceAddTargets([TAGGED], ["a.md", "b.md", "c.md", "d.md"], counting);
+    spaceAddTargets([TAGGED], ["a.md", "b.md", "c.md", "d.md"], counting, null);
     expect(lookups).toBe(1);
   });
 });

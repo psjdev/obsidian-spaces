@@ -19,6 +19,7 @@ import {
 } from "../visibility/glob";
 import { isFolderSpace } from "../visibility/folderSpace";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { ConfirmModal } from "./ConfirmModal";
 import { SpaceContentsModal } from "./SpaceContentsModal";
 import {
@@ -122,7 +123,10 @@ export class SpacesSettingTab extends PluginSettingTab {
     // A callback, not the switcher itself: this tab is built before the
     // switcher exists, in `onload()`, and only ever needs the one thing on
     // it that a placement change must cancel first.
-    private cancelStripDrag?: () => void
+    private cancelStripDrag?: () => void,
+    // The property index the Contents dialog draws counts from, reached
+    // rather than built. This tab never asks it anything itself.
+    private getPropertyIndex?: () => PropertyIndex | null
   ) {
     super(app, plugin);
   }
@@ -602,7 +606,9 @@ export class SpacesSettingTab extends PluginSettingTab {
     return spaces.map((space) => {
       // One row per stored member, tags included. `missing` is unaffected: a
       // tag row is never missing.
-      const rows = memberRows(space, exists);
+      // No property count either, for the tag reason above: unavailable,
+      // stated explicitly. A property row is then `present` with a null count.
+      const rows = memberRows(space, exists, undefined, () => null);
       const missing = missingCount(rows);
       return {
         name: space.name,
@@ -633,7 +639,11 @@ export class SpacesSettingTab extends PluginSettingTab {
                     this.app,
                     this.defs,
                     space.id,
-                    this.getTagIndex
+                    this.getTagIndex,
+                    // Explicit rather than defaulted inside the dialog: a tab built
+                    // without the accessor (the tests) draws counts as
+                    // unavailable, and says so here.
+                    this.getPropertyIndex ?? ((): null => null)
                   ).open();
                 })
             );

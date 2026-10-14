@@ -34,6 +34,7 @@ import {
 import {
   DEFAULT_PICKER_MODE,
   ITEMS_SIGIL,
+  PROPERTY_SIGIL,
   readModeSigil,
   TAG_SIGIL,
   type PickerMode,
@@ -50,7 +51,23 @@ import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
 import { storedTags, type TagSource } from "./tagCandidates";
 import { countTagRows, tagCountLabel } from "./tagRowCounts";
 import type { TagIndex } from "../visibility/TagIndex";
-import type { MemberEntry } from "../types";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
+import type { MemberEntry, PropertyMember } from "../types";
+import {
+  equalsMember,
+  existsMember,
+  pickableKeys,
+  valueLabel,
+  valueMatches,
+  valueQuery,
+} from "./propertyRows";
+import { memberIdentity } from "../definitions/schema";
+import {
+  spacerHeight,
+  visibleRange,
+  windowCovering,
+  type RowWindow,
+} from "./rowWindow";
 
 import {
   isStillCovering as isStillCoveringPure,
@@ -78,6 +95,81 @@ import { SEL } from "../explorer/selectors";
  * running out hides whatever comes last in that order. See its docstring.
  */
 const MAX_PICKER_ROWS = 200;
+
+/**
+ * How many rows the Properties body builds beyond each edge of its viewport.
+ *
+ * Priced from the measured 0.31 ms a row costs: about 14 rows fit the 344 px
+ * viewport, and three either side take a draw from roughly 14 rows to 20,
+ * which is 2 ms spent so that a short scroll reveals rows that already exist.
+ * More would buy fewer repaints at the price of the frame budget the window
+ * exists to protect.
+ */
+const PICKER_OVERSCAN = 3;
+
+/**
+ * What one Properties row is assumed to be worth, in px, until one has been
+ * measured: `styles.css`'s own 22 px `min-height` plus the 3 px margin under
+ * every `.spaces-create-tree-row`.
+ *
+ * An estimate rather than a measurement, so the FIRST draw of a key holding
+ * thousands of values is already windowed instead of building the whole list
+ * once to learn how tall a row is. `repitch` replaces it with the real pitch
+ * read off the drawn rows, which is what a theme with a larger nav font
+ * changes.
+ */
+const PROPERTY_ROW_PITCH_PX = 25;
+
+/** A key row: one property the vault holds, with its disclosure. */
+interface PropertyKeyPlan {
+  readonly kind: "key";
+  readonly key: string;
+  readonly count: number;
+  readonly open: boolean;
+  readonly member: PropertyMember;
+  readonly id: string;
+  readonly held: boolean;
+}
+
+/** A value row: one of an open key's values. */
+interface PropertyValuePlan {
+  readonly kind: "value";
+  readonly key: string;
+  readonly value: string;
+  readonly count: number;
+  readonly member: PropertyMember;
+  readonly id: string;
+  readonly held: boolean;
+}
+
+/**
+ * One row the Properties body would draw, described before any of it exists.
+ *
+ * The plan is what makes windowing possible: the list has to know how many
+ * rows there are, and where each one sits, to decide which handful to build
+ * and how much empty space stands in for the rest. Every field here is read
+ * from the index and from the picker's own state, never from the DOM, so
+ * planning 206 rows and drawing 20 of them is the normal case.
+ */
+type PropertyPlanRow =
+  | PropertyKeyPlan
+  | PropertyValuePlan
+  | { readonly kind: "note"; readonly text: string }
+  | { readonly kind: "overflow"; readonly depth: number; readonly hidden: number };
+
+/**
+ * Whether a planned row carries the named `data-control`, which is how a
+ * control that must survive a redraw is found in a list it may not be drawn
+ * in. The names are the ones the row builders write, read in one place so the
+ * two cannot drift.
+ */
+function planOwnsControl(entry: PropertyPlanRow, control: string): boolean {
+  if (entry.kind === "key") {
+    return control === `expand:${entry.id}` || control === `select:${entry.id}`;
+  }
+  if (entry.kind === "value") return control === `select:${entry.id}`;
+  return false;
+}
 
 /**
  * How long the sigil stays in the filter box before the box takes it back, in
@@ -138,6 +230,46 @@ export interface CreateSpacePanelDeps {
    * twice, once for this panel and once for the engine that already has one.
    */
   tagIndex: () => TagIndex;
+  /**
+   * The property index the tree and the summary row are drawn from, reached
+   * rather than built, for the reason `tagIndex` is. A function because the
+   * index is replaced when a note's metadata changes.
+   *
+   * It must be the DRAWN index (`drawnPropertyIndex`), which keeps the last
+   * ready one while the cache is cold, and not the raw snapshot: the summary
+   * row beneath the body is counted from the drawn index, so a body reading the
+   * raw snapshot would drop its rows to "Loading" while the summary still
+   * counted from the old picture. Asking it is also what records the last
+   * ready index, so the picker is its own populator in a vault with no
+   * property member.
+   *
+   * `null` means no ready index has ever existed, a genuine first start, and
+   * is drawn as "still reading", never as "no properties".
+   */
+  properties: () => PropertyIndex | null;
+  /**
+   * Asks to be told when the property snapshot has been replaced, and returns
+   * the way to stop. The panel subscribes while its picker window is open and
+   * releases when the window closes or the panel is destroyed, so a
+   * subscription never outlives the view it would redraw.
+   *
+   * Needed because a space that holds no property member does not watch
+   * metadata at all, so without this the key list would be a picture of the
+   * vault as it was when the picker opened.
+   */
+  subscribePropertyRefresh: (onChange: () => void) => () => void;
+  /**
+   * The picker list's scroll geometry, for the one body that windows its rows.
+   *
+   * OPTIONAL, and absent in the app: the panel measures its own scroller.
+   * It is a seam because measuring is the one part of windowing a test cannot
+   * reach — jsdom implements no layout and answers zero to every height, which
+   * the window calculation reads as "not laid out yet" and renders everything
+   * for. Supplying this hands the panel a viewport jsdom could never produce,
+   * so what windowing DOES is observable in the suite rather than only in a
+   * browser.
+   */
+  pickerViewport?: () => { scrollTop: number; viewportHeight: number; rowHeight: number };
   /**
    * What the space would contain if created now, answered by the engine
    * rather than by this panel.
@@ -234,11 +366,12 @@ const PLACEHOLDER_PATHS = [
 const isOverflowRow = (row: PickerRow<string>): row is OverflowRow => row.kind === "overflow";
 
 /**
- * What differs between the two picker bodies, handed to `renderTreeRow`.
+ * What differs between the two TREE bodies (Vault and Tags), handed to
+ * `renderTreeRow`. The Properties body draws its own rows and has no adapter.
  *
  * Everything not on this list is the same for both and lives in the renderer,
  * which is the point: a row-level fix is made once. Each member is here
- * because the two bodies genuinely disagree about it.
+ * because the two tree bodies genuinely disagree about it.
  *
  * Each adapter closes over what its own draw built (the covering set, the tag
  * counts, the query). It also reaches panel state that outlives a draw:
@@ -334,6 +467,27 @@ export class CreateSpacePanel {
   private treeEl: HTMLElement | null = null;
 
   /**
+   * Draws the Properties body's current plan into the window the scroller is
+   * showing, or null while some other body is drawn.
+   *
+   * A closure rather than a method because it holds the plan and the row
+   * builders of the draw that made it: a scroll changes WHICH rows are wanted
+   * and nothing about what they are, so repainting must not re-ask the index,
+   * re-filter, or rebuild the plan. Replaced on every draw of the body and
+   * dropped when any other body draws, so a stale plan can never be painted.
+   */
+  private propertyPaint: ((anchor?: string) => void) | null = null;
+
+  /** The row range currently in the host, so a scroll that moves the window a few px repaints nothing. */
+  private propertyRange: RowWindow | null = null;
+
+  /** The row pitch the window is computed from. See `PROPERTY_ROW_PITCH_PX` and `repitch`. */
+  private propertyRowPitch = PROPERTY_ROW_PITCH_PX;
+
+  /** Guards `repitch`'s repaint against measuring its way into a loop. */
+  private repitching = false;
+
+  /**
    * The row pinned under the window's list, kept so `renderSummary()` can
    * redraw its words in place: picking must not rebuild the window under the
    * pointer that just clicked in it.
@@ -416,10 +570,24 @@ export class CreateSpacePanel {
    *
    * One set would collide on any tag that shares a spelling with a folder, and
    * would make a switch to Tags and back collapse whatever the user had opened
-   * in the other body. The two bodies are one picker to look at and two
+   * in the other body. The bodies are one picker to look at and
    * independent things to have browsed into.
    */
   private expandedTags = new Set<string>();
+
+  /**
+   * The property keys the user has opened. Panel state like the two sets
+   * beside it, and the only thing that causes a key's values to be listed:
+   * the body asks the index for values of these keys and no others.
+   */
+  private expandedProperties = new Set<string>();
+
+  /**
+   * The live metadata subscription, or null. One object per subscription so a
+   * notification from a released one can recognize itself as stale and do
+   * nothing, whatever the source does after being told to stop.
+   */
+  private propertySub: { release: () => void } | null = null;
 
   /**
    * Re-aligns when the window changes size, because the panel's top edge moves
@@ -498,6 +666,7 @@ export class CreateSpacePanel {
     this.itemFilter = "";
     this.expandedFolders = new Set<string>();
     this.expandedTags = new Set<string>();
+    this.expandedProperties = new Set<string>();
     // Arriving from "Create space from this folder": the root is already set,
     // so open the branch containing it rather than showing a collapsed tree
     // with the selection hidden inside it...
@@ -631,6 +800,13 @@ export class CreateSpacePanel {
     // A handle left running would reach for a filter box that is no longer
     // in any document.
     this.cancelSigilFlash();
+    // The Properties body's plan, which holds a row per value of every key
+    // anyone opened. Nothing can repaint it now that the scroller it belongs
+    // to is off the document, and holding it would keep those rows reachable
+    // from a torn-down panel.
+    this.propertyPaint = null;
+    this.propertyRange = null;
+    this.releasePropertySubscription();
     // After `el.remove()`, not before: this call is unguarded, and a throw
     // here must not leave our own element still attached, contradicting this
     // method's own "teardown comes off first" ordering above. Nothing above
@@ -1030,6 +1206,9 @@ export class CreateSpacePanel {
         bodies.setAttribute("aria-label", "What the window below shows");
         bodies.appendChild(this.bodyBtn(doc, "items", "Vault", "folder-tree", ITEMS_SIGIL));
         bodies.appendChild(this.bodyBtn(doc, "tags", "Tags", "tag", TAG_SIGIL));
+        bodies.appendChild(
+          this.bodyBtn(doc, "properties", "Properties", "list", PROPERTY_SIGIL)
+        );
       }
 
       const windowEl = doc.win.createDiv();
@@ -1079,7 +1258,7 @@ export class CreateSpacePanel {
       // around them. The role belongs HERE rather than on the box: ARIA
       // requires treeitems to be owned by the tree, and with an unroled div in
       // between assistive tech reported a tree of zero items and a pile of
-      // orphaned rows. Both bodies are trees now, but they differ on
+      // orphaned rows. The Vault and Tags bodies are trees, and the Properties body is a list; they differ on
       // `aria-multiselectable` and on the label, so each body sets both on every
       // draw rather than leaving a stale one behind after a switch. The empty
       // message is NOT a child of this box: it is drawn as its sibling inside the
@@ -1091,6 +1270,13 @@ export class CreateSpacePanel {
       // window taking more.
       const scroll = doc.win.createDiv();
       scroll.className = "spaces-create-tree-scroll";
+      // The Properties body builds only the rows its viewport shows, so the
+      // scroller is what asks for the rest. Passive: nothing here cancels the
+      // scroll, and saying so keeps the handler off the gesture's critical
+      // path. Only that body answers — `onPickerScroll` returns at once while
+      // any other is drawn — and the listener goes with the element whenever
+      // the window is rebuilt.
+      scroll.addEventListener("scroll", () => this.onPickerScroll(), { passive: true });
       scroll.appendChild(rowsEl);
       windowEl.appendChild(scroll);
       this.treeEl = rowsEl;
@@ -1116,10 +1302,16 @@ export class CreateSpacePanel {
       this.renderPickerBody(true);
     } else {
       this.treeEl = null;
+      // The plan was built for a host that no longer exists.
+      this.propertyPaint = null;
+      this.propertyRange = null;
       this.summaryEl = null;
       this.filterEl = null;
       this.pickerModeEls.clear();
     }
+    // After the window is built or dropped, from the one flag that says which:
+    // the subscription lives exactly as long as the picker window does.
+    this.syncPropertySubscription();
 
 
     // --- Actions, pinned to the bottom ---
@@ -1153,9 +1345,9 @@ export class CreateSpacePanel {
   }
 
   /**
-   * Draws whichever body the two buttons above the window ask for, in place.
+   * Draws whichever body the buttons above the window ask for, in place.
    *
-   * The sole redraw entry for both bodies. Separate from `renderInner()`
+   * The sole redraw entry for all three bodies. Separate from `renderInner()`
    * because filtering, expanding and picking must not rebuild the whole panel:
    * a full re-render would drop focus out of the filter field on every
    * keystroke.
@@ -1180,8 +1372,18 @@ export class CreateSpacePanel {
     // Every draw starts with no message, so a body that has rows never inherits
     // the previous draw's "No match". A body with nothing to show sets its own.
     this.setEmptyMessage(host, null);
-    if (readPickerBody(this.pickerMode, this.state.folderMode) === "tags") {
+    // And with no plan. Only the Properties body has one, it belongs to the
+    // draw that is about to happen, and a scroll arriving between two draws
+    // must never repaint the one before.
+    this.propertyPaint = null;
+    this.propertyRange = null;
+    const body = readPickerBody(this.pickerMode, this.state.folderMode);
+    if (body === "tags") {
       this.renderTagBody(host, this.itemFilter);
+      return;
+    }
+    if (body === "properties") {
+      this.renderPropertyBody(host);
       return;
     }
     this.renderItemBody(host, revealSelection);
@@ -1276,7 +1478,7 @@ export class CreateSpacePanel {
     // `onlyKind`.
     const selected = this.state.folderMode
       ? new Set(this.state.root === "" ? [] : [this.state.root])
-      : new Set(this.state.items.flatMap((i) => (i.kind === "tag" ? [] : [i.path])));
+      : new Set(this.state.items.flatMap((i) => (i.kind === "file" || i.kind === "folder" ? [i.path] : [])));
 
     const rows = visibleRows(tree, {
       expanded: this.expandedFolders,
@@ -1367,8 +1569,8 @@ export class CreateSpacePanel {
   }
 
   /**
-   * Draws one body's rows into `host`. The adapter is the only difference
-   * between the two bodies.
+   * Draws one tree body's rows into `host` (Vault or Tags, not Properties).
+   * The adapter is the only difference between those two bodies.
    *
    * Everything a row is lives here once: the overflow row, the mark classes,
    * the ARIA state, the caret, the keyboard split and the redraw after a pick,
@@ -1387,6 +1589,12 @@ export class CreateSpacePanel {
     adapter: RowAdapter<K>
   ): void {
     const doc = host.ownerDocument;
+    // One insertion for the whole body, not one per row. Measured on a real
+    // vault at 2.7 ms of a 73.5 ms draw of 200 rows: small, because appending
+    // to a live tree only marks layout dirty and nothing in this loop reads
+    // geometry back, and free, because the rows are built the same way either
+    // way.
+    const frag = doc.win.createFragment();
     for (const row of rows) {
       // A guard rather than `row.kind === "overflow"`: with `K` generic the
       // compiler cannot rule out a row kind spelled "overflow", so a plain
@@ -1411,7 +1619,7 @@ export class CreateSpacePanel {
         el.textContent = adapter.filterActive()
           ? `${count}, narrow the filter to see ${it}`
           : `${count}, type in the filter to find ${it}`;
-        host.appendChild(el);
+        frag.appendChild(el);
         continue;
       }
       const el = doc.win.createDiv();
@@ -1518,8 +1726,10 @@ export class CreateSpacePanel {
         e.preventDefault();
         choose();
       });
-      host.appendChild(el);
+      frag.appendChild(el);
     }
+    host.appendChild(frag);
+    // After the rows are in the document: it reads what is next to what.
     markJoinedRows(host);
   }
 
@@ -1541,11 +1751,11 @@ export class CreateSpacePanel {
   }
 
   /**
-   * One of the two buttons that choose what the window below them shows.
+   * One of the buttons that choose what the window below them shows.
    *
    * They are new furniture in a pane that was kept bare on purpose, and that
    * is the point: a corner icon and a typed sigil both ask the user to already
-   * know the other body is there. Two labelled buttons say it.
+   * know the other bodies are there. Labelled buttons say it.
    *
    * `aria-pressed` rather than a radio group or a tablist: the pair beside
    * them, Curated and Folder pinned, is already a pressed-button pair in this
@@ -1565,12 +1775,13 @@ export class CreateSpacePanel {
     const btn = doc.win.createEl("button");
     btn.type = "button";
     btn.className = "spaces-create-body";
-    btn.dataset.focusKey = mode === "tags" ? "body-tags" : "body-items";
+    btn.dataset.focusKey = `body-${mode}`;
     btn.title = `${label}. Type ${sigil} in an empty filter box.`;
     const ic = doc.win.createSpan();
     ic.className = "spaces-create-theme-icon";
     setIcon(ic, icon);
     const text = doc.win.createSpan();
+    text.className = "spaces-create-body-label";
     text.textContent = label;
     btn.appendChild(ic);
     btn.appendChild(text);
@@ -1656,6 +1867,10 @@ export class CreateSpacePanel {
     this.paintPickerModes();
     this.renderPlaceholder();
     this.renderPickerBody();
+    // The metadata subscription belongs to the Properties body, not to the
+    // window, so a switch takes it or releases it. Nothing else here needs a
+    // render, which is why this does not go through one.
+    this.syncPropertySubscription();
     // Nothing is written to the summary row: it shows the figures and the
     // figures do not change with the body, so a switch is silent in the live
     // region. The buttons are `aria-pressed`, which a screen reader says when
@@ -1684,15 +1899,20 @@ export class CreateSpacePanel {
       filter.placeholder = "Filter folders…";
       return;
     }
-    filter.placeholder = this.pickerMode === "tags" ? "Filter tags…" : "Filter notes and folders…";
+    filter.placeholder =
+      this.pickerMode === "tags"
+        ? "Filter tags…"
+        : this.pickerMode === "properties"
+          ? "Filter properties…"
+          : "Filter notes and folders…";
   }
 
   /**
    * The row pinned under the window's list: what this space holds so far.
    *
-   * It is what makes the two bodies one picker. A tag chosen in Tags mode has
-   * no row to mark in the tree, and a note chosen in the tree has none in the
-   * tag list, so without this the window could only ever report half of what
+   * It is what makes the bodies one picker. A tag chosen in Tags mode has
+   * no row to mark in the tree, a note chosen in the tree has none in the
+   * tag list, and a property has no row in either, so without this the window could only ever report half of what
    * was picked. Counting both in one line also keeps it to one line, which is
    * what the row of chips above the window failed at.
    *
@@ -1730,12 +1950,701 @@ export class CreateSpacePanel {
   }
 
   /**
+   * Starts listening for property changes while the PROPERTIES body is
+   * showing, and nothing is yet.
+   *
+   * The body, not the picker window. Subscribing for the whole window made
+   * `metadataNotifyRoute` answer `"picker-flush"` rather than `"none"` for a
+   * vault with no property member whose user happened to have the panel open
+   * on Vault or Tags, so every save cost a coalescer submit and a flush whose
+   * only action was a notify that this handler then threw away. Nothing goes
+   * stale by waiting: switching bodies redraws, and the Properties body reads
+   * the accessor on every draw.
+   *
+   * Called from `render` (after the window is built or dropped) and from
+   * `setPickerMode`, which redraws in place without a render.
+   */
+  private syncPropertySubscription(): void {
+    if (!this.itemsOpen || readPickerBody(this.pickerMode, this.state.folderMode) !== "properties") {
+      this.releasePropertySubscription();
+      return;
+    }
+    if (this.propertySub !== null) return;
+    const sub: { release: () => void } = { release: () => undefined };
+    this.propertySub = sub;
+    sub.release = this.deps.subscribePropertyRefresh(() => {
+      if (this.propertySub !== sub) return;
+      this.onPropertiesChanged();
+    });
+  }
+
+  /** Stops listening. Idempotent: `destroy()` and every closed-picker render call it. */
+  private releasePropertySubscription(): void {
+    const sub = this.propertySub;
+    this.propertySub = null;
+    sub?.release();
+  }
+
+  /**
+   * The snapshot was replaced. Only the Properties body reads it, so any
+   * other body has nothing to redraw; the next draw of this one asks again.
+   *
+   * The SUMMARY ROW goes with it, FOR A SELECTION THIS SNAPSHOT CAN MOVE.
+   * Redrawing the body alone left the per-key counts reading from the new
+   * snapshot while the "… N notes" line pinned under them still showed the
+   * figure computed at the last pick: two numbers on one screen from two
+   * different pictures. But this handler runs at NOTIFICATION cadence, about
+   * four times a second through a sync, and the summary costs a
+   * `deps.preview`, which is the engine resolving the whole selection over the
+   * vault: a price written for the once-per-pick it used to be paid at.
+   *
+   * A selection holding no property member is not part of the picture this
+   * snapshot changes. Its figure comes from folders and tags, the rows beside
+   * it carry no count drawn from it, and there is nothing for it to disagree
+   * with, so it keeps the figure its pick computed — which is what it did
+   * before — and pays the preview again at the next pick. A selection that
+   * DOES hold one is the case the paragraph above is about, and is redrawn.
+   */
+  private onPropertiesChanged(): void {
+    if (this.el === null || this.treeEl === null) return;
+    if (readPickerBody(this.pickerMode, this.state.folderMode) !== "properties") return;
+    if (this.pickedMembers().some((m) => m.kind === "property")) this.renderSummary();
+    this.redrawProperties();
+  }
+
+  /**
+   * Redraws the Properties body and puts focus back on the control that held
+   * it.
+   *
+   * WINDOWING MAKES THIS SHARPER: a control that is not drawn cannot be
+   * focused, and a redraw draws only the rows the scroller is showing. The
+   * control that held focus is almost always among them — it is the one the
+   * user just clicked, or the one the keyboard is on, and the browser keeps a
+   * focused control in view — but a redraw raised by the vault changing can
+   * land while it is not. So when the first pass does not find it, the window
+   * is moved to it and it is looked for again.
+   *
+   * THE THIRD CASE IS A CONTROL THAT NO LONGER EXISTS, which is the one this
+   * method used to answer by returning silently and leaving focus on `<body>`:
+   * `renderPickerBody` had already destroyed the row, and a key or value can
+   * genuinely stop existing between two draws when the last note holding it is
+   * deleted or edited during a sync. It falls back to the picker window, the
+   * same place `onPickerScroll` uses and the same place `showFault` focuses,
+   * so a keyboard user is left in the panel rather than at the top of the
+   * document. Focus does not land on `<body>` in any of the three.
+   */
+  private redrawProperties(focusControl?: string): void {
+    const host = this.treeEl;
+    if (!host) return;
+    const active = this.doc?.activeElement;
+    const control =
+      focusControl ??
+      (active && host.contains(active) && active.instanceOf(HTMLElement)
+        ? active.dataset.control
+        : undefined);
+    this.renderPickerBody();
+    if (control === undefined) return;
+    if (this.focusControl(host, control)) return;
+    // Not drawn by the window the scroller asked for. Move the window to it
+    // rather than leaving a keyboard user holding nothing: `scrollIntoView`
+    // inside `focusControl` then takes the list to where the row now is.
+    this.propertyPaint?.(control);
+    if (this.focusControl(host, control)) return;
+    // It is not in the list at all any more.
+    this.focusPickerWindow(host);
+  }
+
+  /**
+   * Focus of last resort: the picker window itself.
+   *
+   * It is focusable for exactly this kind of reason — `showFault` marks it and
+   * focuses it — so sequential Tab continues from the list rather than from
+   * the top of the document. `preventScroll`, because every caller reaches
+   * here after the row that was focused has gone, and scrolling the pane to
+   * the box the user is already looking at is movement with nothing behind it.
+   */
+  private focusPickerWindow(host: HTMLElement): void {
+    const windowEl = host.closest<HTMLElement>(".spaces-create-tree");
+    windowEl?.focus({ preventScroll: true });
+  }
+
+  /** The named control, if this draw built it. */
+  private findControl(host: HTMLElement, control: string): HTMLElement | null {
+    // Compared as values, not through a selector: the control names embed
+    // vault text, which must never be interpolated into one.
+    for (const el of Array.from(host.querySelectorAll<HTMLElement>("[data-control]"))) {
+      if (el.dataset.control === control) return el;
+    }
+    return null;
+  }
+
+  /**
+   * Focuses the named control if this draw built it, and says whether it did.
+   */
+  private focusControl(host: HTMLElement, control: string): boolean {
+    const el = this.findControl(host, control);
+    if (el === null) return false;
+    // `preventScroll`, then a scroll of our own. A plain `focus()` scrolls
+    // EVERY ancestor scroller, and on a vault with enough keys to overflow
+    // the list that moves rows under the pointer between one click and the
+    // next. `block: "nearest"` is a no-op while the control is already in
+    // view, so the list moves only when the control would otherwise be off
+    // it, which is what `renderItemBody` already does with the same call.
+    //
+    // NOT for a restore during a scroll: that one must not move the list at
+    // all. `onPickerScroll` focuses without this.
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: "nearest" });
+    return true;
+  }
+
+  /**
+   * The properties body: every key the vault holds, each openable to its
+   * values.
+   *
+   * Opening and choosing are different controls on purpose, and the OPENER is
+   * the caret. A key row's disclosure button only expands, so a person can
+   * look inside a key without choosing it; everywhere else on the row picks
+   * the existence member, and a value row picks its value member anywhere on
+   * itself. That is the Vault and Tags bodies' own contract: the row carries
+   * `cursor: pointer` and a row-wide hover from `.spaces-create-tree-row`, so
+   * a row that took a click on one button inside it was advertising a target
+   * it did not have.
+   *
+   * The "Has property" button stays, as the explicitly labelled control a
+   * screen reader and the keyboard reach, but it is now one way in rather than
+   * the only one. Every control inside a row that means something other than
+   * "pick this row" stops the click from reaching the row, which leaves the
+   * caret as the one thing that can be clicked without choosing.
+   *
+   * Keys are listed from the index, which is cheap. A key's values are asked
+   * for only while that key is open: drawing the body lists NO values, and the
+   * filter does not read a CLOSED key's values for the same reason. Not split
+   * on `/`, unlike the tag tree: keys and values do not nest, so a value with
+   * a slash in it is one row.
+   *
+   * THE FILTER NARROWS AN OPEN KEY'S VALUES TOO, and an open key whose own
+   * name does not match is kept as long as one of its values does. Without
+   * that, a key with more values than `MAX_PICKER_ROWS` had no way to reach
+   * value 201 at all: the cap decided which values existed for the user, and
+   * on this branch's own 5,000-note fixture `created` holds about 4,035, so
+   * roughly 95% of them could not be picked. Typing a value must reach the
+   * value, not close the key it lives in. The cap stays as it is; 4,035 rows
+   * is unusable at any number, and the overflow row now says what to do.
+   *
+   * The deferral argument holds for a CLOSED key, whose buckets would have to
+   * be built to match a value, and not for an OPEN one, whose buckets are
+   * already built and whose value list is memoized by the index. So the work
+   * added per keystroke is one linear pass over an array that already exists,
+   * per open key: no sort, no copy, no second list. `valueQuery` is computed
+   * once per draw rather than once per row, and the draw loop counts the
+   * matches it skips instead of materializing them.
+   *
+   * The counts on these rows are the raw bucket: distinct notes whose
+   * frontmatter matches, before any space's exclusions and before the global
+   * ignore. A row here is choosing a property, not previewing a space. The
+   * member row in a space's contents counts after exclusions.
+   *
+   * THE TWO ORDERS IN THIS LIST ARE DIFFERENT ON PURPOSE. Key rows are in
+   * name order (`pickableKeys`), because someone scanning for a property they
+   * know by name is better served by a stable order than by counts that shift
+   * as notes change, and the filter box narrows keys by name so the two agree.
+   * Value rows are in count order (`listValues`), because a key's values are
+   * unknown until it is opened and only the first `MAX_PICKER_ROWS` are drawn
+   * — so busiest-first is what decides which values a person sees FIRST, and
+   * name order would hide the common ones behind the rare. That order is the
+   * index's memo and the filter does not disturb it: narrowing drops rows, it
+   * never reorders them.
+   *
+   * **IT BUILDS ONLY THE ROWS ON SCREEN.** Measured in a real Obsidian on a
+   * 5,000-note vault: opening `created`, which holds 4,035 distinct values,
+   * built 206 rows and 836 elements for a 344 px viewport that shows about 14
+   * of them, and cost 60 to 90 ms — four to six frames — of which 85% was the
+   * browser's own style recalc and layout, strictly linear in the row count. A
+   * keystroke in the filter box with that key open cost the same again, every
+   * character, because this method begins by replacing every child. So the
+   * draw is in two halves now: a PLAN of what every row would be, which is
+   * cheap and complete, and a PAINT of the handful the scroller is showing,
+   * with a spacer standing in for the height of the rest. Scrolling repaints;
+   * nothing else about the body changes.
+   *
+   * What that costs elsewhere, said here rather than discovered later: only
+   * rendered controls are in the tab order, the disclosure no longer
+   * enumerates the rows it reveals, and a redraw has to move the window back
+   * to a focused control that is off it (see `redrawProperties`).
+   */
+  private renderPropertyBody(host: HTMLElement): void {
+    const doc = host.ownerDocument;
+    host.setAttribute("role", "list");
+    host.removeAttribute("aria-multiselectable");
+    host.setAttribute("aria-label", "Choose a property");
+    host.replaceChildren();
+    const message = (text: string): void => this.setEmptyMessage(host, text);
+
+    const index = this.deps.properties();
+    if (index === null) {
+      // Still reading, not empty: nothing has been ready yet, and a vault with
+      // no properties is a different sentence.
+      message("Loading this vault's properties…");
+      return;
+    }
+    // Once per draw, not once per row: the box is read on every keystroke and
+    // the answer is the same for every value in the list.
+    const query = valueQuery(this.itemFilter);
+    // An open key whose name misses but whose values hit is kept. The
+    // expansion test comes FIRST, so a closed key never reaches `listValues`
+    // and the picker's deferral of bucket building is untouched; the
+    // predicate is only consulted at all for keys the name test rejected.
+    const keys = pickableKeys(
+      index.listKeys(),
+      this.itemFilter,
+      (key) =>
+        this.expandedProperties.has(key) &&
+        index.listValues(key).some((v) => valueMatches(v, query))
+    );
+    if (keys.length === 0) {
+      message(
+        this.itemFilter.trim() === "" ? "No properties in this vault yet" : "No matching property"
+      );
+      return;
+    }
+
+    const held = this.state.folderMode ? [] : this.state.items;
+    // The identities ONCE per draw, not once per row. `holdsProperty` is a
+    // `some()` with a `JSON.stringify` inside it, and this body asked it for
+    // every key row and every value row: 200 rows against 20 selections is
+    // about 8,400 stringifies, redone on every keystroke in the filter box.
+    // The tag body answers the same question from a `Set` (`chosenTags`), and
+    // so does this one now. `holdsProperty` keeps its signature for its
+    // callers in `propertyRows.ts`, which ask about one member at a time.
+    const heldIds = new Set(held.map(memberIdentity));
+
+    // --- The plan: every row this body would draw, as numbers and strings ---
+    //
+    // Built whole and built first, because the window has to know how many
+    // rows there are and where each one sits before any of them exist. It is
+    // cheap: both caps bound it, so an open `created` holding 4,035 values
+    // plans about 206 entries, and planning one is an object literal against
+    // the 0.31 ms a DRAWN row costs.
+    const plan: PropertyPlanRow[] = [];
+    for (const { key, count } of keys.slice(0, MAX_PICKER_ROWS)) {
+      const keyMember = existsMember(key);
+      const id = memberIdentity(keyMember);
+      const open = this.expandedProperties.has(key);
+      plan.push({ kind: "key", key, count, open, member: keyMember, id, held: heldIds.has(id) });
+      if (!open) continue;
+      // The one place values are asked for, once per open key per draw. The
+      // array is the index's memo, already sorted; it is read, never sliced,
+      // sorted or copied here.
+      const values = index.listValues(key);
+      // Counted as the list is walked rather than by filtering it into a
+      // second array: the overflow row needs how many matched, and building a
+      // 4,035-entry copy on every keystroke to learn its length is the cost
+      // the memo exists to avoid. `drawn` stops at the cap; the walk does not,
+      // because the count has to be right.
+      let matched = 0;
+      let drawn = 0;
+      for (const v of values) {
+        if (!valueMatches(v, query)) continue;
+        matched += 1;
+        if (drawn >= MAX_PICKER_ROWS) continue;
+        drawn += 1;
+        const member = equalsMember(key, v.value);
+        const valueId = memberIdentity(member);
+        plan.push({
+          kind: "value",
+          key,
+          value: v.value,
+          count: v.count,
+          member,
+          id: valueId,
+          held: heldIds.has(valueId),
+        });
+      }
+      if (matched === 0) {
+        // Two different sentences. A key with no values at all has nothing to
+        // offer whatever is typed; a key whose values the filter hid has
+        // something to offer behind a different query, and saying "no values"
+        // there would be a lie about the vault.
+        plan.push({
+          kind: "note",
+          text: values.length === 0 ? "No values to pick" : "No matching value",
+        });
+      }
+      if (matched > drawn) {
+        // The same advice the key overflow row gives, because it is now true
+        // of values too: the filter reaches them. It used to say "not shown",
+        // which named the problem and left the person with nothing to do
+        // about it.
+        plan.push({ kind: "overflow", depth: 1, hidden: matched - drawn });
+      }
+    }
+    if (keys.length > MAX_PICKER_ROWS) {
+      plan.push({ kind: "overflow", depth: 0, hidden: keys.length - MAX_PICKER_ROWS });
+    }
+
+    // --- Drawing one planned row ---
+    const row = (depth: number, extra: string): HTMLElement => {
+      const el = doc.win.createDiv();
+      el.className = `spaces-create-tree-row spaces-create-property-row ${extra}`.trim();
+      el.setAttribute("role", "listitem");
+      el.style.paddingLeft = `${depth * 14}px`;
+      return el;
+    };
+    const countSpan = (n: number): HTMLElement => {
+      const count = doc.win.createSpan();
+      count.className = "spaces-create-tag-count";
+      count.textContent = tagCountLabel(n);
+      return count;
+    };
+    const pick = (member: MemberEntry, focusControl: string): void => {
+      // The Vault and Tags bodies' own toggle, not a parallel path beside it.
+      // `toggleItem` already tells property members apart by
+      // `memberIdentity`, and no property member covers another, so it does
+      // the right thing with one unchanged.
+      //
+      // A second click on a held member takes it off, so a mis-click is
+      // undoable without leaving the picker, which is what the other two
+      // bodies promise and what the summary row's wording assumes. The
+      // "already selected" notice it replaces had nothing to report that the
+      // row was not already showing.
+      this.state = toggleItem(this.state, member);
+      this.clearFault("root");
+      this.renderSummary();
+      this.redrawProperties(focusControl);
+      this.refreshCreateButton();
+    };
+    /**
+     * Stands in for a run of rows that were not built.
+     *
+     * Presentational on purpose: it is not a row, and a child of a
+     * `role="list"` that is not a `listitem` is reported by assistive tech as
+     * a stray node. The rows it replaces are accounted for by `aria-setsize`
+     * on the rows that WERE built, which is the real list length.
+     */
+    const spacer = (height: number): HTMLElement => {
+      const el = doc.win.createDiv();
+      el.className = "spaces-create-tree-spacer";
+      el.setAttribute("role", "presentation");
+      el.setAttribute("aria-hidden", "true");
+      el.style.height = `${height}px`;
+      return el;
+    };
+    const keyRow = (entry: PropertyKeyPlan): HTMLElement => {
+      const el = row(0, entry.held ? "is-selected" : "");
+      el.dataset.propertyKey = entry.key;
+      // The whole row, not the button alone: see the docblock above. Bubbled
+      // from the name, the count and the row's own padding; the caret and the
+      // select button stop the event before it gets here.
+      el.addEventListener("click", () => pick(entry.member, `select:${entry.id}`));
+
+      const disclose = doc.win.createEl("button");
+      disclose.type = "button";
+      disclose.className = "spaces-create-tree-caret spaces-create-property-disclose";
+      disclose.dataset.control = `expand:${entry.id}`;
+      // `aria-expanded` with no `aria-controls`: the rows it reveals are its
+      // next siblings, which is the shape this attribute is defined for when
+      // the revealed content follows the control. The enumeration that used to
+      // name every revealed row by id is gone, and windowing is why: it could
+      // only ever name the rows that happen to be BUILT, so with a window it
+      // would be a list of a dozen ids for a key holding four thousand values,
+      // which is worse than saying nothing. `aria-setsize` and `aria-posinset`
+      // on every row carry the real length and the real position instead.
+      disclose.setAttribute("aria-expanded", String(entry.open));
+      disclose.setAttribute("aria-label", `${entry.open ? "Hide" : "Show"} values of ${entry.key}`);
+      setIcon(disclose, entry.open ? "chevron-down" : "chevron-right");
+      disclose.addEventListener("click", (e) => {
+        // Browsing only: nothing here touches `state`. Stopped so the row's
+        // own pick does not run: looking inside a key must never choose it,
+        // and that split is the whole reason this control exists.
+        e.stopPropagation();
+        if (entry.open) this.expandedProperties.delete(entry.key);
+        else this.expandedProperties.add(entry.key);
+        this.redrawProperties(`expand:${entry.id}`);
+      });
+      el.appendChild(disclose);
+
+      const name = doc.win.createSpan();
+      name.className = "spaces-create-tree-name";
+      name.textContent = entry.key;
+      el.appendChild(name);
+      el.appendChild(countSpan(entry.count));
+
+      const select = doc.win.createEl("button");
+      select.type = "button";
+      select.className = "spaces-create-property-select";
+      select.dataset.control = `select:${entry.id}`;
+      select.textContent = "Has property";
+      select.setAttribute("aria-label", `Has property ${entry.key}`);
+      select.setAttribute("aria-pressed", String(entry.held));
+      // On the row, not on the button, so it answers a hover anywhere on the
+      // control. Says what a second click DOES, the way the tag rows do,
+      // rather than restating the mark the row is already carrying.
+      if (entry.held) el.title = `Remove ${entry.key}`;
+      // Stopped, then picks: without this the row would pick a second time on
+      // the same click and the two would cancel out.
+      select.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pick(entry.member, `select:${entry.id}`);
+      });
+      el.appendChild(select);
+      return el;
+    };
+    const valueRow = (entry: PropertyValuePlan): HTMLElement => {
+      const vr = row(1, entry.held ? "is-selected" : "");
+      // The whole value row, including the indent gutter left of the button,
+      // which was inert while the button was the only target.
+      vr.addEventListener("click", () => pick(entry.member, `select:${entry.id}`));
+      const btn = doc.win.createEl("button");
+      btn.type = "button";
+      btn.className = "spaces-create-property-value";
+      btn.dataset.control = `select:${entry.id}`;
+      btn.setAttribute("aria-pressed", String(entry.held));
+      // The value alone is ambiguous once two keys share one such as done,
+      // so the name carries its key — AND its count, because the count span
+      // is a child of this button and `aria-label` replaces the accessible
+      // name, so a screen reader would otherwise never reach it. On a key
+      // row the count is a sibling of the button inside the `listitem` and
+      // is announced on its own; this is the two row kinds agreeing.
+      btn.setAttribute(
+        "aria-label",
+        `${entry.key} equals ${valueLabel(entry.value)}, ${tagCountLabel(entry.count)}`
+      );
+      if (entry.held) vr.title = `Remove ${entry.key}: ${valueLabel(entry.value)}`;
+      const label = doc.win.createSpan();
+      label.className = "spaces-create-tree-name";
+      label.classList.toggle("is-empty-label", entry.value.trim() === "");
+      label.textContent = valueLabel(entry.value);
+      btn.appendChild(label);
+      btn.appendChild(countSpan(entry.count));
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pick(entry.member, `select:${entry.id}`);
+      });
+      vr.appendChild(btn);
+      return vr;
+    };
+    const buildRow = (entry: PropertyPlanRow, at: number): HTMLElement => {
+      const el =
+        entry.kind === "key"
+          ? keyRow(entry)
+          : entry.kind === "value"
+            ? valueRow(entry)
+            : entry.kind === "note"
+              ? ((): HTMLElement => {
+                  const none = row(1, "is-note");
+                  none.textContent = entry.text;
+                  return none;
+                })()
+              : ((): HTMLElement => {
+                  const more = row(entry.depth, "is-overflow");
+                  more.setAttribute("aria-disabled", "true");
+                  more.textContent = `${entry.hidden === 1 ? "1 more" : `${entry.hidden.toLocaleString()} more`}, narrow the filter to see them`;
+                  return more;
+                })();
+      // What windowing takes away and this gives back: the list is 206 rows
+      // long whether or not 206 were built, and a row knows where it sits in
+      // it. Set on EVERY row kind, including the overflow and empty notes,
+      // because they are in the set a reader is counting through.
+      el.setAttribute("aria-setsize", String(plan.length));
+      el.setAttribute("aria-posinset", String(at + 1));
+      return el;
+    };
+
+    /**
+     * Puts the rows the window names into the host, and nothing else.
+     *
+     * Kept on the panel so a SCROLL can call it without rebuilding the plan:
+     * scrolling changes which rows are wanted, never what they are.
+     * `anchor` names a control that must be built whatever the scroller says,
+     * which is how focus survives a redraw.
+     *
+     * EVERY PAINT THAT CHANGES THE WINDOW DESTROYS EVERY DRAWN ROW, including
+     * the rows the new window still contains, because it replaces the host's
+     * children wholesale. Whatever had focus inside it does not survive;
+     * `onPickerScroll` and `redrawProperties` each put focus back, by their own
+     * rule. A paint that does not move the window returns before touching
+     * anything, which is what makes that cheap to detect.
+     *
+     * `measure` is for the draw that follows a plan rebuild, which is the only
+     * one that re-reads the row pitch. A scroll repaint must not: `repitch`
+     * reads `offsetTop`, which forces a synchronous layout, and a scroll
+     * gesture is the one place that is paid dozens of times a second.
+     */
+    const paint = (anchor?: string, measure = false): void => {
+      const metrics = {
+        ...this.pickerViewport(host),
+        count: plan.length,
+        overscan: PICKER_OVERSCAN,
+      };
+      let range = visibleRange(metrics);
+      if (anchor !== undefined) {
+        const at = plan.findIndex((entry) => planOwnsControl(entry, anchor));
+        if (at >= 0) range = windowCovering(at, metrics);
+      }
+      const drawn = this.propertyRange;
+      if (drawn !== null && drawn.first === range.first && drawn.last === range.last) return;
+      // One insertion, not one per row. Measured at 2.7 ms of a 73.5 ms draw
+      // of 200 rows: small, free, and it compounds with drawing fewer.
+      const frag = doc.win.createFragment();
+      const above = spacerHeight(range.first, metrics.rowHeight);
+      if (above > 0) frag.appendChild(spacer(above));
+      for (let at = range.first; at < range.last; at += 1) frag.appendChild(buildRow(plan[at], at));
+      const below = spacerHeight(plan.length - range.last, metrics.rowHeight);
+      if (below > 0) frag.appendChild(spacer(below));
+      host.replaceChildren(frag);
+      this.propertyRange = range;
+      if (!measure) return;
+      this.repitch(host, () => {
+        this.propertyRange = null;
+        paint(anchor);
+      });
+    };
+    this.propertyPaint = paint;
+    paint(undefined, true);
+  }
+
+  /**
+   * The scroller's geometry, in the numbers `visibleRange` takes.
+   *
+   * THE ONE SEAM between the window calculation and a laid-out browser. The
+   * calculation itself is `rowWindow.ts`, which is pure and tested on numbers;
+   * everything untestable about windowing is these three reads. jsdom answers
+   * zero to all of them, which is exactly the "not laid out" case that renders
+   * the whole list, so the existing suite keeps seeing every row.
+   *
+   * `deps.pickerViewport` replaces it wholesale, so a test can hand the panel
+   * a viewport that jsdom could never produce.
+   *
+   * `closest`, not `parentElement`: a wrapper put between the host and the
+   * scroller would otherwise make this read a height of zero, which the window
+   * calculation reads as "not laid out" and answers by building every row —
+   * windowing silently off, with nothing in the node suite able to see it. The
+   * e2e probe is what would catch that (`B8 it builds only the rows that fit`
+   * fails the moment this returns zero in a real browser), and naming the
+   * scroller rather than counting parents is what keeps it from happening.
+   */
+  private pickerViewport(host: HTMLElement): {
+    scrollTop: number;
+    viewportHeight: number;
+    rowHeight: number;
+  } {
+    const supplied = this.deps.pickerViewport;
+    if (supplied !== undefined) return supplied();
+    const scroll = host.closest<HTMLElement>(".spaces-create-tree-scroll");
+    return {
+      scrollTop: scroll?.scrollTop ?? 0,
+      viewportHeight: scroll?.clientHeight ?? 0,
+      rowHeight: this.propertyRowPitch,
+    };
+  }
+
+  /**
+   * Reads the real row pitch off the rows just drawn, and asks for a repaint
+   * when it is not the one they were windowed by.
+   *
+   * The pitch starts as this plugin's own stylesheet's (`PROPERTY_ROW_PITCH_PX`),
+   * so the FIRST draw is already windowed rather than paying for the whole
+   * list once to find out how tall a row is. A theme with a larger nav font
+   * makes rows taller; measuring one corrects the estimate after a single
+   * draw, and correcting it matters because the spacers that stand in for
+   * unbuilt rows are sized by it.
+   *
+   * Two rows, not one: the pitch is a row's height PLUS the margin under it,
+   * and the distance between two consecutive rows is the only place both are
+   * visible. The slice is contiguous, so the first two drawn rows are always
+   * adjacent.
+   *
+   * UNREACHABLE IN JSDOM, AND SO UNTESTED THERE. `offsetTop` is 0 for every
+   * element, so `pitch <= 0` returns before anything happens, and no test in
+   * the suite can observe the re-entrancy guard, the `propertyRange` reset or
+   * the repaint. That is a property of the thing being measured, not a gap
+   * that can be closed by a better test: this method IS the layout read that
+   * the pure window calculation exists to keep out of itself. What stands in
+   * for a test is the e2e walk, which reads back spacer heights that only
+   * reconcile with the live list if the pitch this produced is right.
+   *
+   * Called from a plan rebuild's own paint and from nowhere else. A scroll
+   * repaint must not call it: a forced synchronous layout dozens of times a
+   * second is the kind of cost windowing was done to remove.
+   */
+  private repitch(host: HTMLElement, again: () => void): void {
+    if (this.repitching) return;
+    const rows = host.querySelectorAll<HTMLElement>(".spaces-create-property-row");
+    if (rows.length < 2) return;
+    const pitch = rows[1].offsetTop - rows[0].offsetTop;
+    if (pitch <= 0 || Math.abs(pitch - this.propertyRowPitch) < 0.5) return;
+    this.propertyRowPitch = pitch;
+    this.repitching = true;
+    try {
+      again();
+    } finally {
+      this.repitching = false;
+    }
+  }
+
+  /**
+   * Repaints the Properties body's window as the list is scrolled.
+   *
+   * It costs a draw of about twenty rows and only when the window has
+   * actually moved, which `paint` decides. No `requestAnimationFrame`
+   * anywhere: Obsidian throttles it to about a second in an unfocused window,
+   * and a list that repaints a second after it is scrolled is worse than one
+   * that repaints in the scroll handler.
+   *
+   * FOCUS. A repaint replaces every drawn row, so the focused control is
+   * destroyed whether or not the new window still contains it. THE TWO CASES
+   * ARE DIFFERENT AND MUST NOT BE CONFLATED, which is the defect this answers:
+   * handing focus to the container whenever the active element went missing
+   * meant that one wheel notch after any click — a click leaves focus on the
+   * control it hit — collapsed the user's Tab position to the top of the drawn
+   * window, on every scroll that moved the window by a single row.
+   *
+   * So the control is looked for by name in what was just built. Found, it is
+   * focused again and the user has not moved. Genuinely off the list, focus
+   * goes to the picker WINDOW, which is focusable for exactly this reason
+   * (`showFault` focuses it too), so the next Tab continues from the list
+   * rather than from the top of the document, and never from `<body>`.
+   *
+   * NO `scrollIntoView` on the way back, which is why this does not go through
+   * `focusControl`. The window is three rows wider than the viewport at each
+   * edge, so a restored control may legitimately be sitting just off screen in
+   * the overscan — and scrolling it into view would drag the list back against
+   * the gesture that is still in progress. The same call is also what made the
+   * redraw's restore undo itself: `focusControl`'s `scrollIntoView` fires a
+   * scroll event at the next rendering step, which lands here, and the 4 px of
+   * padding on the scroller is enough to make that repaint a different window.
+   * It now re-focuses the same control instead of dropping it.
+   */
+  private onPickerScroll(): void {
+    const paint = this.propertyPaint;
+    const host = this.treeEl;
+    if (paint === null || host === null) return;
+    const before = this.doc?.activeElement ?? null;
+    const control =
+      before !== null && host.contains(before) && before.instanceOf(HTMLElement)
+        ? before.dataset.control
+        : undefined;
+    paint();
+    if (control === undefined) return;
+    // The window did not move, so nothing was rebuilt and the control the user
+    // is on is the one they were on.
+    if (this.doc?.activeElement === before) return;
+    const again = this.findControl(host, control);
+    if (again !== null) {
+      again.focus({ preventScroll: true });
+      return;
+    }
+    this.focusPickerWindow(host);
+  }
+
+  /**
    * The tag body: the vault's tags as a tree, drawn into the same box the
    * vault tree uses.
    *
    * It holds all of them, with the ones this space already has marked — the
    * same job the item tree does for notes and folders, which is what makes the
-   * two buttons above the window mean the same kind of thing. An empty filter
+   * buttons above the window mean the same kind of thing. An empty filter
    * box is the whole tree, collapsed; text narrows it.
    *
    * **A tree, where this used to be a flat list of 50.** Obsidian's tags nest
@@ -1761,7 +2670,8 @@ export class CreateSpacePanel {
    * and a tree already has one that the rows' indentation is drawing. Ranking
    * inside a tree would either reorder siblings under their parent for reasons
    * the indentation cannot show, or be computed and then thrown away. One
-   * filter rule now serves both bodies, which is also what the one filter box
+   * filter rule now serves the Vault and Tags bodies, and the Properties body
+   * reads the same box against key names, which is also what the one filter box
    * above them implies.
    *
    * Each row reports how many notes its tag currently brings in, which is what

@@ -1,5 +1,6 @@
 import type { SpaceDefinition } from "../types";
 import type { TagIndex } from "../visibility/TagIndex";
+import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { inheritedFromFolder } from "../definitions/membership";
 import { spaceAddTargets } from "./spaceAddTargets";
 import { submenuFor, type SubmenuLike } from "./nativeMenuSubmenu";
@@ -68,6 +69,11 @@ export interface DecorateContext {
    * "Add to space" offered for a note the space already holds through a tag.
    */
   tags(): TagIndex;
+  /**
+   * The property index, or `null` while the metadata cache is cold. Asked
+   * once per menu, not per space.
+   */
+  properties(): PropertyIndex | null;
 }
 
 interface DecorateHandlers<T extends FileLike> {
@@ -218,7 +224,8 @@ function addToSpaceEntries<T extends FileLike>(
   const targets = spaceAddTargets(
     spaces,
     files.map((f) => f.path),
-    ctx.tags()
+    ctx.tags(),
+    ctx.properties()
   );
   // No targets AFTER filtering means no entry, rather than one that opens onto
   // nothing. Checking `spaces.length` alone is not enough: `spaceAddTargets`
