@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.11.0 — 2026-10-13
+
+A curated space can now collect notes by a property. Add the property `due` to
+collect every note whose frontmatter has it, or add `status` with the value
+`active` to collect only the notes where `status` is set to `active`.
+
+To add one, switch the creation form's picker from **Vault** to
+**Properties**. Click **Has property** beside a property to collect every note
+that has it, or open a property to see its values and click one. On an
+existing space, open Settings → Spaces, click **Contents…** beside the space,
+and fill in the property under **Add a property**, with a value if you want
+one.
+
+Values match without regard to capitals or surrounding spaces, so a note with
+`status: Active` is collected by the value `active`. Property names match
+exactly, so `Status` and `status` are two different properties. A list
+property is collected by any of the plain values in the list, so a note with
+`topics: [atlas, billing]` is collected by the value `atlas`. A property with
+no value still counts as having the property.
+
+A note joins the space when it gains a matching property and leaves when it no
+longer matches. Properties mix freely with notes, folders and tags in one
+space. Tags are not available as a property. Use a tag instead, which also
+finds tags written in a note's text.
+
+A property's values are listed with the most common first. Type in the filter
+box to reach the rest.
+
+While Obsidian is still reading your vault, a property space leaves its
+property matches out rather than showing your whole vault, and the picker says
+it is still loading. Both fill in once the reading finishes.
+
 ## 0.10.0 — 2026-10-12
 
 A folder that exists only to lead to one more folder no longer costs a row of
