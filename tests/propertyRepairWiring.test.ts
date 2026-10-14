@@ -387,6 +387,36 @@ describe("the cost of a repair that cannot close its holes", () => {
     expect(h.read).toHaveBeenCalledTimes(2); // jammed.md and locked.md, once each
   });
 
+  it("forgets a repair that CLOSED every hole, so the next event repairs again", async () => {
+    // The `: new Map()` arm of `repairedAtMtime`, which a successful repair
+    // takes. It is load-bearing and nothing was watching it: with `stamps`
+    // written there instead, the whole suite still passed while a repaired
+    // space went dark on its very next metadata event.
+    //
+    // Why it goes dark. A jammed vault's cache stays null, so every later
+    // event walks, finds the SAME holes at the SAME mtimes, and asks again.
+    // Remembering a success makes that ask decline, and the snapshot it
+    // declines to rebuild is `unavailable` — the repaired one belonged to the
+    // accessor the event just replaced.
+    const h = harness({
+      files: { "jammed.md": null },
+      heads: { "jammed.md": { kind: "frontmatter", frontmatter: { status: "done" } } },
+      stalled: true,
+    });
+
+    metadataEvent(h);
+    await tick();
+    const first = h.installed[h.installed.length - 1]?.();
+    expect(first?.status).toBe("ready");
+
+    // A second event, with the cache still null, as a jam leaves it.
+    metadataEvent(h);
+    await tick();
+    expect(h.read).toHaveBeenCalledTimes(2);
+    const second = h.installed[h.installed.length - 1]?.();
+    expect(second?.status).toBe("ready");
+  });
+
   it("tries again when a file it failed on has actually changed", async () => {
     // Mtime is the signal, and it is the one already threaded through
     // `FrontmatterSource.read`. A share that came back with no edit is covered
