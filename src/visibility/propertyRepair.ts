@@ -12,8 +12,15 @@ import type { PropertyEntry, PropertyWalk } from "./ObsidianPropertyIndex";
  *
  * IT BOUNDS THE UNPARSED LIST AT THE MOMENT OF THE ASK. Vault size never
  * enters it. So the guarantee is: a single mistaken verdict from
- * `lifecycle/parseStall.ts` costs at most 200 head reads of 16 KB, once. It is
- * a blast radius.
+ * `lifecycle/parseStall.ts` costs at most 200 files read, once. It is a blast
+ * radius.
+ *
+ * In bytes that is 3 MB in the ordinary case, where the first 16 KB window
+ * answers, and 65.6 MB in the worst one, where every file holds a frontmatter
+ * block still open at the 256 KB cap and so costs all three windows —
+ * 16 + 64 + 256 KB each. The worst case needs 200 such files in one vault and
+ * has never been seen; it is stated because an earlier version of this comment
+ * said "200 head reads of 16 KB" and was wrong by twenty times.
  *
  * It is NOT a proof that a cold start can never be read off disk. An earlier
  * version of this comment said any vault over 200 notes was "structurally
