@@ -1,4 +1,5 @@
-import type { FileHandle } from "node:fs/promises";
+import type * as FsPromises from "node:fs/promises";
+import type * as NodePath from "node:path";
 import type { HeadReader } from "./frontmatterHead";
 
 /**
@@ -52,23 +53,14 @@ import type { HeadReader } from "./frontmatterHead";
 declare const require: (id: string) => unknown;
 
 /**
- * The two surfaces this module uses, named rather than taken from the builtins'
- * own types.
+ * The two surfaces this module uses, taken from the builtins' OWN types.
  *
- * A `typeof` of the module's own type would say it in one line, but writing
- * that needs the inline-module-type syntax, and two tests forbid those
- * characters anywhere in `src/`: `tests/noNetwork.test.ts` quarantines the one
- * route to the network that looks innocuous, and `tests/moduleGraph.test.ts`
- * requires every import to be a form its parser can follow. Both are right to.
- * This is the cost of staying inside them, and it is two interfaces.
+ * `import type` is erased before anything runs, so this adds no import to the
+ * bundle and leaves the lazy `require` below the only way either module is
+ * reached. Taking the real types rather than hand-writing two interfaces means
+ * a signature cannot quietly drift from Node's.
  */
-interface NodeFsPromises {
-  open(path: string, flags: string): Promise<FileHandle>;
-}
-interface NodePath {
-  join(...parts: string[]): string;
-}
-type NodeBuiltins = { fs: NodeFsPromises; path: NodePath };
+type NodeBuiltins = { fs: typeof FsPromises; path: typeof NodePath };
 
 /** Resolved on the first head read of a session, then held. */
 let builtins: NodeBuiltins | null = null;
@@ -77,15 +69,15 @@ function nodeBuiltins(): NodeBuiltins {
   // Held as the MODULES, not as plucked functions, so every call below stays a
   // method call on its own module object.
   builtins ??= {
-    fs: require("node:fs/promises") as NodeFsPromises,
-    path: require("node:path") as NodePath,
+    fs: require("node:fs/promises") as typeof FsPromises,
+    path: require("node:path") as typeof NodePath,
   };
   return builtins;
 }
 
 export function createNodeHeadReader(vaultRoot: string): HeadReader {
   return async (path, bytes) => {
-    let handle: FileHandle | null = null;
+    let handle: FsPromises.FileHandle | null = null;
     try {
       const node = nodeBuiltins();
       handle = await node.fs.open(node.path.join(vaultRoot, path), "r");
