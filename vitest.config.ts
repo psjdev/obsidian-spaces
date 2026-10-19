@@ -33,7 +33,7 @@ export default defineConfig({
       ["tests/createSpacePanel.test.ts", "jsdom"],
       ["tests/newFileLocation.test.ts", "jsdom"],
       ["tests/nativeNewFileParent.test.ts", "jsdom"],
-      ["tests/propertyRepairWiring.test.ts", "jsdom"],
+      ["tests/parseStallWiring.test.ts", "jsdom"],
     ],
     coverage: {
       provider: "v8",

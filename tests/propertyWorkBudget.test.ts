@@ -59,7 +59,7 @@ import { normalizeValue } from "../src/visibility/propertyValues";
  * `requestPropertyRepair` and no repair-driven `refresh`, so NONE of the work
  * the repair does is counted anywhere in this file. That budget is stated and
  * asserted against the real plugin methods instead, in
- * `tests/propertyRepairWiring.test.ts` under "the cost of a repair that cannot
+ * the removed repair wiring test, under "the cost of a repair that cannot
  * close its holes". Counting it here would need the plugin class and so an
  * Obsidian runtime, which is the reason the mirror exists at all.
  *
