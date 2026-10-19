@@ -16,6 +16,7 @@ import { buildFakeVault } from "./helpers/fakeVault";
 import type { PropertySnapshot } from "../src/visibility/PropertyIndex";
 import { createPropertyIndex } from "../src/visibility/PropertyIndex";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
+import { compileIgnore } from "../src/visibility/glob";
 import type { SpaceDefinition } from "../src/types";
 
 const noTags = createMapTagIndex(new Map());
@@ -30,20 +31,20 @@ const index = createPropertyIndex([{ path: "Work/a.md", frontmatter: { status: "
 
 describe("spaceAddTargets while the property snapshot is unavailable", () => {
   it("does not offer a space whose property member it cannot adjudicate", () => {
-    const [t] = spaceAddTargets([propertySpace], ["Work/a.md"], noTags, null);
+    const [t] = spaceAddTargets([propertySpace], ["Work/a.md"], noTags, null, compileIgnore([]));
     expect(t.disabled).toBe(true);
     expect(t.addablePaths).toEqual([]);
   });
 
   it("still offers a space with no property member", () => {
     const plain: SpaceDefinition = { ...propertySpace, id: "q", members: [] };
-    const [t] = spaceAddTargets([plain], ["Work/a.md"], noTags, null);
+    const [t] = spaceAddTargets([plain], ["Work/a.md"], noTags, null, compileIgnore([]));
     expect(t.disabled).toBe(false);
     expect(t.addablePaths).toEqual(["Work/a.md"]);
   });
 
   it("reports a note a property member holds as already added once the index is ready", () => {
-    const [t] = spaceAddTargets([propertySpace], ["Work/a.md"], noTags, index);
+    const [t] = spaceAddTargets([propertySpace], ["Work/a.md"], noTags, index, compileIgnore([]));
     expect(t).toMatchObject({ disabled: true, label: "Active (already added)" });
   });
 });
@@ -88,7 +89,7 @@ describe("a note a property member shows is still held after the snapshot goes c
     const { controller, set } = await realContext({ status: "ready", index });
     controller.drawnPropertyIndex();
     set({ status: "unavailable", unparsed: [] });
-    const [t] = spaceAddTargets([propertySpace], ["Work/a.md"], noTags, controller.drawnPropertyIndex());
+    const [t] = spaceAddTargets([propertySpace], ["Work/a.md"], noTags, controller.drawnPropertyIndex(), compileIgnore([]));
     expect(t.label).toBe("Active (already added)");
   });
 

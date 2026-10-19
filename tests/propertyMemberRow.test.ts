@@ -10,7 +10,11 @@ import { memberIdentity } from "../src/definitions/schema";
 import { addPropertyMember, isPickableKey, readPropertyAdd } from "../src/ui/propertyRows";
 import { resolveMembers } from "../src/controller/resolveMembers";
 import { createPropertyIndex, type PropertyIndex } from "../src/visibility/PropertyIndex";
+import { compileIgnore } from "../src/visibility/glob";
 import type { MemberEntry, SpaceDefinition } from "../src/types";
+
+/** Nothing is ignored, which is what every case in this file assumes. */
+const NO_IGNORE = compileIgnore([]);
 
 type PropertyMember = Extract<MemberEntry, { kind: "property" }>;
 
@@ -43,7 +47,7 @@ function rowFor(
     space,
     () => true,
     undefined,
-    (m) => propertyMemberCount(m, index, space)
+    (m) => propertyMemberCount(m, index, space, NO_IGNORE)
   );
   const row = rows[0];
   if (row.kind !== "property") throw new Error("expected a property row first");
@@ -103,7 +107,7 @@ describe("a property member's row", () => {
         members,
       };
       const row = memberRows(space, () => true, undefined, (m) =>
-        propertyMemberCount(m, ready, space)
+        propertyMemberCount(m, ready, space, NO_IGNORE)
       ).find((r) => r.kind === "property");
       expect(row).toMatchObject({ kind: "property", matchCount: 3 });
     }
@@ -130,8 +134,8 @@ describe("a property member's row", () => {
           exclude,
         };
         const noTags = { pathsMatching: () => [] };
-        expect(propertyMemberCount(member, ready, space)).toBe(
-          resolveMembers(space, noTags, ready).length
+        expect(propertyMemberCount(member, ready, space, NO_IGNORE)).toBe(
+          resolveMembers(space, noTags, ready, NO_IGNORE).length
         );
       }
     }
@@ -335,7 +339,7 @@ describe("adding a property member to a space that already exists", () => {
       after,
       () => true,
       undefined,
-      (m) => propertyMemberCount(m, ready, after)
+      (m) => propertyMemberCount(m, ready, after, NO_IGNORE)
     );
     const row = rows.find((r) => r.kind === "property");
     expect(row).toMatchObject({

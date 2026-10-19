@@ -1,5 +1,5 @@
 import { Notice, TFolder, type Menu, type TAbstractFile, type Plugin } from "obsidian";
-import { canonicalPath } from "../visibility/glob";
+import { canonicalPath, compileIgnore, type IgnoreMatcher } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceController } from "../controller/SpaceController";
 import type { MemberEntry, SpaceDefinition } from "../types";
@@ -108,12 +108,15 @@ function splitBatch(
   // Already read by the caller, which has refused an unknown answer for a
   // space holding a property member. `null` here therefore only ever means
   // the space has none.
-  properties: PropertyIndex | null
+  properties: PropertyIndex | null,
+  // What the space SHOWS depends on it: a tag or property member does not
+  // hold a note the vault hides. Compiled once per batch by the caller.
+  ignore: IgnoreMatcher
 ): { added: TAbstractFile[]; already: TAbstractFile[] } {
   // Built once for the whole batch, never once per file: expanding a tag
   // member costs a pass over the vault's notes.
   const resolved = space
-    ? resolvedPaths(space, tags, properties)
+    ? resolvedPaths(space, tags, properties, ignore)
     : new Set<string>();
   const seen = new Set<string>();
   const added: TAbstractFile[] = [];
@@ -153,6 +156,15 @@ function propertiesFor(
   return ctx.controller.drawnPropertyIndex() ?? "unknown";
 }
 
+/**
+ * The vault's global ignore, compiled from the settings as they are right
+ * now. One line, in one place, so no add path can read a different setting
+ * from the one the tree was drawn with.
+ */
+function ignoreFor(ctx: MembershipContext): IgnoreMatcher {
+  return compileIgnore(ctx.defs.get().settings.globalIgnore);
+}
+
 async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<void> {
   const space = ctx.controller.activeSpace();
   if (!space) return;
@@ -165,7 +177,13 @@ async function addAll(ctx: MembershipContext, files: TAbstractFile[]): Promise<v
     new Notice(STILL_READING);
     return;
   }
-  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex(), props);
+  const { added, already } = splitBatch(
+    files,
+    current,
+    ctx.controller.tagIndex(),
+    props,
+    ignoreFor(ctx)
+  );
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === space.id);
@@ -214,7 +232,13 @@ export async function addToSpace(
     new Notice(STILL_READING);
     return;
   }
-  const { added, already } = splitBatch(files, current, ctx.controller.tagIndex(), props);
+  const { added, already } = splitBatch(
+    files,
+    current,
+    ctx.controller.tagIndex(),
+    props,
+    ignoreFor(ctx)
+  );
   try {
     await ctx.defs.mutate((d) => {
       const target = d.spaces.find((s) => s.id === spaceId);
@@ -266,6 +290,10 @@ export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFil
     // none pays no metadata walk for opening a context menu.
     properties: (): PropertyIndex | null =>
       ctx.defs.get().spaces.some(holdsPropertyMember) ? ctx.controller.drawnPropertyIndex() : null,
+    // Compiled at most once per menu, and only if a space is actually
+    // offered as a target: `compileIgnore` builds a RegExp per pattern, and
+    // opening a context menu must not pay for that when nothing asks.
+    ignore: (): IgnoreMatcher => ignoreFor(ctx),
   };
   decorateMenu(menu, decorateCtx, files, {
     addAll: (fs) => void addAll(ctx, fs),

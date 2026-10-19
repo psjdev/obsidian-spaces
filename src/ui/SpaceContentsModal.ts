@@ -6,6 +6,7 @@ import {
   memberRows,
   withoutMember,
   propertyMemberCount,
+  tagMemberCount,
   withoutPropertyMember,
   withoutTagMember,
   type PathMemberRow,
@@ -17,6 +18,7 @@ import { STILL_READING } from "../actions/membership";
 import { addPropertyMember, pickableKeys, readPropertyAdd } from "./propertyRows";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { normalizeTag } from "../visibility/tagMatch";
+import { compileIgnore } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { SpaceDefinition } from "../types";
@@ -160,9 +162,12 @@ export class SpaceContentsModal extends Modal {
     // per row means every count on screen describes one picture of the
     // vault.
     let tags: TagIndex | null = null;
+    // Compiled ONCE per render and closed over, never once per row: it builds
+    // a RegExp per pattern, and both counters below read it.
+    const ignore = compileIgnore(this.defs.get().settings.globalIgnore);
     const matchCount = (tag: string): number => {
       tags ??= this.tagIndex();
-      return tags.pathsMatching(tag).length;
+      return tagMemberCount(tag, tags, ignore);
     };
 
     // Shared with the exclusions section below, which asks the same question
@@ -184,7 +189,7 @@ export class SpaceContentsModal extends Modal {
       return properties;
     };
     const propertyCount = (m: Parameters<typeof propertyMemberCount>[0]): number | null =>
-      propertyMemberCount(m, propertyIndexOnce(), space);
+      propertyMemberCount(m, propertyIndexOnce(), space, ignore);
 
     const rows = memberRows(space, exists, matchCount, propertyCount);
 

@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { spaceAddTargets } from "../src/actions/spaceAddTargets";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { tagIndexOf } from "./helpers/tagIndex";
+import { compileIgnore } from "../src/visibility/glob";
+
+/** Nothing is ignored, which is what every case in this file assumes. */
+const NO_IGNORE = compileIgnore([]);
 import type { SpaceDefinition } from "../src/types";
 
 /**
@@ -15,7 +19,7 @@ const noTags = createMapTagIndex(new Map());
 const targets = (
   spaces: readonly SpaceDefinition[],
   paths: readonly string[]
-): ReturnType<typeof spaceAddTargets> => spaceAddTargets(spaces, paths, noTags, null);
+): ReturnType<typeof spaceAddTargets> => spaceAddTargets(spaces, paths, noTags, null, NO_IGNORE);
 
 const space = (over: Partial<SpaceDefinition>): SpaceDefinition => ({
   id: "s",
@@ -129,18 +133,18 @@ describe("spaceAddTargets and tag members", () => {
   );
 
   it("does not offer a note the space already holds through a tag", () => {
-    const out = spaceAddTargets([TAGGED], ["Anywhere/Tagged.md"], index, null);
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Tagged.md"], index, null, NO_IGNORE);
     expect(out[0]).toMatchObject({ disabled: true, addablePaths: [] });
     expect(out[0].label).toBe("Tagged (already added)");
   });
 
   it("counts a nested tag as held too, matching the engine", () => {
-    const out = spaceAddTargets([TAGGED], ["Anywhere/Nested.md"], index, null);
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Nested.md"], index, null, NO_IGNORE);
     expect(out[0].disabled).toBe(true);
   });
 
   it("still offers a note the tag does not reach", () => {
-    const out = spaceAddTargets([TAGGED], ["Anywhere/Plain.md"], index, null);
+    const out = spaceAddTargets([TAGGED], ["Anywhere/Plain.md"], index, null, NO_IGNORE);
     expect(out[0]).toMatchObject({ disabled: false, addablePaths: ["Anywhere/Plain.md"] });
   });
 
@@ -154,7 +158,7 @@ describe("spaceAddTargets and tag members", () => {
       exclude: ["Anywhere/Tagged.md"],
       members: [{ kind: "tag", tag: "project" }],
     });
-    const out = spaceAddTargets([excluding], ["Anywhere/Tagged.md"], index, null);
+    const out = spaceAddTargets([excluding], ["Anywhere/Tagged.md"], index, null, NO_IGNORE);
     expect(out[0]).toMatchObject({ disabled: false, addablePaths: ["Anywhere/Tagged.md"] });
   });
 
@@ -168,7 +172,7 @@ describe("spaceAddTargets and tag members", () => {
         return index.pathsMatching(tag);
       },
     };
-    spaceAddTargets([TAGGED], ["a.md", "b.md", "c.md", "d.md"], counting, null);
+    spaceAddTargets([TAGGED], ["a.md", "b.md", "c.md", "d.md"], counting, null, NO_IGNORE);
     expect(lookups).toBe(1);
   });
 });

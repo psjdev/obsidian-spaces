@@ -1,6 +1,7 @@
 import type { SpaceDefinition } from "../types";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
+import type { IgnoreMatcher } from "../visibility/glob";
 import { inheritedFromFolder } from "../definitions/membership";
 import { spaceAddTargets } from "./spaceAddTargets";
 import { submenuFor, type SubmenuLike } from "./nativeMenuSubmenu";
@@ -74,6 +75,15 @@ export interface DecorateContext {
    * once per menu, not per space.
    */
   properties(): PropertyIndex | null;
+  /**
+   * The vault's global ignore, compiled. Asked once per menu, not per space,
+   * so every target is judged against one reading of the settings.
+   *
+   * Required rather than optional for the same reason `tags` is: a tag or
+   * property member does not hold a note the vault hides, so a menu missing
+   * this would offer "already added" for a note no space shows.
+   */
+  ignore(): IgnoreMatcher;
 }
 
 interface DecorateHandlers<T extends FileLike> {
@@ -225,7 +235,8 @@ function addToSpaceEntries<T extends FileLike>(
     spaces,
     files.map((f) => f.path),
     ctx.tags(),
-    ctx.properties()
+    ctx.properties(),
+    ctx.ignore()
   );
   // No targets AFTER filtering means no entry, rather than one that opens onto
   // nothing. Checking `spaces.length` alone is not enough: `spaceAddTargets`
