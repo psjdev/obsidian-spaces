@@ -29,7 +29,10 @@ vi.mock("../src/visibility/glob", async (importOriginal) => {
 
 import { resolveMembers } from "../src/controller/resolveMembers";
 import { tagIndexOf } from "./helpers/tagIndex";
-import { canonicalPath } from "../src/visibility/glob";
+import { canonicalPath, compileIgnore } from "../src/visibility/glob";
+
+/** Nothing is ignored, which is what every case in this file assumes. */
+const NO_IGNORE = compileIgnore([]);
 import type { MemberEntry, SpaceDefinition } from "../src/types";
 
 const spy = vi.mocked(canonicalPath);
@@ -59,7 +62,7 @@ const TAGGED: MemberEntry[] = [{ kind: "tag", tag: "project" }];
 describe("resolveMembers, per matched path", () => {
   it("canonicalises a matched path once, not twice", () => {
     spy.mockClear();
-    const out = resolveMembers(space(TAGGED), tags, null);
+    const out = resolveMembers(space(TAGGED), tags, null, NO_IGNORE);
     expect(out).toHaveLength(3);
     expect(spy).toHaveBeenCalledTimes(3);
   });
@@ -67,7 +70,7 @@ describe("resolveMembers, per matched path", () => {
   it("canonicalises it once when the space does have exclusions", () => {
     spy.mockClear();
     // Three matches plus the one stored exclusion the Set is built from.
-    const out = resolveMembers(space(TAGGED, ["Work/b.md"]), tags, null);
+    const out = resolveMembers(space(TAGGED, ["Work/b.md"]), tags, null, NO_IGNORE);
     expect(out.map((m) => m.path)).toEqual(["Work/a.md", "Work/c.md"]);
     expect(spy).toHaveBeenCalledTimes(4);
   });
@@ -76,14 +79,14 @@ describe("resolveMembers, per matched path", () => {
     // `exclude: []` is stored by the schema's own normalisation and reaches
     // here as often as an absent one, so both must take the fast path.
     spy.mockClear();
-    resolveMembers(space(TAGGED, []), tags, null);
+    resolveMembers(space(TAGGED, []), tags, null, NO_IGNORE);
     expect(spy).toHaveBeenCalledTimes(3);
   });
 });
 
 describe("resolveMembers, unchanged behaviour", () => {
   it("still drops an excluded match spelled in another case", () => {
-    const out = resolveMembers(space(TAGGED, ["work/B.MD"]), tags, null);
+    const out = resolveMembers(space(TAGGED, ["work/B.MD"]), tags, null, NO_IGNORE);
     expect(out.map((m) => m.path)).toEqual(["Work/a.md", "Work/c.md"]);
   });
 
@@ -93,7 +96,8 @@ describe("resolveMembers, unchanged behaviour", () => {
     const out = resolveMembers(
       space([{ kind: "file", path: "Loose.md" }], ["Loose.md"]),
       tags,
-      null
+      null,
+      NO_IGNORE
     );
     expect(out).toEqual([{ kind: "file", path: "Loose.md" }]);
   });
@@ -102,13 +106,14 @@ describe("resolveMembers, unchanged behaviour", () => {
     const out = resolveMembers(
       space([...TAGGED, { kind: "file", path: "work/a.md" }]),
       tags,
-      null
+      null,
+      NO_IGNORE
     );
     expect(out).toHaveLength(3);
   });
 
   it("still returns a space with no tag members unchanged", () => {
     const s = space([{ kind: "folder", path: "Work" }]);
-    expect(resolveMembers(s, tags, null)).toEqual([{ kind: "folder", path: "Work" }]);
+    expect(resolveMembers(s, tags, null, NO_IGNORE)).toEqual([{ kind: "folder", path: "Work" }]);
   });
 });

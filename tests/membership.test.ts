@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
+import { compileIgnore } from "../src/visibility/glob";
 import {
   decorate,
   type DecorateContext,
@@ -9,6 +10,9 @@ import {
   type VisibilityDecisionLike,
 } from "../src/actions/membershipMenu";
 import type { SpaceDefinition } from "../src/types";
+
+/** Nothing is ignored, which is what every case in this file assumes. */
+const NO_IGNORE = compileIgnore([]);
 
 /** No note in this fake vault carries a tag; these cases are all about paths. */
 const noTags = createMapTagIndex(new Map());
@@ -110,6 +114,7 @@ function ctxWith(
     spaces: () => (s ? [s] : []),
     tags: () => noTags,
     properties: () => null,
+    ignore: () => NO_IGNORE,
   };
 }
 
@@ -327,6 +332,7 @@ function allCtx(spaces: SpaceDefinition[]) {
     spaces: () => spaces,
     tags: () => noTags,
     properties: () => null,
+    ignore: () => NO_IGNORE,
   };
 }
 

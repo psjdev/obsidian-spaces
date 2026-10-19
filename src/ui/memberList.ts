@@ -17,6 +17,7 @@ import type { TagIndex } from "../visibility/TagIndex";
 import { resolveMembers } from "../controller/resolveMembers";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { memberIdentity } from "../definitions/schema";
+import type { IgnoreMatcher } from "../visibility/glob";
 import type { MemberEntry, MemberKind, PropertyMember, SpaceDefinition } from "../types";
 import { valueLabel } from "./propertyRows";
 
@@ -79,10 +80,10 @@ export interface PropertyMemberRow {
   status: "present" | "matches-nothing";
   /**
    * The distinct notes this member contributes to THIS space after the
-   * space's exclusions, counted whether or not another member also brings them
-   * in. NOT filtered by the global ignore, because the tree does not filter a
-   * seed either (see `propertyMemberCount`). Scaffold folders are never
-   * counted.
+   * space's exclusions AND after the global ignore, counted whether or not
+   * another member also brings them in — the same two filters the tree
+   * applies to a rule member (see `propertyMemberCount`). Scaffold folders
+   * are never counted.
    *
    * NULL IS NOT ZERO and must never be drawn as one. It means the count is
    * unavailable: the caller did not count, or no property index has ever been
@@ -107,34 +108,48 @@ const NO_TAGS: TagIndex = { pathsMatching: () => [] };
  * counts, and a note this space excludes does not, even though the tree shows
  * it through that file member.
  *
- * NOT FILTERED BY THE GLOBAL IGNORE, on purpose. A property match arrives as a
- * seed, and `includedPaths` says "seeds bypass globalIgnore entirely": the
- * ignore applies only to descendants inherited from a folder seed. The tree
- * shows an ignored note a property member matches, so a count that dropped it
- * would omit a row the user can see. Tag members behave the same. It follows
- * that a has-the-key member can pull notes out of an ignored folder; that is
- * the existing behavior for every member kind. Do not add the filter back.
+ * FILTERED BY THE GLOBAL IGNORE, because the tree now filters one too. A
+ * property member names a RULE, and `expandMembers` drops a rule's match that
+ * the vault hides, so a count that kept it would promise a row the user
+ * cannot see. The precedence this does NOT apply is the other half of the
+ * same rule: a note the space also names by hand is shown, and is counted,
+ * because `expandMembers` takes it for the hand-added member.
  *
- * THAT IS GUARANTEED BY CONSTRUCTION, NOT BY A TEST: this function,
- * `PropertyIndex`, `ObsidianPropertyIndex` and `resolveMembers` have no
- * ignore surface, so no test here can observe one. Three edits would break it
- * without failing a test:
- *  1. Pre-filtering entries before `createPropertyIndex`. An ignore-aware
- *     index still type-checks, and the count would inherit it.
- *  2. Adding an ignore parameter to `resolveMembers`. The sharing test follows
- *     the resolver, so it stays green while the count changes.
- *  3. Post-filtering the result inside this function.
- * Any of the three makes the count omit notes the tree shows.
+ * This read "NOT FILTERED BY THE GLOBAL IGNORE, on purpose" until issue #41,
+ * and warned that adding an ignore parameter to `resolveMembers` would make
+ * the count silently disagree with the tree. That warning is why the
+ * parameter is REQUIRED and has no default: there is no spelling of this call
+ * that still compiles while skipping the filter, so the two cannot drift
+ * apart again.
  *
  * Null when `index` is null, which is "unavailable", not zero.
  */
 export function propertyMemberCount(
   member: PropertyMember,
   index: PropertyIndex | null,
-  space: SpaceDefinition
+  space: SpaceDefinition,
+  ignore: IgnoreMatcher
 ): number | null {
   if (index === null) return null;
-  return resolveMembers({ ...space, members: [member] }, NO_TAGS, index).length;
+  return resolveMembers({ ...space, members: [member] }, NO_TAGS, index, ignore).length;
+}
+
+/**
+ * How many notes a tag member contributes.
+ *
+ * The tag half of `propertyMemberCount`, and deliberately not the same
+ * function. This one does NOT apply the space's exclusions, which is what the
+ * dialog has always done for a tag row; only the global ignore is applied,
+ * because that is what changed under issue #41 and a tag count that kept an
+ * ignored note would name notes the tree does not draw.
+ *
+ * Pure and exported so the rule is testable in plain node, rather than living
+ * in a closure inside the dialog where no test can reach it.
+ */
+export function tagMemberCount(tag: string, tags: TagIndex, ignore: IgnoreMatcher): number {
+  let n = 0;
+  for (const path of tags.pathsMatching(tag)) if (!ignore.matches(path)) n += 1;
+  return n;
 }
 
 /**

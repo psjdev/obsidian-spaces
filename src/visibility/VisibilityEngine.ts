@@ -68,6 +68,16 @@ export function buildVisibilitySnapshot(
 
   // 4. ancestor closure, regardless of ignore rules.
   //
+  // "Regardless" STAYS, and issue #41 is what made it easy to defend. An
+  // ignored folder can now only reach `scaffold` on behalf of a hand-picked
+  // note inside it: a rule member's match is dropped before it is a seed, and
+  // a folder seed's descendants were already dropped by step 2, so every
+  // remaining ignored path in `included` is one the user pointed at. Drawing
+  // the chain down to it is the only way that note is reachable in the tree,
+  // and hiding the chain would hide the note while still claiming it is a
+  // member. A scaffold folder whose only reason to exist was an ignored note
+  // the user did NOT point at no longer arises.
+  //
   // Climbs once per DISTINCT directory instead of once per included path.
   // `ancestorsOf` rebuilds the whole chain from scratch for every path, with a
   // `split` and then a `slice` and a `join` per level, so siblings recompute

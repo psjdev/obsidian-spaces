@@ -17,7 +17,7 @@
  */
 
 import type { MemberEntry, PathMember, SpaceDefinition } from "../types";
-import { canonicalPath } from "../visibility/glob";
+import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
 import { ancestorsOf, type VaultIndex } from "../visibility/VaultIndex";
 import { resolveLivePath } from "../visibility/resolveLivePath";
 import { hasRoot } from "../visibility/folderSpace";
@@ -249,9 +249,14 @@ export function resolvedPaths(
   tags: TagIndex,
   // `null` when no property snapshot is ready: a property member then
   // contributes nothing here, so a note it would have held reads as not held.
-  properties: PropertyIndex | null
+  properties: PropertyIndex | null,
+  // The vault's global ignore. A tag or property member does not hold a note
+  // the vault hides, so neither does this: without it, "Add to space" would
+  // report "already added" for a note the space does not show and leave the
+  // user no way to put it there.
+  ignore: IgnoreMatcher
 ): Set<string> {
-  return new Set(resolveMembers(space, tags, properties).map((m) => canonicalPath(m.path)));
+  return new Set(resolveMembers(space, tags, properties, ignore).map((m) => canonicalPath(m.path)));
 }
 
 /**

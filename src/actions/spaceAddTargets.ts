@@ -18,6 +18,7 @@ import type { SpaceDefinition } from "../types";
 import { heldBy, holdsPropertyMember, resolvedPaths } from "../definitions/membership";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
+import type { IgnoreMatcher } from "../visibility/glob";
 import { isFolderSpace } from "../visibility/folderSpace";
 
 interface SpaceAddTarget {
@@ -50,7 +51,10 @@ export function spaceAddTargets(
   // space, so every space is judged against one picture. `null` means not ready,
   // which for a space holding a property member means UNKNOWN, not "holds
   // nothing": such a space is not offered, see below.
-  properties: PropertyIndex | null
+  properties: PropertyIndex | null,
+  // Read once by the caller, like the two indexes above, and shared by every
+  // space here so none of them is judged against a different vault.
+  ignore: IgnoreMatcher
 ): SpaceAddTarget[] {
   // Folder spaces are not targets: adding a path from elsewhere would mean
   // moving the file, and a space operation must never mutate the vault. A
@@ -72,7 +76,7 @@ export function spaceAddTargets(
         addablePaths: [],
       };
     }
-    const resolved = resolvedPaths(space, tags, properties);
+    const resolved = resolvedPaths(space, tags, properties, ignore);
     const addablePaths: string[] = [];
     let sharedFolder: string | null = null;
     for (const path of paths) {

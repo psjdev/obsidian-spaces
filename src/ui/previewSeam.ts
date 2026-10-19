@@ -71,7 +71,7 @@ export function buildPreview(
     // would count 2 here where a recompute, which keeps the first spelling,
     // counts 1. Exclusions drop a tag or property match and never a
     // hand-picked path, which is the expansion's precedence and not this
-    // seam's to choose.
+    // seam's to choose, and the global ignore drops one on the same terms.
     const seeds: string[] = [];
     expandMembers(
       members,
@@ -80,6 +80,10 @@ export function buildPreview(
       // Null rather than an empty Set for the common case, the same fast path
       // `resolveMembers` takes.
       excluded.size === 0 ? null : excluded,
+      // The same matcher `includedPaths` is handed below. A tag or property
+      // match the vault hides is dropped during the expansion, so the number
+      // under the picker counts what the space will actually show.
+      ignore,
       (m) => seeds.push(m.path)
     );
     const { included } = includedPaths(vault, seeds, ignore, excluded);

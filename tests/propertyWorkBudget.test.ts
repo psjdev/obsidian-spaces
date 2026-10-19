@@ -19,6 +19,7 @@ import { createObsidianTagIndex } from "../src/visibility/ObsidianTagIndex";
 import { createLazyTagIndex, createMapTagIndex, type TagIndex } from "../src/visibility/TagIndex";
 import { createPropertyIndex, type PropertySnapshot } from "../src/visibility/PropertyIndex";
 import { normalizeValue } from "../src/visibility/propertyValues";
+import { compileIgnore } from "../src/visibility/glob";
 
 /**
  * THE WORK BUDGET OF PROPERTY MEMBERS, as counts.
@@ -232,7 +233,7 @@ function fakePlugin(
       const snap = properties();
       index = snap.status === "ready" ? snap.index : null;
     }
-    members = resolveMembers(active, tags, index);
+    members = resolveMembers(active, tags, index, compileIgnore([]));
   };
 
   // The REAL tag index, lazy as in main.ts: a listing plus a `getFileCache`
@@ -580,7 +581,12 @@ describe("budget 4: a space naming one key pays for one key", () => {
   it("a key-only member normalizes nothing", () => {
     const idx = index();
     vi.mocked(normalizeValue).mockClear();
-    resolveMembers(space([{ kind: "property", key: "status" }]), createMapTagIndex(new Map()), idx);
+    resolveMembers(
+      space([{ kind: "property", key: "status" }]),
+      createMapTagIndex(new Map()),
+      idx,
+      compileIgnore([])
+    );
     expect(vi.mocked(normalizeValue)).not.toHaveBeenCalled();
   });
 
@@ -590,7 +596,8 @@ describe("budget 4: a space naming one key pays for one key", () => {
     const out = resolveMembers(
       space([{ kind: "property", key: "status", value: "done" }]),
       createMapTagIndex(new Map()),
-      idx
+      idx,
+      compileIgnore([])
     );
     expect(out.length).toBe(167);
     // 500 notes carry `status`, and the query is one more. Expanding every key
@@ -601,7 +608,8 @@ describe("budget 4: a space naming one key pays for one key", () => {
     resolveMembers(
       space([{ kind: "property", key: "status", value: "active" }]),
       createMapTagIndex(new Map()),
-      idx
+      idx,
+      compileIgnore([])
     );
     expect(vi.mocked(normalizeValue)).toHaveBeenCalledTimes(1);
   });

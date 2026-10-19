@@ -155,7 +155,7 @@ describe("the create panel's preview runs the engine's own resolution", () => {
     const got = buildPreview(vault, ignore, tags, () => index, excluded)(members);
     const want = includedPaths(
       vault,
-      resolveMembers(space, tags, index).map((m) => m.path),
+      resolveMembers(space, tags, index, ignore).map((m) => m.path),
       ignore,
       excluded
     ).included;
