@@ -56,9 +56,23 @@ import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
  * nothing measurable", which did not reproduce.
  *
  * The 0.9 ms at three patterns is about 240 ns per PATH — all three regex
- * tests together, not 240 ns per test. Measured again at the supported cap of
- * `MAX_PATTERNS`, the cost is linear in the pattern count and has no cliff:
- * about 15 ms for 100 patterns over the same 3,785 paths, once per recompute.
+ * tests together, not 240 ns per test.
+ *
+ * SHAPE COSTS MORE THAN COUNT, and quoting a count alone was misleading. The
+ * cost is linear in the number of patterns for any one shape, with no cliff,
+ * but the constant differs by more than ten times between shapes. Over the
+ * same 3,785 paths, once per recompute:
+ *
+ *   patterns      prefix shape      leading `**` shape
+ *         10            0.8 ms                7.1 ms
+ *         25            2.0 ms               23.4 ms
+ *        100           14.1 ms              175.5 ms
+ *
+ * A LEADING `**` is the expensive one, because `(?:[^/]+/)*` makes the engine
+ * try every segment split from the left. It is also the shape the README
+ * teaches, so it is the one to assume. Rewriting it unanchored was measured
+ * at only 1.4x to 2x, which is not worth changing a shared compiler for; the
+ * cost is recorded rather than hidden.
  *
  * There is no cheaper place to put the filter: doing it later, in
  * `includedPaths`, would mean carrying an origin on every seed — an object

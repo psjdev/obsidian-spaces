@@ -70,9 +70,9 @@
  * provisional. See `stallCleared`.
  *
  * Bounded above by the outage it is sitting through: while this waits, a
- * property space shows the whole vault. Three samples at 5 s is a 15-second
+ * property space shows the whole vault. Seven samples at 5 s is a 35-second
  * worst case before the notice, against an outage that otherwise lasts as long
- * as the offending file is in the vault — measured across two restarts, so
+ * as the offending note is in the vault — measured across two restarts, so
  * vault-length and not session-length.
  *
  * The interval is how OFTEN the counter is read; how many readings must agree
@@ -89,9 +89,18 @@ export const PROPERTY_STALL_SAMPLE_MS = 5_000;
  * merely busy — tolerable when the accusation was silent, not now that it is
  * a notice telling somebody to take a note out of their vault.
  *
- * Thirty seconds clears the measured plateau with half as long again to
- * spare. The cost is a notice that arrives thirty seconds into an outage that
- * lasts for hours, which is no cost at all.
+ * Thirty seconds of stillness clears the measured plateau with half as long
+ * again to spare. Measured from `arm()` the notice therefore lands at about
+ * 35 s, against an outage that lasts for hours, which is no cost at all.
+ *
+ * WHAT IT DOES COST, said here because nothing else records it: the window in
+ * which the one notice can be missed is three times longer than it was.
+ * `reportParseStall` says nothing unless a property space is active or a
+ * picker is open, `onStalled` fires only on the transition, and the latch
+ * survives, so a notice not shown is not retried for that jam. Somebody who
+ * leaves the property space during those 35 seconds and comes back is told
+ * nothing. Raising the threshold made that more likely, and it was still the
+ * right trade: the alternative was accusing healthy vaults.
  */
 export const PROPERTY_STALL_SAMPLES_AGREED = 7;
 
@@ -142,9 +151,10 @@ export function stallVerdict(samples: readonly (number | null)[]): StallVerdict 
  * A latch is a verdict about a moment, not about the session, and the project's
  * own control run shows a healthy vault can earn one: `jam-questions-report.md`
  * records `inProgressTaskCount` holding still for twenty seconds in a run that
- * completed in 27.4 s, which is longer than the two intervals this file latches
- * on. So a wrong verdict has to be able to cost ONE notice rather than the rest
- * of the session.
+ * completed in 27.4 s. That plateau is what set the threshold: six intervals,
+ * thirty seconds, deliberately longer than it. The margin is fifty per cent,
+ * not an order of magnitude, so a wrong verdict still has to be able to cost
+ * ONE notice rather than the rest of the session.
  *
  * Exactly two readings contradict "the counter has stopped": one that has
  * reached ZERO, and one that is LOWER than the reading before it. Everything
@@ -194,8 +204,9 @@ export interface ParseStallWatch {
    * Whether the samples currently say Obsidian has stopped.
    *
    * Latched but NOT permanent: sampling continues past a latch, and a counter
-   * that moves or reaches zero clears it. A wrong verdict therefore costs one
-   * notice rather than the rest of the session.
+   * that FALLS or reaches zero clears it. A rising counter does not — on a
+   * jammed vault the queue only grows. See `stallCleared`. A wrong verdict
+   * therefore costs one notice rather than the rest of the session.
    */
   stalled(): boolean;
   /** Drop any pending sample so no timer outlives the plugin. */

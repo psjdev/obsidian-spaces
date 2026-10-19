@@ -12,7 +12,7 @@ export interface PropertyEntry {
  * files Obsidian has not parsed.
  *
  * Exposed as a value rather than folded straight into a snapshot because the
- * the caller needs both halves. Re-deriving the entries after a second pass would
+ * caller needs both halves. Re-deriving the entries after a second pass would
  * mean walking twice and merging two different pictures of the vault; handing
  * the walk over means a later snapshot can be THE SAME WALK with its holes
  * filled in.

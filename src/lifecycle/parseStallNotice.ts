@@ -27,39 +27,47 @@
  *
  * ## Which note gets named
  *
- * The FIRST path, in the vault's own listing order, which is the order
- * `walkPropertyCache` collects them in. Measured on a jammed vault: the
- * unparsed set is a run of the vault walk starting at the offending note, so
- * the first entry is the one at the head of the queue. It is the best
- * available guess rather than a guarantee, which is why the wording says it is
- * first in the queue rather than that it is the cause.
+ * THE LARGEST of the unparsed ones, not the first.
+ *
+ * It used to be the first in vault listing order, on the reasoning that the
+ * unparsed set is a run of the vault walk starting at the offending note. A
+ * real Obsidian disproved that: on a 33 MB jammed vault the first unparsed
+ * path was `note-019.md`, sixty bytes long, and the notice told the user to
+ * move or split it. `getMarkdownFiles()` order is not the parse queue's
+ * order, and acting on that advice would have done nothing except cost
+ * somebody a note.
+ *
+ * Size is a far better guess, because the cost that causes this is
+ * superlinear in the length of the note: a note big enough to stall the queue
+ * is essentially always the biggest thing in the unparsed set. It is still a
+ * guess, which is why the wording says it is the largest rather than that it
+ * is the cause.
  */
 
 /**
  * The message, or `null` when there is nothing to report.
  *
- * `null` for an empty list so the caller has one thing to test. An unavailable
- * snapshot with no unparsed paths is a real state and means "nobody has
- * walked yet", which is not worth interrupting anyone over.
+ * `count` is how many notes are unparsed and `culprit` is the largest of
+ * them; the caller picks it, because sizes come from the vault and this
+ * stays pure. A count of zero reports nothing: an unavailable snapshot with
+ * nothing unparsed means "nobody has walked yet", which is not worth
+ * interrupting anyone over.
  */
-export function parseStallMessage(unparsed: readonly string[]): string | null {
-  const first = unparsed[0];
-  if (first === undefined) return null;
+export function parseStallMessage(count: number, culprit: string): string | null {
+  if (count <= 0 || culprit === "") return null;
   // CONDITIONAL, not an order. Thirty seconds of a motionless queue is strong
   // evidence and not proof, and the thing being asked for is destructive: a
   // person who takes a healthy note out of their vault because of this has
-  // been actively harmed by a guess. "If it stays that way" costs five words
-  // and makes the advice safe to be wrong about.
+  // been actively harmed by a guess.
   const tail = "If it stays that way, move that note out of the vault or split it into smaller notes.";
-  if (unparsed.length === 1) {
+  if (count === 1) {
     return (
-      `Spaces: Obsidian is still reading "${first}", so spaces that collect ` +
+      `Spaces: Obsidian is still reading "${culprit}", so spaces that collect ` +
       `notes by a property are incomplete. ${tail}`
     );
   }
   return (
-    `Spaces: Obsidian is still reading ${unparsed.length} notes, so spaces ` +
-    `that collect notes by a property are incomplete. "${first}" is first in ` +
-    `line. ${tail}`
+    `Spaces: Obsidian is still reading ${count} notes, so spaces that collect ` +
+    `notes by a property are incomplete. The largest is "${culprit}". ${tail}`
   );
 }

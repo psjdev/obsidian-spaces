@@ -720,6 +720,25 @@ export default class SpacesPlugin extends Plugin {
   }
 
   private startSteps(): void {
+    // ARM THE STALL WATCHER HERE TOO, not only from the `resolved` listener.
+    //
+    // That listener is registered in `onload` and `resolved` fires once on a
+    // jammed vault and never again. So if our `onload` lands AFTER it — which
+    // is every time somebody enables or reloads the plugin on a vault that is
+    // already jammed, and measurably some ordinary startups too — nothing ever
+    // arms the watcher, nothing ever latches, and the notice cannot fire in
+    // the one situation it exists for.
+    //
+    // MEASURED: on a 33 MB jammed vault the watcher stayed unarmed for a full
+    // minute with a property space active, and the only runs that produced a
+    // notice were ones where the PROBE happened to ask for the property index
+    // on a timer. The product was relying on somebody else's curiosity.
+    //
+    // Gated on a property member existing, so budget 2 in
+    // `tests/propertyWorkBudget.test.ts` still holds: a vault with no property
+    // space arms nothing and pays nothing. `arm()` is a no-op while already
+    // sampling, so doing this as well as the listener costs nothing twice.
+    if (this.defs.get().spaces.some(holdsPropertyMember)) this.parseStall.arm();
     this.adapter.onHealthChange((healthy) => {
       if (healthy) {
         this.explorerHealthWarned = false;
@@ -1577,12 +1596,14 @@ export default class SpacesPlugin extends Plugin {
    * Re-walking after the async read instead would merge two different pictures
    * of the vault.
    *
-   * THE REPAIR IS DEMAND-DRIVEN, and that is what keeps it free. It is asked
-   * for only from inside this build — which runs only when a property member
-   * or an open picker actually asks a question — so a vault with neither pays
-   * nothing, exactly as budget 2 in `tests/propertyWorkBudget.test.ts` states.
-   * It is also what makes the repair reach a user who switches into a property
-   * space ten minutes into a jammed session, with no extra wiring for it.
+   * THE WALK IS DEMAND-DRIVEN, and that is what keeps it free. It runs only
+   * when a property member or an open picker actually asks a question, so a
+   * vault with neither pays nothing, exactly as budget 2 in
+   * `tests/propertyWorkBudget.test.ts` states.
+   *
+   * Which is also why `reportParseStall` asks for itself rather than relying
+   * on this: demand-driven means there may be no demand, and on a jammed
+   * vault there often is not.
    */
   private newPropertySnapshot(): () => PropertySnapshot {
     const generation = ++this.propertyGeneration;
@@ -1644,7 +1665,40 @@ export default class SpacesPlugin extends Plugin {
     const space = this.controller.activeSpace();
     const resolvesProperties = space !== null && !hasRoot(space) && holdsPropertyMember(space);
     if (!resolvesProperties && this.propertyRefresh.size === 0) return;
-    const message = parseStallMessage(this.propertyUnparsed);
+    // ASK ONCE, HERE, rather than hoping somebody else already did.
+    //
+    // `propertyUnparsed` is recorded by the snapshot accessor, and the
+    // accessor only runs when something asks for properties. On a jammed
+    // vault that ask can simply never happen: `SpaceController.stillReading`
+    // returns early on `metadataReady() === false` WITHOUT calling the
+    // accessor, and `metadataResolved` stays false for the whole session when
+    // the plugin's `onload` lands after `resolved` has already fired — which
+    // on a jammed vault is +167 ms in, and before `layoutReady`.
+    //
+    // MEASURED, not reasoned: in a real Obsidian on a 33 MB jammed vault,
+    // three runs in five produced no notice at all for this reason, and the
+    // two that worked only did so because the probe itself was reading the
+    // property index on a timer. The feature was silent in exactly the
+    // situation it exists for.
+    //
+    // One walk, only once a stall has latched, and only for somebody who
+    // resolves property members. `drawnPropertyIndex` is the controller's own
+    // way of asking, so this takes the same path a recompute would.
+    if (this.propertyUnparsed.length === 0) this.controller.drawnPropertyIndex();
+    // The LARGEST unparsed note, not the first one listed. See
+    // `lifecycle/parseStallNotice.ts` for why the first one was wrong advice.
+    // One pass, only after a stall has latched, over at most the vault.
+    let culprit = "";
+    let biggest = -1;
+    for (const path of this.propertyUnparsed) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      const size = file instanceof TFile ? file.stat.size : 0;
+      if (size > biggest) {
+        biggest = size;
+        culprit = path;
+      }
+    }
+    const message = parseStallMessage(this.propertyUnparsed.length, culprit);
     // 15 s, not the ~5 s default. The message carries a vault path the reader
     // has to find, and advice they have to weigh; the default clears before a
     // slow reader has finished the first sentence.

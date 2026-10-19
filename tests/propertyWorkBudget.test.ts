@@ -56,12 +56,11 @@ import { compileIgnore } from "../src/visibility/glob";
  * real controller skips the recompute while the cache is cold and the space
  * watches metadata; the cold cases below are therefore an upper bound.
  *
- * WHAT THE MIRROR CANNOT SEE, SAID PLAINLY. It has no stall watcher, no
- * no stall handling and no stall-driven `refresh`, so NONE of that work is
- * counted anywhere in this file. That budget was stated and
- * asserted against the real plugin methods instead, in
- * the removed repair wiring test, under "the cost of a repair that cannot
- * close its holes". Counting it here would need the plugin class and so an
+ * WHAT THE MIRROR CANNOT SEE, SAID PLAINLY. It has no stall watcher and no
+ * stall handling, so NONE of that work is counted anywhere in this file. That
+ * budget is asserted against the real plugin methods instead, in
+ * `tests/parseStallWiring.test.ts`. Counting it here would need the plugin
+ * class and so an
  * Obsidian runtime, which is the reason the mirror exists at all.
  *
  * ONE-SIZE COUNTS CANNOT SEE A CONSTANT FACTOR. A count is the same on every

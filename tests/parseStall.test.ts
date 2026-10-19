@@ -1,6 +1,6 @@
 /**
  * The trigger. The one piece of this feature that can do real harm if it is
- * wrong, because at cold start EVERY file is unparsed and a repair that fired
+ * wrong, because at cold start EVERY file is unparsed and a notice that fired
  * then would read the whole vault off disk on every launch.
  *
  * Both halves are tested from the outside: the verdict as a pure function of
@@ -37,7 +37,7 @@ const manualTimer = () => {
      * Steps time forward, firing each due timer AT its own moment — so a
      * callback that schedules the next sample gets to run again inside one
      * `advance`. A clock that jumped straight to the target and swept once
-     * would deliver one sample per call, and every "three samples" assertion
+     * would deliver one sample per call, and every full-window assertion
      * below would be asserting the opposite of what it says.
      */
     advance(ms: number) {
@@ -107,7 +107,7 @@ describe("stallVerdict", () => {
 
   it("is unknown, never stalled, when a reading is missing", () => {
     // A future Obsidian without `inProgressTaskCount` reads null. Treating
-    // that as "unchanged" would repair on every launch, which is the exact
+    // that as "unchanged" would accuse the vault on every launch, which is the exact
     // failure this file exists to prevent.
     expect(stallVerdict([null])).toBe("unknown");
     expect(stallVerdict([...Array(PROPERTY_STALL_SAMPLES_AGREED - 1).fill(11), null])).toBe(
@@ -200,7 +200,7 @@ describe("the watcher", () => {
     // The latch used to be permanent, and the project's own control run shows a
     // HEALTHY vault can earn one: `inProgressTaskCount` held still for twenty
     // seconds in a run that finished in 27.4 s. A wrong verdict has to cost one
-    // repair, not the session.
+    // notice, not the session.
     let count = 11;
     const { clock, onStalled, watch } = watcher(() => count);
     watch.arm();
@@ -227,7 +227,7 @@ describe("the watcher", () => {
   });
 
   it("earns a SECOND verdict, and a second callback, after one is taken back", () => {
-    // One repair per verdict, not one per session. `main.ts` hangs the
+    // One notice per verdict, not one per session. `main.ts` hangs the
     // clearing of its own "we tried these and got nowhere" memory off exactly
     // this second callback.
     let count = 11;
@@ -366,7 +366,7 @@ describe("nativeParseProgress", () => {
 
   it("is null for every shape it does not recognise", () => {
     // Fail-open: null is "this build cannot say", and `stallVerdict` turns
-    // that into "unknown", which repairs nothing.
+    // that into "unknown", which says nothing.
     expect(nativeParseProgress(app({}))).toBeNull();
     expect(nativeParseProgress(app({ inProgressTaskCount: "11" }))).toBeNull();
     expect(nativeParseProgress(app({ inProgressTaskCount: NaN }))).toBeNull();
