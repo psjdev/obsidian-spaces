@@ -412,7 +412,8 @@ export class SpacesSettingTab extends PluginSettingTab {
             name: "Ignored paths",
             desc: this.describe(
               "One glob per line. Supports * within a segment and ** across segments. " +
-                "Hidden in every space; an explicit member overrides this.",
+                "Hidden in every space, including notes collected by a tag or a property. " +
+                "A note you add to a space by hand is still shown.",
               (host) => {
                 this.renderIgnoreWarning(host);
               }

@@ -17,7 +17,7 @@ describe("the parse stall message", () => {
     expect(message).toContain('"Logs/export.md"');
     // The singular form must not claim a queue position it cannot know, and
     // must not read as though more notes are involved.
-    expect(message).not.toContain("first in the queue");
+    expect(message).not.toContain("first in line");
     expect(message).not.toContain("notes,");
   });
 
@@ -25,7 +25,7 @@ describe("the parse stall message", () => {
     const message = parseStallMessage(["a.md", "b.md", "c.md"]);
     expect(message).toContain("3 notes");
     expect(message).toContain('"a.md"');
-    expect(message).toContain("first in the queue");
+    expect(message).toContain("first in line");
     // The ones behind it are not named: the list can be the whole vault, and
     // the only one worth acting on is the one at the head.
     expect(message).not.toContain("b.md");
@@ -35,9 +35,12 @@ describe("the parse stall message", () => {
   it("tells the reader what to do about it", () => {
     // Not decoration. A notice naming a file without saying what to do with
     // it leaves someone with a problem they cannot act on, which is the whole
-    // reason this replaced a silent repair.
+    // reason this replaced a silent repair. Conditional, though: see the
+    // source. Being wrong here costs somebody a note.
     for (const paths of [["one.md"], ["one.md", "two.md"]]) {
-      expect(parseStallMessage(paths)).toContain("Move or split that note.");
+      expect(parseStallMessage(paths)).toContain(
+        "move that note out of the vault or split it into smaller notes."
+      );
     }
   });
 

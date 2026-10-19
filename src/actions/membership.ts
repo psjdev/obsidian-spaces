@@ -290,9 +290,11 @@ export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFil
     // none pays no metadata walk for opening a context menu.
     properties: (): PropertyIndex | null =>
       ctx.defs.get().spaces.some(holdsPropertyMember) ? ctx.controller.drawnPropertyIndex() : null,
-    // Compiled at most once per menu, and only if a space is actually
-    // offered as a target: `compileIgnore` builds a RegExp per pattern, and
-    // opening a context menu must not pay for that when nothing asks.
+    // Compiled at most once per menu. NOT "only if a space is offered": this
+    // is an argument to `spaceAddTargets`, so it is evaluated before the
+    // empty-targets guard can return, and an earlier version of this comment
+    // claimed otherwise. `compileIgnore` builds a RegExp per pattern, which
+    // is why it is a function at all rather than a value on the context.
     ignore: (): IgnoreMatcher => ignoreFor(ctx),
   };
   decorateMenu(menu, decorateCtx, files, {

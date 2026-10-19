@@ -43,20 +43,26 @@ import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
  *
  * Issue #41 put one thing BACK on that tail: an `ignore.matches` per path a
  * rule member reaches. Measured on the same 3,785 match expansion, with each
- * variant run interleaved so machine drift hits all of them equally:
+ * variant run interleaved so machine drift hits all of them equally. Two
+ * people measured it on different machines and got different absolute
+ * numbers, which is why the DELTA is what is quoted and not the floor:
  *
- *  - no ignore test at all (what shipped):     0.95 ms
- *  - an EMPTY `globalIgnore`:                  0.95 ms
- *  - three patterns:                           1.85 ms
+ *  - an EMPTY `globalIgnore`, against no ignore test at all:  +5 to 10%
+ *  - three patterns, against no ignore test at all:           about +0.9 ms
  *
- * So the usual vault, which ignores nothing, pays nothing measurable: the
- * matcher's pattern list is empty and the call returns on the first compare.
- * A vault with three patterns pays about 0.9 ms per recompute of a space
- * that size, which is three anchored regex tests per path and roughly
- * 240 ns each. That is the price of the filter and there is no cheaper place
- * to put it: doing it later, in `includedPaths`, would mean carrying an
- * origin on every seed — an object allocation per matched path, which is
- * strictly more than one regex test.
+ * An empty ignore is therefore CHEAP, not free: `matches()` is still a call
+ * per path and still allocates the closure `[].some` takes, even with nothing
+ * to compare against. An earlier version of this comment said it "pays
+ * nothing measurable", which did not reproduce.
+ *
+ * The 0.9 ms at three patterns is about 240 ns per PATH — all three regex
+ * tests together, not 240 ns per test. Measured again at the supported cap of
+ * `MAX_PATTERNS`, the cost is linear in the pattern count and has no cliff:
+ * about 15 ms for 100 patterns over the same 3,785 paths, once per recompute.
+ *
+ * There is no cheaper place to put the filter: doing it later, in
+ * `includedPaths`, would mean carrying an origin on every seed — an object
+ * allocation per matched path, which is strictly more than one regex test.
  */
 export function resolveMembers(
   space: SpaceDefinition,
@@ -153,10 +159,12 @@ export const MEMBER_NAMING: Record<MemberEntry["kind"], MemberNaming> = {
  * ## Both filters live in `take`, under one flag
  *
  * `MEMBER_NAMING` answers, per member, whether its paths are filtered at all,
- * and `take` is the only way a path leaves this function. A later member kind
- * therefore cannot slip past either filter by writing its own loop: it has no
- * other way to emit a path, and it cannot be written at all until
- * `MEMBER_NAMING` has a key for it.
+ * and `take` applies both filters under that answer. The per-kind cases live
+ * in `expandOne` below, which is handed `take` and NOT the raw `add` sink, so
+ * a later member kind cannot slip past either filter: there is no other sink
+ * in its scope, and it cannot be written at all until `MEMBER_NAMING` has a
+ * key for it. Both halves are compile errors, not conventions — see
+ * `expandOne`'s own docblock for what went wrong when only one of them was.
  *
  * A filtered path is NOT marked seen, exactly as the per-case `continue` it
  * replaced did not. That is what makes the precedence order-free: a note that
@@ -198,40 +206,80 @@ export function expandMembers(
     seen.add(key);
     add(m, key);
   };
+  // Asked at most once across every member, and only when a property member
+  // is actually reached. `undefined` is the only "not asked yet"; a `null`
+  // answer is remembered too, or each further property member asks again.
   let index: PropertyIndex | null | undefined;
+  const propertyIndex = (): PropertyIndex | null => {
+    if (index === undefined) index = properties();
+    return index;
+  };
 
   for (const m of members) {
     // Missing key here = compile error. See `MEMBER_NAMING`.
     naming = MEMBER_NAMING[m.kind];
-    switch (m.kind) {
-      case "file":
-      case "folder":
-        // A hand picked member is never dropped by an exclusion or by the
-        // global ignore. Removing one removes the member.
-        take(m, canonicalPath(m.path));
-        break;
-      case "tag":
-        for (const path of tags.pathsMatching(m.tag)) {
-          take({ kind: "file", path }, canonicalPath(path));
-        }
-        break;
-      case "property": {
-        if (index === undefined) index = properties();
-        if (index === null) break;
-        const matched =
-          m.value === undefined ? index.pathsWithKey(m.key) : index.pathsMatching(m.key, m.value);
-        for (const path of matched) {
-          take({ kind: "file", path }, canonicalPath(path));
-        }
-        break;
+    expandOne(m, take, tags, propertyIndex);
+  }
+}
+
+/**
+ * One member, turned into the paths it names.
+ *
+ * ## Why this is a separate function
+ *
+ * **So that `take` is the only way out, by construction rather than by
+ * convention.** This used to be the body of the loop in `expandMembers`,
+ * where `add` — the raw, unfiltered sink — was a parameter in scope. Nothing
+ * stopped a future `case` from calling it directly and skipping the
+ * de-duplication, the space's exclusions and the global ignore, and nothing
+ * would have complained: a reviewer proved it by adding a member kind whose
+ * case called `add`, and `tsc` reported no error at all. The docblock
+ * claiming a later kind "has no other way to emit a path" was simply false.
+ *
+ * Here it is true. `add` is not in this scope, so the only sink reachable
+ * from any case is `take`, and `take` applies both filters under the naming
+ * its caller set. A new kind cannot opt out of filtering without changing
+ * this function's signature, which is a conversation rather than an
+ * oversight.
+ *
+ * Adding a kind to `MemberEntry` therefore fails twice at compile time: at
+ * `MEMBER_NAMING`, which must say which side it falls on, and at the `never`
+ * below, which must gain a case.
+ */
+function expandOne(
+  m: MemberEntry,
+  take: (member: PathMember, key: string) => void,
+  tags: MemberTags,
+  propertyIndex: () => PropertyIndex | null
+): void {
+  switch (m.kind) {
+    case "file":
+    case "folder":
+      // A hand picked member is never dropped by an exclusion or by the
+      // global ignore. Removing one removes the member.
+      take(m, canonicalPath(m.path));
+      return;
+    case "tag":
+      for (const path of tags.pathsMatching(m.tag)) {
+        take({ kind: "file", path }, canonicalPath(path));
       }
-      default: {
-        // A member kind with no case above. Adding one to `MemberEntry` fails
-        // HERE, at compile time, instead of silently contributing nothing —
-        // for the preview as well as for the tree, now that both run this.
-        const unreached: never = m;
-        return unreached;
+      return;
+    case "property": {
+      const index = propertyIndex();
+      if (index === null) return;
+      const matched =
+        m.value === undefined ? index.pathsWithKey(m.key) : index.pathsMatching(m.key, m.value);
+      for (const path of matched) {
+        take({ kind: "file", path }, canonicalPath(path));
       }
+      return;
+    }
+    default: {
+      // A member kind with no case above. Adding one to `MemberEntry` fails
+      // HERE, at compile time, instead of silently contributing nothing —
+      // for the preview as well as for the tree, now that both run this.
+      const unreached: never = m;
+      return unreached;
     }
   }
 }

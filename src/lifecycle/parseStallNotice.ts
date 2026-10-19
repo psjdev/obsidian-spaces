@@ -45,16 +45,21 @@
 export function parseStallMessage(unparsed: readonly string[]): string | null {
   const first = unparsed[0];
   if (first === undefined) return null;
-  const tail = "Move or split that note.";
+  // CONDITIONAL, not an order. Thirty seconds of a motionless queue is strong
+  // evidence and not proof, and the thing being asked for is destructive: a
+  // person who takes a healthy note out of their vault because of this has
+  // been actively harmed by a guess. "If it stays that way" costs five words
+  // and makes the advice safe to be wrong about.
+  const tail = "If it stays that way, move that note out of the vault or split it into smaller notes.";
   if (unparsed.length === 1) {
     return (
-      `Spaces: Obsidian has not finished reading "${first}", so spaces that ` +
-      `collect notes by a property are incomplete. ${tail}`
+      `Spaces: Obsidian is still reading "${first}", so spaces that collect ` +
+      `notes by a property are incomplete. ${tail}`
     );
   }
   return (
-    `Spaces: Obsidian has not finished reading ${unparsed.length} notes, so ` +
-    `spaces that collect notes by a property are incomplete. "${first}" is ` +
-    `first in the queue. ${tail}`
+    `Spaces: Obsidian is still reading ${unparsed.length} notes, so spaces ` +
+    `that collect notes by a property are incomplete. "${first}" is first in ` +
+    `line. ${tail}`
   );
 }

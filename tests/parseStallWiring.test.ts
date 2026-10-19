@@ -95,6 +95,15 @@ function harness(opts: {
         .newPropertySnapshot();
       return get();
     },
+    /**
+     * ONE accessor, handed back so a test can ask it more than once.
+     *
+     * `ask` builds a fresh accessor every call, which is the common path but
+     * cannot see the memo boundary at all. See the second-ask test.
+     */
+    accessor: (): (() => PropertySnapshot) =>
+      (plugin as unknown as { newPropertySnapshot(): () => PropertySnapshot })
+        .newPropertySnapshot(),
     /** What the watcher calls when its verdict turns to "stalled". */
     stallFired: (): void => {
       (plugin as unknown as { reportParseStall(): void }).reportParseStall();
@@ -160,6 +169,29 @@ describe("the stall notice, as main.ts wires it", () => {
     const healthy = harness({ files: { "a.md": { status: "done" } } });
     healthy.ask();
     expect(healthy.armCount()).toBe(0);
+  });
+
+  it("records and re-arms on a LATER ask of the same accessor", () => {
+    // THE MEMO BOUNDARY, and the one invariant the deleted repair wiring test
+    // protected that nothing else does.
+    //
+    // `createLazyPropertySnapshot` memoizes, so the walk runs once per
+    // accessor and every later ask gets the remembered answer. The record and
+    // the re-arm sit OUTSIDE that memo on purpose: a jammed vault sends no
+    // further metadata events, so the accessor in force is asked again and
+    // again by whoever is still looking at a property space, and those asks
+    // are the only signal that somebody still cares.
+    //
+    // Move the two lines inside the memo and the whole suite stays green
+    // without this case: every other test here builds a fresh accessor per
+    // assertion and so never crosses the boundary.
+    const h = harness({ files: { "a.md": null } });
+    const get = h.accessor();
+    get();
+    expect(h.armCount()).toBe(1);
+    get();
+    get();
+    expect(h.armCount()).toBe(3);
   });
 
   it("keeps the paths from the walk that found them, not from a later one", () => {

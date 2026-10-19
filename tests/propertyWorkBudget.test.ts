@@ -57,8 +57,8 @@ import { compileIgnore } from "../src/visibility/glob";
  * watches metadata; the cold cases below are therefore an upper bound.
  *
  * WHAT THE MIRROR CANNOT SEE, SAID PLAINLY. It has no stall watcher, no
- * `requestPropertyRepair` and no repair-driven `refresh`, so NONE of the work
- * the repair does is counted anywhere in this file. That budget is stated and
+ * no stall handling and no stall-driven `refresh`, so NONE of that work is
+ * counted anywhere in this file. That budget was stated and
  * asserted against the real plugin methods instead, in
  * the removed repair wiring test, under "the cost of a repair that cannot
  * close its holes". Counting it here would need the plugin class and so an

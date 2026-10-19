@@ -12,9 +12,9 @@ export interface PropertyEntry {
  * files Obsidian has not parsed.
  *
  * Exposed as a value rather than folded straight into a snapshot because the
- * repair needs both halves. Re-deriving the entries after the async read would
+ * the caller needs both halves. Re-deriving the entries after a second pass would
  * mean walking twice and merging two different pictures of the vault; handing
- * the walk over means the repaired snapshot is THE SAME WALK with its holes
+ * the walk over means a later snapshot can be THE SAME WALK with its holes
  * filled in.
  */
 export interface PropertyWalk {
@@ -40,12 +40,17 @@ export interface PropertyWalk {
  *
  * THE WALK NO LONGER ABANDONS AT THE FIRST NULL, and that is a deliberate
  * trade. Abandoning made a cold start cheap and left us unable to say WHICH
- * files were missing, so a vault holding a file Obsidian cannot parse — a
- * markdown file somewhat over 32 MB jams the parse queue for the life of the
- * vault, not merely the session — turned property members off permanently,
- * with nothing to name and nothing to repair from. Running to the end buys the
- * path list the repair is driven by, and costs the COLD path N listings and N
- * cache reads where it used to pay one of each.
+ * files were missing, so a vault holding a note Obsidian cannot parse turned
+ * property members off permanently with nothing to name. Running to the end
+ * buys the path list, and costs the COLD path N listings and N cache reads
+ * where it used to pay one of each.
+ *
+ * The note that does it is not necessarily a huge one. A note whose text runs
+ * for many lines with no blank line between them — pasted log output, an
+ * export — takes superlinear time for Obsidian to parse, and the queue behind
+ * it is serial with no timeout, so every later note keeps a `null` cache for
+ * the life of the vault rather than the session. That is Obsidian's to fix;
+ * `lifecycle/parseStallNotice.ts` is all this plugin does about it.
  *
  * MEASURED, not assumed, because this is the path the performance budgets
  * protect. In a running Obsidian 1.13.7 on the 5,000-note property fixture,
@@ -80,11 +85,12 @@ export function walkPropertyCache(app: App): PropertyWalk {
 }
 
 /**
- * A walk as a snapshot. Any unparsed file at all is still `unavailable`, which
- * is the rule the docblock above states and the one the repair does NOT relax:
- * the repair produces a different walk, with fewer holes, and runs it through
- * here again. A repair that could not read every hole therefore stays
- * unavailable, and says which files it could not read.
+ * A walk as a snapshot. Any unparsed file at all means `unavailable`, which is
+ * the rule the docblock above states, and an unavailable snapshot carries the
+ * paths it could not read so a caller can say which note is holding things up.
+ *
+ * 0.11.0 read those notes off disk here instead and carried on. 0.12.0 removed
+ * that: see `lifecycle/parseStallNotice.ts` for why.
  */
 export function snapshotFromWalk(walk: PropertyWalk, generation: number): PropertySnapshot {
   if (walk.unparsed.length > 0) return { status: "unavailable", unparsed: walk.unparsed };

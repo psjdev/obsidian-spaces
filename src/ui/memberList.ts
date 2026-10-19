@@ -111,9 +111,15 @@ const NO_TAGS: TagIndex = { pathsMatching: () => [] };
  * FILTERED BY THE GLOBAL IGNORE, because the tree now filters one too. A
  * property member names a RULE, and `expandMembers` drops a rule's match that
  * the vault hides, so a count that kept it would promise a row the user
- * cannot see. The precedence this does NOT apply is the other half of the
- * same rule: a note the space also names by hand is shown, and is counted,
- * because `expandMembers` takes it for the hand-added member.
+ * cannot see.
+ *
+ * THE HAND-ADDED PRECEDENCE DOES NOT REACH THIS COUNT, and an earlier version
+ * of this comment said it did. The count resolves the ONE member it is asked
+ * about, so the rest of the space is not in scope: a note that this property
+ * matches, that the ignore hides, and that the space also names by hand is
+ * shown in the tree and is NOT counted here. The tree is right; the number is
+ * the conservative one. Making them agree means resolving the whole member
+ * list per row, which is a different change.
  *
  * This read "NOT FILTERED BY THE GLOBAL IGNORE, on purpose" until issue #41,
  * and warned that adding an ignore parameter to `resolveMembers` would make

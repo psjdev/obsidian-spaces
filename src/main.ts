@@ -1645,7 +1645,10 @@ export default class SpacesPlugin extends Plugin {
     const resolvesProperties = space !== null && !hasRoot(space) && holdsPropertyMember(space);
     if (!resolvesProperties && this.propertyRefresh.size === 0) return;
     const message = parseStallMessage(this.propertyUnparsed);
-    if (message !== null) new Notice(message);
+    // 15 s, not the ~5 s default. The message carries a vault path the reader
+    // has to find, and advice they have to weigh; the default clears before a
+    // slow reader has finished the first sentence.
+    if (message !== null) new Notice(message, 15_000);
   }
 
 

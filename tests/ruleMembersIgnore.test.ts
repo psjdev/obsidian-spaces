@@ -7,11 +7,19 @@
  * member and a property member name a RULE, and the ignore is a rule too, so
  * the narrower of the two wins and a hidden note is not collected.
  *
- * Every case here drives the REAL chain a recompute drives —
- * `resolveMembers` into `buildVisibilitySnapshot`, with one compiled ignore
- * handed to both, exactly as `SpaceController.recompute` does. A test that
- * called `expandMembers` alone could not see the scaffold rows, which is
- * where half the user-visible answer lives.
+ * MOST cases here drive `resolveMembers` into `buildVisibilitySnapshot` with
+ * one compiled ignore handed to both, which is the shape `recompute` uses; a
+ * test that called `expandMembers` alone could not see the scaffold rows,
+ * where half the user-visible answer lives. A handful do not, and should not
+ * be read as if they did: the `MEMBER_NAMING` assertions, the count cases and
+ * the `spaceAddTargets` cases each exercise one surface on purpose.
+ *
+ * None of them, however, checks that the APP hands these functions the user's
+ * real `settings.globalIgnore` — every ignore here is compiled by the test.
+ * That wiring is pinned in `tests/controller.test.ts`, by the cases named
+ * "applies globalIgnore to a TAG member" and "to a PROPERTY member". Without
+ * those, severing the matcher at `SpaceController.recompute` reverted this
+ * entire issue with the whole suite still green.
  */
 import { describe, expect, it } from "vitest";
 import { buildVisibilitySnapshot } from "../src/visibility/VisibilityEngine";

@@ -74,19 +74,35 @@ describe("stallVerdict", () => {
     expect(stallVerdict([12, 12, 11])).toBe("working");
   });
 
-  it("needs three readings before it will call anything stalled", () => {
+  it("needs a full window of agreeing readings before it will say stalled", () => {
     // The cold-start guard, in its cheapest form. `resolved` fires mid-index
     // with files still queued — measured at +167 ms with twelve outstanding —
-    // so one reading, or two, says nothing at all.
-    expect(stallVerdict([11])).toBe("working");
-    expect(stallVerdict([11, 11])).toBe("working");
-    expect(stallVerdict([11, 11, 11])).toBe("stalled");
-    expect(PROPERTY_STALL_SAMPLES_AGREED).toBe(3);
+    // so anything short of the whole window says nothing at all.
+    //
+    // Built FROM the constant rather than from a literal: the threshold moved
+    // from 3 to 7 in 0.12.0 and a hard-coded window would have gone on
+    // asserting the old rule under a new name.
+    const agreed = PROPERTY_STALL_SAMPLES_AGREED;
+    for (let n = 1; n < agreed; n++) {
+      expect(stallVerdict(Array(n).fill(11))).toBe("working");
+    }
+    expect(stallVerdict(Array(agreed).fill(11))).toBe("stalled");
   });
 
-  it("is stalled on the LAST three, not on the whole history", () => {
+  it("waits at least thirty seconds of a motionless counter", () => {
+    // The threshold is not arbitrary and it is not free to lower. The healthy
+    // control run held `inProgressTaskCount` at one value for twenty seconds
+    // in a run that finished fine, and a latch now costs a notice telling
+    // somebody to take a note out of their vault. Anything at or under that
+    // plateau accuses a healthy vault.
+    const window = (PROPERTY_STALL_SAMPLES_AGREED - 1) * PROPERTY_STALL_SAMPLE_MS;
+    expect(window).toBeGreaterThanOrEqual(30_000);
+  });
+
+  it("is stalled on the LAST window, not on the whole history", () => {
     // A vault that made progress and then stopped is still a stall.
-    expect(stallVerdict([30, 20, 14, 14, 14])).toBe("stalled");
+    const tail = Array(PROPERTY_STALL_SAMPLES_AGREED).fill(14);
+    expect(stallVerdict([30, 20, ...tail])).toBe("stalled");
   });
 
   it("is unknown, never stalled, when a reading is missing", () => {
@@ -94,8 +110,10 @@ describe("stallVerdict", () => {
     // that as "unchanged" would repair on every launch, which is the exact
     // failure this file exists to prevent.
     expect(stallVerdict([null])).toBe("unknown");
-    expect(stallVerdict([11, null, 11])).toBe("unknown");
-    expect(stallVerdict([null, null, null])).toBe("unknown");
+    expect(stallVerdict([...Array(PROPERTY_STALL_SAMPLES_AGREED - 1).fill(11), null])).toBe(
+      "unknown"
+    );
+    expect(stallVerdict(Array(PROPERTY_STALL_SAMPLES_AGREED).fill(null))).toBe("unknown");
     expect(stallVerdict([])).toBe("unknown");
   });
 
@@ -105,9 +123,19 @@ describe("stallVerdict", () => {
 });
 
 describe("stallCleared", () => {
-  it("is true when the counter has MOVED", () => {
+  it("is true when the counter has FALLEN", () => {
     expect(stallCleared([11, 11, 11, 10])).toBe(true);
-    expect(stallCleared([11, 12])).toBe(true); // up counts too: something queued
+  });
+
+  it("is FALSE when the counter has RISEN, because that is the jam growing", () => {
+    // The bug this pins shut: on a jammed vault the queue only ever grows,
+    // since every note the user saves lands behind the note that is stuck. A
+    // rule of "any change clears it" read each of those saves as recovery,
+    // un-latched, re-latched, and told the user to cut up their note again —
+    // about seven times in a two-minute run.
+    expect(stallCleared([11, 12])).toBe(false);
+    expect(stallCleared([11, 11, 11, 12])).toBe(false);
+    expect(stallCleared([11, 11, 11, 12, 13])).toBe(false);
   });
 
   it("is true when the counter has reached zero", () => {
@@ -152,10 +180,10 @@ describe("the watcher", () => {
     expect(clock.pending()).toBe(1);
   });
 
-  it("latches stalled after three agreeing samples, and calls back once", () => {
+  it("latches stalled after a full window of agreeing samples, and calls back once", () => {
     const { clock, onStalled, watch } = watcher(() => 11);
     watch.arm();
-    clock.advance(PROPERTY_STALL_SAMPLE_MS * 2);
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * (PROPERTY_STALL_SAMPLES_AGREED - 1));
     expect(watch.stalled()).toBe(false);
     expect(onStalled).not.toHaveBeenCalled();
     clock.advance(PROPERTY_STALL_SAMPLE_MS);
