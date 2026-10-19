@@ -27,18 +27,15 @@
  * ARM on the first `resolved` — it does not fire again once jammed, so waiting
  * for a second is waiting forever (two negative experiments: files written
  * while jammed produced no `resolved`, no `changed`, no `resolve`). THEN watch
- * `inProgressTaskCount` across a short interval and repair only if it has not
+ * `inProgressTaskCount` across a short interval and speak only if it has not
  * moved. Mid-index it falls; jammed it does not, in every reading.
  *
- * ## Two guards, because one is a judgement and the other is not
+ * ## What a wrong verdict costs
  *
- * This file is the judgement: it can be wrong about timing. The guard that
- * cannot be wrong is `PROPERTY_REPAIR_MAX_FILES` in `visibility/
- * propertyRepair.ts` — more than 200 unparsed files is not a jam and is never
- * read from disk, which bounds what a mistaken verdict here can cost to 200
- * files. It bounds the LIST AT THE MOMENT OF THE ASK and not the vault, so it
- * is a blast radius and not a proof that a cold start can never be read; see
- * that file for what it does and does not guarantee.
+ * One notice. This file is a judgement and it can be wrong about timing, so
+ * what hangs off it is deliberately small: `main.ts` says which note is
+ * holding up the queue and does nothing else. Nothing is read, nothing is
+ * rebuilt, and nothing on screen changes.
  *
  * And because this judgement can be wrong, it is not permanent. Sampling
  * continues past a latch and a counter that moves or drains takes it back —
@@ -132,7 +129,7 @@ export function stallVerdict(samples: readonly (number | null)[]): StallVerdict 
  * own control run shows a healthy vault can earn one: `jam-questions-report.md`
  * records `inProgressTaskCount` holding still for twenty seconds in a run that
  * completed in 27.4 s, which is longer than the two intervals this file latches
- * on. So a wrong verdict has to be able to cost ONE repair rather than the rest
+ * on. So a wrong verdict has to be able to cost ONE notice rather than the rest
  * of the session.
  *
  * Exactly two readings contradict "the counter has stopped": one that has
@@ -168,7 +165,7 @@ export interface ParseStallWatch {
    *
    * Latched but NOT permanent: sampling continues past a latch, and a counter
    * that moves or reaches zero clears it. A wrong verdict therefore costs one
-   * repair rather than the rest of the session.
+   * notice rather than the rest of the session.
    */
   stalled(): boolean;
   /** Drop any pending sample so no timer outlives the plugin. */
