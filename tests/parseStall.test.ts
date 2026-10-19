@@ -1,6 +1,6 @@
 /**
  * The trigger. The one piece of this feature that can do real harm if it is
- * wrong, because at cold start EVERY file is unparsed and a repair that fired
+ * wrong, because at cold start EVERY file is unparsed and a notice that fired
  * then would read the whole vault off disk on every launch.
  *
  * Both halves are tested from the outside: the verdict as a pure function of
@@ -37,7 +37,7 @@ const manualTimer = () => {
      * Steps time forward, firing each due timer AT its own moment — so a
      * callback that schedules the next sample gets to run again inside one
      * `advance`. A clock that jumped straight to the target and swept once
-     * would deliver one sample per call, and every "three samples" assertion
+     * would deliver one sample per call, and every full-window assertion
      * below would be asserting the opposite of what it says.
      */
     advance(ms: number) {
@@ -74,28 +74,46 @@ describe("stallVerdict", () => {
     expect(stallVerdict([12, 12, 11])).toBe("working");
   });
 
-  it("needs three readings before it will call anything stalled", () => {
+  it("needs a full window of agreeing readings before it will say stalled", () => {
     // The cold-start guard, in its cheapest form. `resolved` fires mid-index
     // with files still queued — measured at +167 ms with twelve outstanding —
-    // so one reading, or two, says nothing at all.
-    expect(stallVerdict([11])).toBe("working");
-    expect(stallVerdict([11, 11])).toBe("working");
-    expect(stallVerdict([11, 11, 11])).toBe("stalled");
-    expect(PROPERTY_STALL_SAMPLES_AGREED).toBe(3);
+    // so anything short of the whole window says nothing at all.
+    //
+    // Built FROM the constant rather than from a literal: the threshold moved
+    // from 3 to 7 in 0.12.0 and a hard-coded window would have gone on
+    // asserting the old rule under a new name.
+    const agreed = PROPERTY_STALL_SAMPLES_AGREED;
+    for (let n = 1; n < agreed; n++) {
+      expect(stallVerdict(Array(n).fill(11))).toBe("working");
+    }
+    expect(stallVerdict(Array(agreed).fill(11))).toBe("stalled");
   });
 
-  it("is stalled on the LAST three, not on the whole history", () => {
+  it("waits at least thirty seconds of a motionless counter", () => {
+    // The threshold is not arbitrary and it is not free to lower. The healthy
+    // control run held `inProgressTaskCount` at one value for twenty seconds
+    // in a run that finished fine, and a latch now costs a notice telling
+    // somebody to take a note out of their vault. Anything at or under that
+    // plateau accuses a healthy vault.
+    const window = (PROPERTY_STALL_SAMPLES_AGREED - 1) * PROPERTY_STALL_SAMPLE_MS;
+    expect(window).toBeGreaterThanOrEqual(30_000);
+  });
+
+  it("is stalled on the LAST window, not on the whole history", () => {
     // A vault that made progress and then stopped is still a stall.
-    expect(stallVerdict([30, 20, 14, 14, 14])).toBe("stalled");
+    const tail = Array(PROPERTY_STALL_SAMPLES_AGREED).fill(14);
+    expect(stallVerdict([30, 20, ...tail])).toBe("stalled");
   });
 
   it("is unknown, never stalled, when a reading is missing", () => {
     // A future Obsidian without `inProgressTaskCount` reads null. Treating
-    // that as "unchanged" would repair on every launch, which is the exact
+    // that as "unchanged" would accuse the vault on every launch, which is the exact
     // failure this file exists to prevent.
     expect(stallVerdict([null])).toBe("unknown");
-    expect(stallVerdict([11, null, 11])).toBe("unknown");
-    expect(stallVerdict([null, null, null])).toBe("unknown");
+    expect(stallVerdict([...Array(PROPERTY_STALL_SAMPLES_AGREED - 1).fill(11), null])).toBe(
+      "unknown"
+    );
+    expect(stallVerdict(Array(PROPERTY_STALL_SAMPLES_AGREED).fill(null))).toBe("unknown");
     expect(stallVerdict([])).toBe("unknown");
   });
 
@@ -105,9 +123,19 @@ describe("stallVerdict", () => {
 });
 
 describe("stallCleared", () => {
-  it("is true when the counter has MOVED", () => {
+  it("is true when the counter has FALLEN", () => {
     expect(stallCleared([11, 11, 11, 10])).toBe(true);
-    expect(stallCleared([11, 12])).toBe(true); // up counts too: something queued
+  });
+
+  it("is FALSE when the counter has RISEN, because that is the jam growing", () => {
+    // The bug this pins shut: on a jammed vault the queue only ever grows,
+    // since every note the user saves lands behind the note that is stuck. A
+    // rule of "any change clears it" read each of those saves as recovery,
+    // un-latched, re-latched, and told the user to cut up their note again —
+    // about seven times in a two-minute run.
+    expect(stallCleared([11, 12])).toBe(false);
+    expect(stallCleared([11, 11, 11, 12])).toBe(false);
+    expect(stallCleared([11, 11, 11, 12, 13])).toBe(false);
   });
 
   it("is true when the counter has reached zero", () => {
@@ -152,10 +180,10 @@ describe("the watcher", () => {
     expect(clock.pending()).toBe(1);
   });
 
-  it("latches stalled after three agreeing samples, and calls back once", () => {
+  it("latches stalled after a full window of agreeing samples, and calls back once", () => {
     const { clock, onStalled, watch } = watcher(() => 11);
     watch.arm();
-    clock.advance(PROPERTY_STALL_SAMPLE_MS * 2);
+    clock.advance(PROPERTY_STALL_SAMPLE_MS * (PROPERTY_STALL_SAMPLES_AGREED - 1));
     expect(watch.stalled()).toBe(false);
     expect(onStalled).not.toHaveBeenCalled();
     clock.advance(PROPERTY_STALL_SAMPLE_MS);
@@ -172,7 +200,7 @@ describe("the watcher", () => {
     // The latch used to be permanent, and the project's own control run shows a
     // HEALTHY vault can earn one: `inProgressTaskCount` held still for twenty
     // seconds in a run that finished in 27.4 s. A wrong verdict has to cost one
-    // repair, not the session.
+    // notice, not the session.
     let count = 11;
     const { clock, onStalled, watch } = watcher(() => count);
     watch.arm();
@@ -199,7 +227,7 @@ describe("the watcher", () => {
   });
 
   it("earns a SECOND verdict, and a second callback, after one is taken back", () => {
-    // One repair per verdict, not one per session. `main.ts` hangs the
+    // One notice per verdict, not one per session. `main.ts` hangs the
     // clearing of its own "we tried these and got nowhere" memory off exactly
     // this second callback.
     let count = 11;
@@ -338,7 +366,7 @@ describe("nativeParseProgress", () => {
 
   it("is null for every shape it does not recognise", () => {
     // Fail-open: null is "this build cannot say", and `stallVerdict` turns
-    // that into "unknown", which repairs nothing.
+    // that into "unknown", which says nothing.
     expect(nativeParseProgress(app({}))).toBeNull();
     expect(nativeParseProgress(app({ inProgressTaskCount: "11" }))).toBeNull();
     expect(nativeParseProgress(app({ inProgressTaskCount: NaN }))).toBeNull();

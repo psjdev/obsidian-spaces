@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0 — 2026-10-19
+
+A tag or a property now leaves out notes whose path matches **Ignored paths**
+under Settings → Spaces → Preferences. A space that used to collect notes from
+an ignored folder through a tag or a property no longer shows them. To show one
+of them anyway, add that note to the space yourself. A note you add by hand is
+shown whatever the ignore list says, and so is a note you have open.
+
+When Obsidian is stuck reading a note, Spaces now names that note instead of
+reading it off disk itself. Spaces that collect notes by a property stay
+incomplete until Obsidian finishes, and a notice tells you which note to move
+out of the vault or split into smaller notes. A note whose text runs for many
+lines with no blank line between them, such as pasted log output, is the usual
+cause.
+
 ## 0.11.0 — 2026-10-13
 
 A curated space can now collect notes by a property. Add the property `due` to

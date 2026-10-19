@@ -68,6 +68,21 @@ export function buildVisibilitySnapshot(
 
   // 4. ancestor closure, regardless of ignore rules.
   //
+  // "Regardless" STAYS, and issue #41 narrowed what it has to cover. A rule
+  // member's match is dropped before it is a seed, and a folder seed's
+  // descendants were already dropped by step 2, so a MEMBER can no longer
+  // scaffold a chain down into an ignored folder unless the note at the end
+  // of it was pointed at by hand. Drawing that chain is the only way such a
+  // note is reachable in the tree, and hiding it would hide the note while
+  // still claiming it is a member.
+  //
+  // NOT every ignored path in `included` is one the user pointed at, and an
+  // earlier version of this comment said so. A VISITOR is a seed too, and
+  // visitors bypass the ignore: open an ignored note and it scaffolds its
+  // chain with no member involved at all. That is deliberate — you asked for
+  // the note by opening it — but it means the guarantee here is about
+  // MEMBERS, not about the whole of `included`.
+  //
   // Climbs once per DISTINCT directory instead of once per included path.
   // `ancestorsOf` rebuilds the whole chain from scratch for every path, with a
   // `split` and then a `slice` and a `join` per level, so siblings recompute

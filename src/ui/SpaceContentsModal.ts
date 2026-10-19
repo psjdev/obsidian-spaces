@@ -6,6 +6,7 @@ import {
   memberRows,
   withoutMember,
   propertyMemberCount,
+  tagMemberCount,
   withoutPropertyMember,
   withoutTagMember,
   type PathMemberRow,
@@ -17,6 +18,7 @@ import { STILL_READING } from "../actions/membership";
 import { addPropertyMember, pickableKeys, readPropertyAdd } from "./propertyRows";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { normalizeTag } from "../visibility/tagMatch";
+import { compileIgnore } from "../visibility/glob";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { SpaceDefinition } from "../types";
@@ -60,7 +62,16 @@ import type { SpaceDefinition } from "../types";
  */
 function tagRowDescription(row: TagMemberRow): string {
   if (row.matchCount === null) return "Tag. Nested tags included.";
-  if (row.status === "matches-nothing") return "Tag. No notes carry it right now.";
+  // NOT "no notes carry it". Since 0.12.0 the count is filtered by the global
+  // ignore, so zero has two causes: nothing carries the tag, or everything
+  // that does sits in an ignored path. Telling somebody their tag matches
+  // nothing when it matches plenty invites them to delete a member that is
+  // working, so this says only what is true of both and points at the setting
+  // that explains the second. Distinguishing them needs a second, unfiltered
+  // count, which is a separate change.
+  if (row.status === "matches-nothing") {
+    return "Tag. No notes shown. Check Ignored paths if you expected some.";
+  }
   const notes = row.matchCount === 1 ? "note" : "notes";
   return `Tag. ${row.matchCount} ${notes}, nested tags included.`;
 }
@@ -73,7 +84,11 @@ function tagRowDescription(row: TagMemberRow): string {
  */
 function propertyRowDescription(row: PropertyMemberRow): string {
   if (row.matchCount === null) return "Property.";
-  if (row.status === "matches-nothing") return "Property. No notes match right now.";
+  // See the tag row above: zero is now ambiguous and must not be reported as
+  // "nothing matches".
+  if (row.status === "matches-nothing") {
+    return "Property. No notes shown. Check Ignored paths if you expected some.";
+  }
   const notes = row.matchCount === 1 ? "note" : "notes";
   return `Property. ${row.matchCount} ${notes}.`;
 }
@@ -160,9 +175,12 @@ export class SpaceContentsModal extends Modal {
     // per row means every count on screen describes one picture of the
     // vault.
     let tags: TagIndex | null = null;
+    // Compiled ONCE per render and closed over, never once per row: it builds
+    // a RegExp per pattern, and both counters below read it.
+    const ignore = compileIgnore(this.defs.get().settings.globalIgnore);
     const matchCount = (tag: string): number => {
       tags ??= this.tagIndex();
-      return tags.pathsMatching(tag).length;
+      return tagMemberCount(tag, tags, ignore);
     };
 
     // Shared with the exclusions section below, which asks the same question
@@ -184,7 +202,7 @@ export class SpaceContentsModal extends Modal {
       return properties;
     };
     const propertyCount = (m: Parameters<typeof propertyMemberCount>[0]): number | null =>
-      propertyMemberCount(m, propertyIndexOnce(), space);
+      propertyMemberCount(m, propertyIndexOnce(), space, ignore);
 
     const rows = memberRows(space, exists, matchCount, propertyCount);
 

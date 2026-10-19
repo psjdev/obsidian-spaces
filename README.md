@@ -122,6 +122,8 @@ Nested tags match. A space holding `project` includes notes tagged `project/atla
 
 Add the tag to a note and it appears, change or delete the tag and it leaves. Tags written in a note's properties and tags written in its text both count.
 
+A tag leaves out any note whose path matches **Ignored paths** under Settings → Spaces → Preferences. To show one of them anyway, add that note to the space yourself. A note you add by hand is shown whatever the ignore list says.
+
 To drop a single note without dropping the tag, right-click it inside the space and choose `Remove from <space name>`. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
 
 ## Properties
@@ -136,6 +138,8 @@ To add one:
 Values match without regard to capitals or surrounding spaces, so a note with `status: Active` is collected by the value `active`. The property name has to match exactly: `Status` and `status` are different properties. A list property is collected by any of the plain values in the list, so a note with `topics: [atlas, billing]` is collected by the value `atlas`. A property with no value still counts as having the property.
 
 A note joins the space when it gains a matching property and leaves when it no longer matches. Properties mix freely with notes, folders and tags in one space. Tags are not available as a property. Use [Tags](#tags) instead, which also finds tags written in a note's text.
+
+A property leaves out any note whose path matches **Ignored paths** under Settings → Spaces → Preferences. To show one of them anyway, add that note to the space yourself. A note you add by hand is shown whatever the ignore list says.
 
 To drop a single note without dropping the property, right-click it inside the space and choose `Remove from <space name>`. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
 
@@ -223,7 +227,7 @@ Settings → Spaces has three pages. **Appearance** holds the settings that chan
 | Drag indicator | Box | How the file pane shows where a dragged row will land. Box opens a gap between the rows and fills it. Line draws a thin rule at the boundary and moves nothing |
 | Use theme colors for space icons | Off | Draws every space icon in your theme's icon color. Your saved colors are kept and come back when you turn it off |
 | Show notes you open that are not in this space | On | Whether visitors appear. Off, a non-member note you open stays hidden |
-| Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A note you added explicitly is still shown |
+| Ignored paths | Empty | One glob per line, hidden from every space. `*` matches within a path segment, `**` across segments. A tag or a property leaves out what is listed here. A note you add by hand is still shown, and so is a note you have open |
 | Allow reordering a space's notes and folders | On | Whether dragging rows rearranges them inside a space |
 | Allow reordering outside spaces | On | The same, for **All** |
 | Restore tabs when switching spaces | Off | Whether each space restores its own tabs. On, switching also rearranges your panes; off changes nothing about which rows are visible |

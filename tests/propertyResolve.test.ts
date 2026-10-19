@@ -6,6 +6,9 @@ import { holdsPropertyMember, resolvedPaths, watchesMetadata } from "../src/defi
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { buildPreview } from "../src/ui/previewSeam";
 import { compileIgnore } from "../src/visibility/glob";
+
+/** Nothing is ignored, which is what every case in this file assumes. */
+const NO_IGNORE = compileIgnore([]);
 import { createPropertyIndex, type PropertySnapshot } from "../src/visibility/PropertyIndex";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { buildFakeVault } from "./helpers/fakeVault";
@@ -24,7 +27,7 @@ const space = (s: Partial<SpaceDefinition>): SpaceDefinition => ({
   id: "s", name: "S", icon: "box", color: "#808080", members: [], ...s,
 });
 const paths = (s: SpaceDefinition): string[] =>
-  resolveMembers(s, tags, properties).map((m) => m.path).sort();
+  resolveMembers(s, tags, properties, NO_IGNORE).map((m) => m.path).sort();
 
 describe("precedence", () => {
   it("expands a property member", () => {
@@ -72,18 +75,18 @@ describe("precedence", () => {
       1
     );
     const s = space({ members: [{ kind: "property", key: "city", value: "CAFÉ" }] });
-    expect(resolveMembers(s, tags, accented).map((m) => m.path).sort()).toEqual([
+    expect(resolveMembers(s, tags, accented, NO_IGNORE).map((m) => m.path).sort()).toEqual([
       "Work/composed.md",
       "Work/decomposed.md",
     ]);
     // A member stored in the other form finds the same two notes.
     const other = space({ members: [{ kind: "property", key: "city", value: "café" }] });
-    expect(resolveMembers(other, tags, accented)).toHaveLength(2);
+    expect(resolveMembers(other, tags, accented, NO_IGNORE)).toHaveLength(2);
   });
 
   it("contributes nothing when no property index is available", () => {
     const s = space({ members: [{ kind: "property", key: "status" }] });
-    expect(resolveMembers(s, tags, null)).toEqual([]);
+    expect(resolveMembers(s, tags, null, NO_IGNORE)).toEqual([]);
   });
 
   it("never yields one note twice", () => {
@@ -94,7 +97,7 @@ describe("precedence", () => {
         { kind: "file", path: "Work/a.md" },
       ],
     });
-    const out = resolveMembers(s, tags, properties).map((m) => m.path);
+    const out = resolveMembers(s, tags, properties, NO_IGNORE).map((m) => m.path);
     expect(new Set(out).size).toBe(out.length);
   });
 });
@@ -113,13 +116,13 @@ describe("the helpers that read a property member", () => {
   });
 
   it("counts a property match as held, canonically", () => {
-    expect(resolvedPaths(s, tags, properties)).toEqual(
+    expect(resolvedPaths(s, tags, properties, NO_IGNORE)).toEqual(
       new Set(["work/a.md", "work/b.md", "work/tagged.md"])
     );
   });
 
   it("holds nothing through a property member while no index is available", () => {
-    expect(resolvedPaths(s, tags, null).size).toBe(0);
+    expect(resolvedPaths(s, tags, null, NO_IGNORE).size).toBe(0);
   });
 });
 

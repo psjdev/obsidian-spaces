@@ -8,6 +8,7 @@ import { tagIndexOf } from "./helpers/tagIndex";
 import { SCHEMA_VERSION, type MemberEntry } from "../src/types";
 import type { SwitchOutcome } from "../src/types";
 import { createSpace } from "../src/actions/spaceLifecycle";
+import { createPropertyIndex } from "../src/visibility/PropertyIndex";
 
 const vault = buildFakeVault({
   Papers: "folder",
@@ -1495,6 +1496,168 @@ describe("SpaceController", () => {
     // globalIgnore still applies to what the shim exposes.
     expect(snap!.decisionFor("Papers/Ignored.md").visible).toBe(false);
     expect(snap!.decisionFor("Recipes.md").visible).toBe(false);
+  });
+
+  it("applies globalIgnore to a TAG member, through the real recompute", async () => {
+    // ISSUE #41, END TO END, and the gap a reviewer found by ablation: every
+    // other test of this behavior calls `resolveMembers` directly with a
+    // matcher it compiled itself. None of them checks that the APP hands the
+    // user's real `settings.globalIgnore` to the expansion. Replacing the
+    // matcher at `SpaceController.recompute`'s call site with an empty one
+    // reverted issue #41 in the tree and left all 2710 tests green.
+    //
+    // This is the case that goes red.
+    let stored: unknown = {
+      schemaVersion: SCHEMA_VERSION,
+      settings: { globalIgnore: ["Papers/Secret.md"], restoreLayouts: false },
+      spaces: [
+        {
+          id: "research",
+          name: "Research",
+          icon: "flask-conical",
+          color: "#5b5bff",
+          members: [{ kind: "tag", tag: "project" }],
+        },
+      ],
+    };
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await store.load();
+    const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    runtime.load();
+    const controller = new SpaceController(
+      store,
+      runtime,
+      buildFakeVault({
+        Papers: "folder",
+        "Papers/A.md": "file",
+        "Papers/Secret.md": "file",
+        "Recipes.md": "file",
+      }),
+      { apply: vi.fn(), livePaths: () => new Set<string>() },
+      // Both notes carry the tag. Only the ignored one must be dropped, which
+      // is what separates "the ignore was applied" from "the tag matched
+      // nothing".
+      tagIndexOf(
+        new Map([
+          ["Papers/A.md", ["project"]],
+          ["Papers/Secret.md", ["project"]],
+        ])
+      ),
+      () => ({ status: "unavailable", unparsed: [] })
+    );
+    await controller.switchTo({ kind: "space", id: "research" });
+
+    const snap = controller.currentSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.decisionFor("Papers/A.md").visible).toBe(true);
+    expect(snap!.decisionFor("Papers/Secret.md").visible).toBe(false);
+    // Not a member at all, so its absence proves nothing about the ignore.
+    expect(snap!.decisionFor("Recipes.md").visible).toBe(false);
+  });
+
+  it("applies globalIgnore to a PROPERTY member, through the real recompute", async () => {
+    // The other rule kind, through the same call site. A fix that threaded the
+    // matcher for tags and not for properties would pass the case above.
+    let stored: unknown = {
+      schemaVersion: SCHEMA_VERSION,
+      settings: { globalIgnore: ["Papers/Secret.md"], restoreLayouts: false },
+      spaces: [
+        {
+          id: "research",
+          name: "Research",
+          icon: "flask-conical",
+          color: "#5b5bff",
+          members: [{ kind: "property", key: "status", value: "active" }],
+        },
+      ],
+    };
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await store.load();
+    const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    runtime.load();
+    const controller = new SpaceController(
+      store,
+      runtime,
+      buildFakeVault({
+        Papers: "folder",
+        "Papers/A.md": "file",
+        "Papers/Secret.md": "file",
+        "Recipes.md": "file",
+      }),
+      { apply: vi.fn(), livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({
+        status: "ready",
+        index: createPropertyIndex(
+          [
+            { path: "Papers/A.md", frontmatter: { status: "active" } },
+            { path: "Papers/Secret.md", frontmatter: { status: "active" } },
+          ],
+          1
+        ),
+      })
+    );
+    await controller.switchTo({ kind: "space", id: "research" });
+
+    const snap = controller.currentSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.decisionFor("Papers/A.md").visible).toBe(true);
+    expect(snap!.decisionFor("Papers/Secret.md").visible).toBe(false);
+  });
+
+  it("still shows a hand-added note that the ignore would hide", async () => {
+    // The other half of #41, through the same path: a note you pointed at is
+    // yours. Without this, "apply the ignore everywhere" would pass both cases
+    // above and silently break hand-picked members.
+    let stored: unknown = {
+      schemaVersion: SCHEMA_VERSION,
+      settings: { globalIgnore: ["Papers/Secret.md"], restoreLayouts: false },
+      spaces: [
+        {
+          id: "research",
+          name: "Research",
+          icon: "flask-conical",
+          color: "#5b5bff",
+          members: [{ kind: "file", path: "Papers/Secret.md" }],
+        },
+      ],
+    };
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await store.load();
+    const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    runtime.load();
+    const controller = new SpaceController(
+      store,
+      runtime,
+      buildFakeVault({
+        Papers: "folder",
+        "Papers/A.md": "file",
+        "Papers/Secret.md": "file",
+      }),
+      { apply: vi.fn(), livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] })
+    );
+    await controller.switchTo({ kind: "space", id: "research" });
+
+    const snap = controller.currentSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.decisionFor("Papers/Secret.md").visible).toBe(true);
   });
 
   describe("the missing-root state renders empty through the real production path", () => {

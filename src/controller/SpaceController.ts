@@ -3,7 +3,7 @@ import type { RuntimeStateStore } from "../runtime/RuntimeStateStore";
 import type { VaultIndex } from "../visibility/VaultIndex";
 import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
 import { buildVisibilitySnapshot } from "../visibility/VisibilityEngine";
-import { compileIgnore, canonicalPath } from "../visibility/glob";
+import { compileIgnore, canonicalPath, type IgnoreMatcher } from "../visibility/glob";
 import { RevealedSet } from "../visibility/RevealedSet";
 import { sameSelection } from "../order/sortOverride";
 import { hasRoot, rootOf } from "../visibility/folderSpace";
@@ -401,7 +401,14 @@ export class SpaceController {
     space: SpaceDefinition,
     // Read ONCE per recompute by `propertiesFor` and handed down, because the
     // readiness gate above needs the same answer and two asks could differ.
-    properties: PropertyIndex | null
+    properties: PropertyIndex | null,
+    // The SAME compiled ignore the engine below is handed, not a second
+    // compile of the same settings. A rule member honours it during the
+    // expansion, because by the time the engine sees the result every member
+    // is a path member and the two kinds are no longer distinguishable; the
+    // engine's own ignore step still applies to a folder member's
+    // descendants. One matcher for both, so they cannot disagree.
+    ignore: IgnoreMatcher
   ): readonly PathMember[] {
     if (hasRoot(space)) {
       const root = rootOf(space);
@@ -419,7 +426,7 @@ export class SpaceController {
     // space: `stillReading` holds the recompute back, because publishing
     // members resolved against nothing would publish "not known yet" as
     // "matches nothing".
-    return resolveMembers(space, this.tags, properties);
+    return resolveMembers(space, this.tags, properties, ignore);
   }
 
   /**
@@ -554,7 +561,7 @@ export class SpaceController {
     const visitors = settings.revealVisitors ? revealed : new Set<string>();
     this.snapshot = buildVisibilitySnapshot(
       this.vault,
-      { ...space, members: [...this.membersForSnapshot(space, properties())] },
+      { ...space, members: [...this.membersForSnapshot(space, properties(), ignore)] },
       visitors,
       ignore,
       new Set((space.exclude ?? []).map(canonicalPath))

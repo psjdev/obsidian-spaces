@@ -41,8 +41,8 @@
  * `nativeParseProgress` returns null whenever the capability is not exactly as
  * expected, and callers must treat null as "this build cannot say", never as
  * zero. A future Obsidian that renames or removes the field therefore costs
- * the automatic repair and leaves the feature exactly where it is today: a
- * jammed vault reports unavailable, which is wrong but honest.
+ * the stall notice and nothing else: a jammed vault still reports unavailable,
+ * it just stops being able to say which note is holding it up.
  */
 
 /** The shape we hope for, expressed so no `any` escapes this file. */

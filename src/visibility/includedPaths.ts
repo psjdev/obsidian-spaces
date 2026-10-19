@@ -29,6 +29,13 @@ export function includedPaths(
   excluded: ReadonlySet<string>
 ): IncludedPaths {
   // 1. seeds bypass globalIgnore entirely
+  //
+  // Still true, and narrower than it reads. Since issue #41 a seed can only
+  // be a path a PERSON pointed at: `expandMembers` applies the ignore to
+  // every path a tag or property member reaches, so a rule's match that the
+  // vault hides never arrives here to bypass anything. Do not add an ignore
+  // test to this loop — it would hide the note the user explicitly added,
+  // which is the one thing the bypass exists to protect.
   const seeds = new Set<string>();
   // Belt and braces against a future `resolveLivePath`, not a behaviour
   // change: today every seed is already a live path that exists.

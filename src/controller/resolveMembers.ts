@@ -1,7 +1,7 @@
 import type { MemberEntry, PathMember, SpaceDefinition } from "../types";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { TagIndex } from "../visibility/TagIndex";
-import { canonicalPath } from "../visibility/glob";
+import { canonicalPath, type IgnoreMatcher } from "../visibility/glob";
 
 /**
  * The member list the visibility engine is handed, with every tag member
@@ -14,11 +14,13 @@ import { canonicalPath } from "../visibility/glob";
  * `membersForSnapshot` already plays for a folder space, which presents
  * itself as a space whose single member is its root.
  *
- * Exclusions are applied HERE for tag and property matches rather than left
- * to the engine. An expanded note arrives as a seed, and seeds bypass the
- * engine's ignore step by design, so an excluded match that reached the
- * engine would be visible. A hand-added member is a seed for the same reason and survives its
- * own exclusion, which is the intended precedence.
+ * Exclusions AND the global ignore are applied HERE for tag and property
+ * matches rather than left to the engine. An expanded note arrives as a seed,
+ * and seeds bypass the engine's ignore step by design, so a filtered match
+ * that reached the engine would be visible. A hand-added member is a seed for
+ * the same reason and survives both its own exclusion and the global ignore,
+ * which is the intended precedence: the person pointed at that note, and a
+ * rule must not overrule a finger.
  *
  * ## The per-path tail is the whole cost
  *
@@ -38,6 +40,43 @@ import { canonicalPath } from "../visibility/glob";
  * canonical-path de-duplication is exactly what must NOT change: two
  * spellings of one note (a tag match and a hand-added member differing only
  * in case) must still seed once, or the user gets a duplicate row.
+ *
+ * Issue #41 put one thing BACK on that tail: an `ignore.matches` per path a
+ * rule member reaches. Measured on the same 3,785 match expansion, with each
+ * variant run interleaved so machine drift hits all of them equally. Two
+ * people measured it on different machines and got different absolute
+ * numbers, which is why the DELTA is what is quoted and not the floor:
+ *
+ *  - an EMPTY `globalIgnore`, against no ignore test at all:  +5 to 10%
+ *  - three patterns, against no ignore test at all:           about +0.9 ms
+ *
+ * An empty ignore is therefore CHEAP, not free: `matches()` is still a call
+ * per path and still allocates the closure `[].some` takes, even with nothing
+ * to compare against. An earlier version of this comment said it "pays
+ * nothing measurable", which did not reproduce.
+ *
+ * The 0.9 ms at three patterns is about 240 ns per PATH — all three regex
+ * tests together, not 240 ns per test.
+ *
+ * SHAPE COSTS MORE THAN COUNT, and quoting a count alone was misleading. The
+ * cost is linear in the number of patterns for any one shape, with no cliff,
+ * but the constant differs by more than ten times between shapes. Over the
+ * same 3,785 paths, once per recompute:
+ *
+ *   patterns      prefix shape      leading `**` shape
+ *         10            0.8 ms                7.1 ms
+ *         25            2.0 ms               23.4 ms
+ *        100           14.1 ms              175.5 ms
+ *
+ * A LEADING `**` is the expensive one, because `(?:[^/]+/)*` makes the engine
+ * try every segment split from the left. It is also the shape the README
+ * teaches, so it is the one to assume. Rewriting it unanchored was measured
+ * at only 1.4x to 2x, which is not worth changing a shared compiler for; the
+ * cost is recorded rather than hidden.
+ *
+ * There is no cheaper place to put the filter: doing it later, in
+ * `includedPaths`, would mean carrying an origin on every seed — an object
+ * allocation per matched path, which is strictly more than one regex test.
  */
 export function resolveMembers(
   space: SpaceDefinition,
@@ -46,7 +85,12 @@ export function resolveMembers(
   // contributes nothing. That is "not known yet", not "matches nothing", so a
   // caller that publishes the result as a space's membership must keep its
   // previous result instead; this function cannot tell the two apart.
-  properties: PropertyIndex | null
+  properties: PropertyIndex | null,
+  // The vault's global ignore, compiled. Required, and with no default,
+  // because every answer this function gives depends on it: a caller that
+  // could leave it out would get a space holding notes the tree does not
+  // show. `compileIgnore([])` is the explicit "nothing is ignored".
+  ignore: IgnoreMatcher
 ): PathMember[] {
   // Null rather than an empty Set. The usual space has no exclusions at all,
   // and a null test per matched path is cheaper than a hash lookup that can
@@ -59,7 +103,7 @@ export function resolveMembers(
   // nothing. Whether to read it AT ALL for this space is `membersForSnapshot`'s
   // decision, one level up, and it must stay there: that is what keeps a space
   // with no property member from paying for a vault walk.
-  expandMembers(space.members, tags, () => properties, excluded, (m) => out.push(m));
+  expandMembers(space.members, tags, () => properties, excluded, ignore, (m) => out.push(m));
   return out;
 }
 
@@ -67,6 +111,41 @@ export function resolveMembers(
 export interface MemberTags {
   pathsMatching(tag: string): readonly string[];
 }
+
+/**
+ * How a member names the notes it brings in — the one thing that decides
+ * whether a space's filters apply to what it brought.
+ *
+ * `"picked"`: the person pointed at this exact note or this exact folder.
+ * Nothing the vault is configured to hide may overrule that; refusing the
+ * note would be refusing the gesture that added it.
+ *
+ * `"rule"`: the member states a condition and the vault answers it. The
+ * global ignore is a condition too, and the narrower of two conditions wins,
+ * so a note the vault hides is not collected.
+ */
+export type MemberNaming = "picked" | "rule";
+
+/**
+ * Which side each member kind falls on.
+ *
+ * A `Record` keyed by `MemberEntry["kind"]`, and that is the whole point.
+ * Adding a kind to `MemberEntry` leaves this object missing a key, which
+ * `tsc` reports HERE — at the one line whose job is to decide — before the
+ * new kind can reach a filter and inherit an answer nobody chose. A boolean
+ * parameter, or a `kind === "tag" || kind === "property"` test, would both
+ * have let it default silently into one side.
+ *
+ * It is `Record<..., MemberNaming>` and not `Partial<...>` or an index
+ * signature for the same reason: only a total map is a compile error when it
+ * stops being total.
+ */
+export const MEMBER_NAMING: Record<MemberEntry["kind"], MemberNaming> = {
+  file: "picked",
+  folder: "picked",
+  tag: "rule",
+  property: "rule",
+};
 
 /**
  * THE member expansion: every member turned into the vault paths it names,
@@ -91,6 +170,22 @@ export interface MemberTags {
  * a hash lookup that can never hit — and cheaper still than building the Set
  * to make it.
  *
+ * ## Both filters live in `take`, under one flag
+ *
+ * `MEMBER_NAMING` answers, per member, whether its paths are filtered at all,
+ * and `take` applies both filters under that answer. The per-kind cases live
+ * in `expandOne` below, which is handed `take` and NOT the raw `add` sink, so
+ * a later member kind cannot slip past either filter: there is no other sink
+ * in its scope, and it cannot be written at all until `MEMBER_NAMING` has a
+ * key for it. Both halves are compile errors, not conventions — see
+ * `expandOne`'s own docblock for what went wrong when only one of them was.
+ *
+ * A filtered path is NOT marked seen, exactly as the per-case `continue` it
+ * replaced did not. That is what makes the precedence order-free: a note that
+ * a tag member reaches and the ignore hides, and that the same space also
+ * names by hand, is taken for the hand-added member whichever of the two is
+ * listed first.
+ *
  * `properties` is a FUNCTION, asked at most once and only when a property
  * member is actually reached, so a selection with none never asks for an
  * index at all. `undefined` is the only "not asked yet": a `null` answer is
@@ -101,50 +196,104 @@ export function expandMembers(
   tags: MemberTags,
   properties: () => PropertyIndex | null,
   excluded: ReadonlySet<string> | null,
+  // The vault's global ignore, compiled. Consulted once per path a RULE
+  // member reaches and never for a hand-picked one.
+  ignore: IgnoreMatcher,
   add: (member: PathMember, key: string) => void
 ): void {
   const seen = new Set<string>();
+  // The current member's side of `MEMBER_NAMING`, assigned at the top of the
+  // loop below. Held here rather than passed to `take` so that no case can
+  // pass the wrong one, and read rather than re-derived so the lookup is once
+  // per MEMBER and not once per matched path.
+  let naming: MemberNaming = "picked";
   const take = (m: PathMember, key: string): void => {
     if (seen.has(key)) return;
+    if (naming === "rule") {
+      if (excluded !== null && excluded.has(key)) return;
+      // The LIVE path, not the folded key: `patternToRegExp` compiles with
+      // `i` and folds its own side, and a stored spelling never reaches here
+      // because only a rule member is tested and a rule member's paths come
+      // straight out of the vault's own indexes.
+      if (ignore.matches(m.path)) return;
+    }
     seen.add(key);
     add(m, key);
   };
+  // Asked at most once across every member, and only when a property member
+  // is actually reached. `undefined` is the only "not asked yet"; a `null`
+  // answer is remembered too, or each further property member asks again.
   let index: PropertyIndex | null | undefined;
+  const propertyIndex = (): PropertyIndex | null => {
+    if (index === undefined) index = properties();
+    return index;
+  };
 
   for (const m of members) {
-    switch (m.kind) {
-      case "file":
-      case "folder":
-        // A hand picked member is never dropped by an exclusion. Removing one
-        // removes the member.
-        take(m, canonicalPath(m.path));
-        break;
-      case "tag":
-        for (const path of tags.pathsMatching(m.tag)) {
-          const key = canonicalPath(path);
-          if (excluded !== null && excluded.has(key)) continue;
-          take({ kind: "file", path }, key);
-        }
-        break;
-      case "property": {
-        if (index === undefined) index = properties();
-        if (index === null) break;
-        const matched =
-          m.value === undefined ? index.pathsWithKey(m.key) : index.pathsMatching(m.key, m.value);
-        for (const path of matched) {
-          const key = canonicalPath(path);
-          if (excluded !== null && excluded.has(key)) continue;
-          take({ kind: "file", path }, key);
-        }
-        break;
+    // Missing key here = compile error. See `MEMBER_NAMING`.
+    naming = MEMBER_NAMING[m.kind];
+    expandOne(m, take, tags, propertyIndex);
+  }
+}
+
+/**
+ * One member, turned into the paths it names.
+ *
+ * ## Why this is a separate function
+ *
+ * **So that `take` is the only way out, by construction rather than by
+ * convention.** This used to be the body of the loop in `expandMembers`,
+ * where `add` — the raw, unfiltered sink — was a parameter in scope. Nothing
+ * stopped a future `case` from calling it directly and skipping the
+ * de-duplication, the space's exclusions and the global ignore, and nothing
+ * would have complained: a reviewer proved it by adding a member kind whose
+ * case called `add`, and `tsc` reported no error at all. The docblock
+ * claiming a later kind "has no other way to emit a path" was simply false.
+ *
+ * Here it is true. `add` is not in this scope, so the only sink reachable
+ * from any case is `take`, and `take` applies both filters under the naming
+ * its caller set. A new kind cannot opt out of filtering without changing
+ * this function's signature, which is a conversation rather than an
+ * oversight.
+ *
+ * Adding a kind to `MemberEntry` therefore fails twice at compile time: at
+ * `MEMBER_NAMING`, which must say which side it falls on, and at the `never`
+ * below, which must gain a case.
+ */
+function expandOne(
+  m: MemberEntry,
+  take: (member: PathMember, key: string) => void,
+  tags: MemberTags,
+  propertyIndex: () => PropertyIndex | null
+): void {
+  switch (m.kind) {
+    case "file":
+    case "folder":
+      // A hand picked member is never dropped by an exclusion or by the
+      // global ignore. Removing one removes the member.
+      take(m, canonicalPath(m.path));
+      return;
+    case "tag":
+      for (const path of tags.pathsMatching(m.tag)) {
+        take({ kind: "file", path }, canonicalPath(path));
       }
-      default: {
-        // A member kind with no case above. Adding one to `MemberEntry` fails
-        // HERE, at compile time, instead of silently contributing nothing —
-        // for the preview as well as for the tree, now that both run this.
-        const unreached: never = m;
-        return unreached;
+      return;
+    case "property": {
+      const index = propertyIndex();
+      if (index === null) return;
+      const matched =
+        m.value === undefined ? index.pathsWithKey(m.key) : index.pathsMatching(m.key, m.value);
+      for (const path of matched) {
+        take({ kind: "file", path }, canonicalPath(path));
       }
+      return;
+    }
+    default: {
+      // A member kind with no case above. Adding one to `MemberEntry` fails
+      // HERE, at compile time, instead of silently contributing nothing —
+      // for the preview as well as for the tree, now that both run this.
+      const unreached: never = m;
+      return unreached;
     }
   }
 }

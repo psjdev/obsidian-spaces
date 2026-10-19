@@ -2,7 +2,7 @@
  * When to stop waiting for Obsidian to parse the rest of the vault.
  *
  * THE WHOLE RISK IS HERE. At cold start every file is unparsed, so a trigger
- * that fires on "files are unparsed" fires on every launch, and the repair
+ * that fires on "files are unparsed" fires on every launch, and the notice
  * behind it would read the vault off disk every time the app opens. That is
  * far worse than the outage it exists to fix.
  *
@@ -19,7 +19,7 @@
  * null. So `resolved` does NOT mean the queue drained — it fired twice
  * mid-index, with twelve and then eleven files outstanding. On a large healthy
  * vault the same event arrives at the same point, so that trigger would have
- * fired the repair on every ordinary cold start. It was ruled out by the
+ * fired on every ordinary cold start. It was ruled out by the
  * measurement, not by review.
  *
  * ## The trigger that replaced it
@@ -27,22 +27,29 @@
  * ARM on the first `resolved` — it does not fire again once jammed, so waiting
  * for a second is waiting forever (two negative experiments: files written
  * while jammed produced no `resolved`, no `changed`, no `resolve`). THEN watch
- * `inProgressTaskCount` across a short interval and repair only if it has not
+ * `inProgressTaskCount` across a short interval and speak only if it has not
  * moved. Mid-index it falls; jammed it does not, in every reading.
  *
- * ## Two guards, because one is a judgement and the other is not
+ * ## What a wrong verdict costs, and why that set the threshold
  *
- * This file is the judgement: it can be wrong about timing. The guard that
- * cannot be wrong is `PROPERTY_REPAIR_MAX_FILES` in `visibility/
- * propertyRepair.ts` — more than 200 unparsed files is not a jam and is never
- * read from disk, which bounds what a mistaken verdict here can cost to 200
- * files. It bounds the LIST AT THE MOMENT OF THE ASK and not the vault, so it
- * is a blast radius and not a proof that a cold start can never be read; see
- * that file for what it does and does not guarantee.
+ * A NOTICE NAMING ONE OF THE USER'S NOTES, telling them to move it out of the
+ * vault or break it up. That is the whole budget, and it is spent in public.
  *
- * And because this judgement can be wrong, it is not permanent. Sampling
- * continues past a latch and a counter that moves or drains takes it back —
- * `stallCleared` below.
+ * It used to be a repair: a mistimed verdict read at most 200 files off disk,
+ * got bytes identical to what the cache would later give, and nobody ever
+ * knew. The numbers below were chosen against THAT cost, and they were not
+ * re-derived when the repair was removed in 0.12.0. They are now.
+ *
+ * The binding measurement is the healthy control run, in which
+ * `inProgressTaskCount` held at one value for TWENTY SECONDS in the middle of
+ * a run that finished fine in 27.4 s. A threshold under that accuses a healthy
+ * vault. Latency costs nothing here by comparison: the outage this sits
+ * through lasts as long as the offending note is in the vault, measured across
+ * restarts, so waiting another fifteen seconds to be sure is free and being
+ * wrong is not.
+ *
+ * And because this judgement can still be wrong, it is not permanent:
+ * `stallCleared` takes it back the moment Obsidian makes real progress.
  */
 
 /**
@@ -63,31 +70,44 @@
  * provisional. See `stallCleared`.
  *
  * Bounded above by the outage it is sitting through: while this waits, a
- * property space shows the whole vault. Three samples at 5 s is a 15-second
- * worst case before the repair, against an outage that otherwise lasts as long
- * as the offending file is in the vault — measured across two restarts, so
+ * property space shows the whole vault. Seven samples at 5 s is a 35-second
+ * worst case before the notice, against an outage that otherwise lasts as long
+ * as the offending note is in the vault — measured across two restarts, so
  * vault-length and not session-length.
  *
- * What a mis-timed fire COSTS is the reason 5 s is affordable: at most 200
- * files are read, the result is byte-identical to what the cache would have
- * given (verified across 5,000 real files), and it simply arrives sooner. The
- * design's own third open question asks for exactly that: the 19-second window
- * during which a slow-but-not-stuck vault shows property spaces wide open is
- * worth closing too.
+ * The interval is how OFTEN the counter is read; how many readings must agree
+ * is `PROPERTY_STALL_SAMPLES_AGREED`, and that is where the cost of being
+ * wrong is paid. See the section on it in this file's own header.
  */
 export const PROPERTY_STALL_SAMPLE_MS = 5_000;
 
 /**
- * Three samples that agree — two intervals with no progress — before calling
- * it stalled. Two samples would call a single slow file a jam far more often
- * for no useful gain in latency.
+ * Seven samples that agree: THIRTY SECONDS of a counter that has not moved.
+ *
+ * Was three (ten seconds) when a wrong verdict cost an invisible repair. The
+ * healthy control run plateaus for twenty, so three accused a vault that was
+ * merely busy — tolerable when the accusation was silent, not now that it is
+ * a notice telling somebody to take a note out of their vault.
+ *
+ * Thirty seconds of stillness clears the measured plateau with half as long
+ * again to spare. Measured from `arm()` the notice therefore lands at about
+ * 35 s, against an outage that lasts for hours, which is no cost at all.
+ *
+ * WHAT IT DOES COST, said here because nothing else records it: the window in
+ * which the one notice can be missed is three times longer than it was.
+ * `reportParseStall` says nothing unless a property space is active or a
+ * picker is open, `onStalled` fires only on the transition, and the latch
+ * survives, so a notice not shown is not retried for that jam. Somebody who
+ * leaves the property space during those 35 seconds and comes back is told
+ * nothing. Raising the threshold made that more likely, and it was still the
+ * right trade: the alternative was accusing healthy vaults.
  */
-export const PROPERTY_STALL_SAMPLES_AGREED = 3;
+export const PROPERTY_STALL_SAMPLES_AGREED = 7;
 
 /**
  * 24 samples, two minutes, and then this stops sampling.
  *
- * Not a timeout on the repair: it is a timer that must not run for the life of
+ * Not a deadline on anything: it is a timer that must not run for the life of
  * the session on a vault that simply has nothing to say. `arm()` restarts it,
  * and `main.ts` re-arms whenever something actually asks for properties and
  * gets an unavailable answer, so the give-up is never final for a user who is
@@ -100,7 +120,7 @@ export type StallVerdict =
   | "drained"
   /** It is still getting through them. Keep watching. */
   | "working"
-  /** It has stopped. Repair. */
+  /** It has stopped. Say so. */
   | "stalled"
   /** Not enough readings yet, or this build cannot say. Keep watching. */
   | "unknown";
@@ -131,15 +151,32 @@ export function stallVerdict(samples: readonly (number | null)[]): StallVerdict 
  * A latch is a verdict about a moment, not about the session, and the project's
  * own control run shows a healthy vault can earn one: `jam-questions-report.md`
  * records `inProgressTaskCount` holding still for twenty seconds in a run that
- * completed in 27.4 s, which is longer than the two intervals this file latches
- * on. So a wrong verdict has to be able to cost ONE repair rather than the rest
- * of the session.
+ * completed in 27.4 s. That plateau is what set the threshold: six intervals,
+ * thirty seconds, deliberately longer than it. The margin is fifty per cent,
+ * not an order of magnitude, so a wrong verdict still has to be able to cost
+ * ONE notice rather than the rest of the session.
  *
  * Exactly two readings contradict "the counter has stopped": one that has
- * MOVED, and one that has reached zero. Everything else leaves the latch alone
- * — in particular a window too short to judge, so that re-arming (which clears
- * the samples) cannot un-latch by itself, and a null, so that a build which
- * stops exposing the counter cannot either.
+ * reached ZERO, and one that is LOWER than the reading before it. Everything
+ * else leaves the latch alone — in particular a window too short to judge, so
+ * that re-arming (which clears the samples) cannot un-latch by itself, and a
+ * null, so that a build which stops exposing the counter cannot either.
+ *
+ * ## Why a RISING counter is not progress
+ *
+ * This used to clear on any change at all, `last !== previous`. That is wrong
+ * in the one direction that matters, and the bug it caused was user-visible:
+ * on a jammed vault the queue only ever GROWS, because every note the user
+ * saves lands behind the note that is stuck. So each save looked like
+ * recovery, cleared the latch, and let it re-latch thirty seconds later — and
+ * since `main.ts` speaks on the latch transition, the user was told to go cut
+ * up their note again, and again. Measured against the real watcher by a
+ * reviewer: 12,12,12,13,13,13 fires twice; two saves fire three times; about
+ * seven notices in a two-minute armed run.
+ *
+ * A counter that goes UP while its head is stuck is the jam getting worse, not
+ * better. Only a counter coming DOWN, or reaching zero, is Obsidian actually
+ * getting through the queue.
  */
 export function stallCleared(samples: readonly (number | null)[]): boolean {
   const last = samples[samples.length - 1];
@@ -147,7 +184,7 @@ export function stallCleared(samples: readonly (number | null)[]): boolean {
   if (last === 0) return true;
   const previous = samples[samples.length - 2];
   if (previous === undefined || previous === null) return false;
-  return last !== previous;
+  return last < previous;
 }
 
 /** The injected clock, the shape `eventCoalescer.ts` uses. */
@@ -167,8 +204,9 @@ export interface ParseStallWatch {
    * Whether the samples currently say Obsidian has stopped.
    *
    * Latched but NOT permanent: sampling continues past a latch, and a counter
-   * that moves or reaches zero clears it. A wrong verdict therefore costs one
-   * repair rather than the rest of the session.
+   * that FALLS or reaches zero clears it. A rising counter does not — on a
+   * jammed vault the queue only grows. See `stallCleared`. A wrong verdict
+   * therefore costs one notice rather than the rest of the session.
    */
   stalled(): boolean;
   /** Drop any pending sample so no timer outlives the plugin. */
