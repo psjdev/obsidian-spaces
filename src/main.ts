@@ -19,6 +19,7 @@ import { SwitcherView } from "./ui/SwitcherView";
 import { SpaceHeaderView } from "./ui/SpaceHeaderView";
 import { SpaceSuggestModal } from "./ui/SpaceSuggestModal";
 import { spaceEntries } from "./ui/spaceEntries";
+import { activeSpaces } from "./definitions/archived";
 import { knownIconIds } from "./ui/knownIcons";
 import { CreateSpacePanel } from "./ui/CreateSpacePanel";
 import { nativeKnownTags } from "./ui/nativeTagCounts";
@@ -66,7 +67,12 @@ import { installNativeCreateRedirect } from "./actions/nativeNewFileParent";
 import { armIntent, matchIntent, type CreationIntent } from "./actions/creationIntent";
 import { canOfferCreateSpaceFromFolder } from "./actions/createSpaceMenu";
 import { inheritedFromFolder } from "./actions/membershipMenu";
-import { holdsPropertyMember, pathMembers, watchesMetadata } from "./definitions/membership";
+import {
+  armsParseStall,
+  holdsPropertyMember,
+  pathMembers,
+  watchesMetadata,
+} from "./definitions/membership";
 import { canonicalPath, compileIgnore } from "./visibility/glob";
 import { buildPreview } from "./ui/previewSeam";
 import { PublicApi } from "./api/PublicApi";
@@ -541,6 +547,13 @@ export default class SpacesPlugin extends Plugin {
     // Same reason: a live sampling timer that outlived `onunload` would hold
     // the plugin instance and go on reading a torn-down app.
     this.register(() => this.parseStall.cancel());
+    // A coalesced resample must not fire into a torn-down plugin. The optional
+    // chain in it would survive that, but a timer outliving its owner is the
+    // kind of thing this file does not leave lying around.
+    this.register(() => {
+      if (this.resampleHandle !== null) window.clearTimeout(this.resampleHandle);
+      this.resampleHandle = null;
+    });
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -738,7 +751,13 @@ export default class SpacesPlugin extends Plugin {
     // `tests/propertyWorkBudget.test.ts` still holds: a vault with no property
     // space arms nothing and pays nothing. `arm()` is a no-op while already
     // sampling, so doing this as well as the listener costs nothing twice.
-    if (this.defs.get().spaces.some(holdsPropertyMember)) this.parseStall.arm();
+    // ACTIVE spaces only: `reportParseStall` gates on
+    // `controller.activeSpace()`, which is null for an archived space, so an
+    // archived property space can never be told anything. This re-arm is not
+    // what decides whether sampling happens at all — the `resolved` listener
+    // above arms unconditionally — so the filter buys a truthful ask, not a
+    // saved sampler. See `armsParseStall`.
+    if (armsParseStall(this.defs.get().spaces)) this.parseStall.arm();
     this.adapter.onHealthChange((healthy) => {
       if (healthy) {
         this.explorerHealthWarned = false;
@@ -792,6 +811,9 @@ export default class SpacesPlugin extends Plugin {
         onOutcome: (outcome) => {
           if (outcome.kind !== "skipped") this.bindExplorer();
           this.reportLayoutOutcome(outcome);
+        },
+        onSelectionDropped: (from) => {
+          void this.controller.runQueuedLayoutJob(() => this.settleLayoutAfterDrop(from));
         },
       }
     );
@@ -884,16 +906,25 @@ export default class SpacesPlugin extends Plugin {
           // running only when it cannot rule a change out.
           const current = this.defs.get();
           if (!renameTouchesDefs(current, oldPath, file.path)) return;
-          if (sameDefs(current, repairOnRename(current, oldPath, file.path))) return;
-          try {
-            await this.defs.mutate((d) => repairRenameIn(d, oldPath, file.path));
-          } catch (e) {
-            // A failed write leaves members pointing at the old path, which the
-            // rest of the plugin tolerates. `mutate` raises nothing itself when
-            // the write fails, so without this the user sees nothing at all.
-            // Matches what `repairIfMoved` does for the external-move path.
-            console.error("Spaces: could not repair paths after a rename", e);
+          if (!sameDefs(current, repairOnRename(current, oldPath, file.path))) {
+            try {
+              await this.defs.mutate((d) => repairRenameIn(d, oldPath, file.path));
+            } catch (e) {
+              // A failed write leaves members pointing at the old path, which
+              // the rest of the plugin tolerates. `mutate` raises nothing
+              // itself when the write fails, so without this the user sees
+              // nothing at all. Matches what `repairIfMoved` does for the
+              // external-move path.
+              console.error("Spaces: could not repair paths after a rename", e);
+            }
           }
+          // OUTSIDE the `sameDefs` early-out above, and after the repair.
+          // Outside, because a rename can leave the document identical and
+          // still change what EXISTS: renaming a folder to the path a space
+          // is pinned to rewrites nothing and makes a missing root present.
+          // After, because the repair rewrites the stored root, and the row
+          // must show where the space now points, not where it used to.
+          this.resampleSettingsRows();
         });
       })
     );
@@ -912,7 +943,21 @@ export default class SpacesPlugin extends Plugin {
         // sequencing it before the repair bought nothing; being on the queue
         // does buy something, namely that a delete's repair cannot interleave
         // with a concurrent rename's.
-        void this.onVaultChange(() => this.repairIfMoved(file, "delete"));
+        void this.onVaultChange(async () => {
+          await this.repairIfMoved(file, "delete");
+          // The settings row's `(missing)` marker is a string built when the
+          // page was, and the only other refresh is gated on the SPACE LIST,
+          // which a delete does not move. Without this, deleting a folder a
+          // space is pinned to leaves its row reading as healthy until a
+          // restart. `(path, path)` asks `renameTouchesDefs` the question it
+          // already answers for one path: is this it, or under it. Broader
+          // than the row strictly needs, since it also counts exclusions and
+          // order keys; over-triggering costs a redraw nobody sees, and
+          // under-triggering is the bug.
+          if (renameTouchesDefs(this.defs.get(), file.path, file.path)) {
+            this.resampleSettingsRows();
+          }
+        });
       })
     );
     // A native create is attributed to a preceding explorer gesture, or
@@ -1084,6 +1129,41 @@ export default class SpacesPlugin extends Plugin {
     // (`Plugin.addCommand` is not modelled by the `obsidian` stub, and a
     // command that is not in the list is not registered).
     for (const spec of this.commandSpecs()) this.addCommand(spec);
+
+    // LAST: the settings page sampled the vault inside `onload()`, before
+    // `onLayoutReady`, so every folder space's row could be claiming its
+    // folder is missing. See `SpacesSettingTab.resampleVault`.
+    this.resampleSettingsRows();
+  }
+
+  private resampleHandle: number | null = null;
+
+  /**
+   * Ask the settings page to look at the vault again, if it exists.
+   *
+   * COALESCED, because one user gesture is a BURST of vault events: a folder
+   * delete arrives as the folder plus every child, a rename likewise, and each
+   * one that names a space answers the gate. Measured in a real Obsidian on
+   * this build: deleting one pinned folder asked twice, renaming a folder a
+   * space holds notes in asked three more times. `resampleVault` rebuilds
+   * every row and `memberRows` is O(M^2) per space (issue #54), so letting a
+   * burst through would be a stack of quadratic redraws for one keystroke,
+   * which is the shape of hitch this plugin treats as a defect.
+   *
+   * Guarded like the defs-subscription refresh: a settings redraw must never
+   * take down a started plugin or a vault-event handler. The page being
+   * briefly wrong is not worth that.
+   */
+  private resampleSettingsRows(): void {
+    if (this.resampleHandle !== null) return;
+    this.resampleHandle = window.setTimeout(() => {
+      this.resampleHandle = null;
+      try {
+        this.settingTab?.resampleVault();
+      } catch (e) {
+        console.error("Spaces: settings resample failed", e);
+      }
+    }, 0);
   }
 
   /**
@@ -1796,7 +1876,7 @@ export default class SpacesPlugin extends Plugin {
   }
 
   private async cycle(delta: number): Promise<void> {
-    const spaces = this.defs.get().spaces;
+    const spaces = activeSpaces(this.defs.get().spaces);
     if (spaces.length === 0) return;
     const order: ActiveSelection[] = [
       { kind: "all" },
@@ -1807,9 +1887,75 @@ export default class SpacesPlugin extends Plugin {
     // resolve both presses against the same index: the second one advanced
     // nowhere and ran a self-transition that pruned the target's saved layout.
     await this.controller.switchTo((current) => {
-      const i = order.findIndex((o) => sameSelection(o, current));
+      const at = order.findIndex((o) => sameSelection(o, current));
+      // -1 when the committed selection names a space that is not in this
+      // list: an archived one, in the window between the archive write
+      // landing in memory and the recompute that rewrites the selection
+      // (`mutate` notifies after `persist()`, so that window is a disk
+      // write long). Unresolved means "nowhere in the cycle", and the place
+      // in the cycle that means that is All, so both directions step from
+      // there: Next lands on the first space and Previous on the last.
+      // Left as -1 it gave All for Next and the second-to-last space for
+      // Previous, which is not an answer to anything.
+      const i = at < 0 ? 0 : at;
       return order[(i + delta + order.length) % order.length];
     });
+  }
+
+  /**
+   * The layout half of a selection that fell back to All on its own.
+   *
+   * `recompute` resets the selection synchronously, so the tabs of the space
+   * that went away are still on screen under a selection that now says All.
+   * This runs the transition a deliberate switch would have run: the
+   * workspace on screen is captured into the departed space's slot, and All's
+   * own saved workspace comes back. Without it the next switch captures those
+   * tabs into All's slot instead, and the workspace the user had saved for
+   * All is overwritten with no gesture of theirs.
+   *
+   * Right for all three ways the arm is reached:
+   *
+   *  - **Archived.** The space is still in the definitions, so the capture
+   *    lands where the README says it does: an archived space keeps the tabs
+   *    Spaces saved for it.
+   *  - **Deleted.** `transition` captures SYNCHRONOUSLY, before its first
+   *    await, and `deleteSpace` calls its `onDeleted` hook (and so
+   *    `dropLayoutFor`) after the mutate that brought us here, so the blob is
+   *    reaped a moment later. The check below covers the ordering anyway.
+   *  - **Gone from a sync.** Nothing will ever ask about that id again, so
+   *    the captured blob is dropped rather than left for `reconcileLayouts`
+   *    to find at the next load.
+   *
+   * Deliberately NOT routed through `switchTo`: the selection is already All
+   * by the time this runs, so `switchTo` would see `from === to` and skip,
+   * and a failed transition would leave the fallback to be retried on every
+   * subsequent refresh.
+   *
+   * It IS routed through `controller.runQueuedLayoutJob`, which gives it the
+   * switch queue and the `switching` guard without the idempotence check.
+   * Calling it bare let a strip click start a second, concurrent transition
+   * that captured a half-restored workspace, and let an ordinary recompute
+   * release the switch mask mid-transition. See that method for both.
+   */
+  private async settleLayoutAfterDrop(from: ActiveSelection): Promise<void> {
+    if (from.kind !== "space") return;
+    try {
+      const outcome = await this.runMaskedTransition(from, { kind: "all" });
+      if (outcome.kind !== "skipped") this.bindExplorer();
+      this.reportLayoutOutcome(outcome);
+    } catch (e) {
+      console.error("[spaces] layout transition after a dropped selection failed", e);
+    }
+    // The mask comes off, and the tree is re-applied against All, on this
+    // recompute: `host.apply` is what releases it. Unconditional, including
+    // after a `skipped` transition that installed no mask: one extra recompute
+    // against a selection that is already All is cheaper than working out
+    // which outcomes left a mask behind, and getting that wrong strands the
+    // explorer under one.
+    this.controller.refresh();
+    if (!this.defs.get().spaces.some((s) => s.id === from.id)) {
+      this.runtime.dropLayoutFor(from.id);
+    }
   }
 
   /** Derived every time; the persisted preference is never rewritten. */

@@ -21,6 +21,7 @@
  * never a dead zone, and a drop that changes nothing draws no line.
  */
 
+import { activeSpaces, isArchived } from "../definitions/archived";
 import type { Span } from "./stripAxis";
 
 /** How close to the rail's edge the pointer must be before it scrolls. */
@@ -126,3 +127,69 @@ export function gapCenterAt(index: number, boxes: readonly ItemBox[]): number {
 
 /** How far outside the strip the first and last positions sit. */
 const EDGE_LINE_INSET_PX = 2;
+
+/**
+ * Where the dragged space sits among the VISIBLE (non-archived) spaces, or
+ * null when it is not in the list or is itself archived.
+ *
+ * The strip measures its drop gap against rendered icons, so every index the
+ * drag logic compares or draws is a visible index. `spaces` is the full
+ * stored list.
+ */
+export function visibleIndexOf(
+  spaces: readonly { id: string; archived?: boolean }[],
+  id: string
+): number | null {
+  const at = activeSpaces(spaces).findIndex((sp) => sp.id === id);
+  return at < 0 ? null : at;
+}
+
+/**
+ * The stored list after dragging the space `id` to a gap measured among the
+ * visible spaces (`visibleGap`, as `insertionIndexAt` returns it).
+ *
+ * The gap is translated to the stored position directly before the active
+ * space that currently sits at that gap. A gap past the last active space
+ * lands right after it, which leaves a trailing archived run trailing.
+ * Returns the list unchanged when `id` is not an active space, and when the
+ * gap is one of the two touching the dragged space, which are no-ops.
+ *
+ * **The invariant is relative order, not stored index.** Every space other
+ * than the dragged one keeps its position relative to every other, archived
+ * ones included, because the move is one removal and one reinsertion. Their
+ * stored INDEXES are not stable and cannot be: `[a, B(archived), c]` with
+ * `a` dragged to the last gap gives `[B, c, a]`, so `B` moved from 1 to 0
+ * and `a` crossed it. Crossing is unavoidable when the user drags a space
+ * past one that is further along, and an earlier version of this paragraph
+ * claimed the drop "never steps over, displaces or repositions an archived
+ * one". The counterexample above is the disproof, and it is pinned. An
+ * earlier version of this paragraph also carried a hit rate from an
+ * exhaustive enumeration; a reviewer re-ran that enumeration four ways and
+ * got four different totals, so the figure is gone rather than restated. The
+ * claim that needs to be true is the invariant, and it is pinned by an
+ * exhaustive relative-order test in `tests/archivedHiding.test.ts`.
+ */
+export function moveVisibleTo<T extends { id: string; archived?: boolean }>(
+  spaces: readonly T[],
+  id: string,
+  visibleGap: number
+): T[] {
+  const from = spaces.findIndex((sp) => sp.id === id);
+  if (from < 0 || isArchived(spaces[from])) return [...spaces];
+  const visible = activeSpaces(spaces);
+  const gap = Math.max(0, Math.min(visibleGap, visible.length));
+  // `isNoOpMove`'s rule, in the VISIBLE index space the gap was measured in.
+  // Without it the sentence above is not true of this function: `[a, X, b]`
+  // with `X` archived and `a` dropped at gap 1 translated to "the slot before
+  // `b`" and returned `[X, a, b]`, stepping `a` over the archived space to
+  // reach the position it already held. The drop handler returns on
+  // `isNoOpMove` before it ever gets here, but that is the handler's guard,
+  // and this is a pure function that is called directly and documented on its
+  // own terms.
+  if (isNoOpMove(visible.findIndex((sp) => sp.id === id), gap)) return [...spaces];
+  const stored =
+    gap < visible.length
+      ? spaces.indexOf(visible[gap])
+      : spaces.indexOf(visible[visible.length - 1]) + 1;
+  return moveTo(spaces, from, stored);
+}

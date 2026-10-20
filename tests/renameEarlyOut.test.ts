@@ -188,3 +188,56 @@ describe("renameTouchesDefs", () => {
     }
   });
 });
+
+describe("renameTouchesDefs asked about a single path", () => {
+  // The delete handler calls it as `(path, path)` to ask the one question it
+  // already answers: is this the path, or under it. That gate is what decides
+  // whether deleting a folder makes the settings page look again, so the
+  // single-path reading gets its own tests rather than riding on the
+  // two-path ones.
+  const pinned = defsWith({
+    spaces: [{ ...RESEARCH, root: "Projects/Kitchen", members: [] }],
+  });
+  const curated = defsWith({
+    spaces: [
+      { ...RESEARCH, members: [{ path: "Reading/book.md", kind: "file" as const }] },
+    ],
+  });
+  const touches = (d: SpacesDefinitions, p: string): boolean =>
+    renameTouchesDefs(d, p, p);
+
+  it("sees the pinned folder itself", () => {
+    expect(touches(pinned, "Projects/Kitchen")).toBe(true);
+  });
+
+  it("sees an ANCESTOR of the pinned folder, which is how a parent delete reaches it", () => {
+    // Deleting "Projects" takes "Projects/Kitchen" with it, so the row has to
+    // be rebuilt even though nothing named "Projects" is stored anywhere.
+    expect(touches(pinned, "Projects")).toBe(true);
+  });
+
+  it("stays quiet for a note inside the pinned folder, which cannot change the row", () => {
+    // Checked against the predicate, not assumed: `hit` compares each STORED
+    // string against the changed path, so a note UNDER the root is not a hit
+    // on the root. That is right. Deleting a note inside a pinned folder does
+    // not make the folder missing, and a folder space's row counts no members,
+    // so there is nothing to rebuild. A deleted note that IS a curated member
+    // is a different case, and the test below covers it.
+    expect(touches(pinned, "Projects/Kitchen/plan.md")).toBe(false);
+  });
+
+  it("does not fire for a sibling that shares a string prefix", () => {
+    // The segment-aware check earns its keep here: a bare startsWith would
+    // rebuild the page for a folder that has nothing to do with the space.
+    expect(touches(pinned, "Projects/Kitchen Rebuild")).toBe(false);
+  });
+
+  it("sees a curated member path", () => {
+    expect(touches(curated, "Reading/book.md")).toBe(true);
+  });
+
+  it("stays quiet for a path no space names", () => {
+    expect(touches(pinned, "Inbox/idea.md")).toBe(false);
+    expect(touches(curated, "Inbox/idea.md")).toBe(false);
+  });
+});

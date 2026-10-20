@@ -5,7 +5,8 @@ import {
   isIconIdShape,
   normalizeHex,
 } from "../definitions/appearance";
-import { RESERVED_IDS } from "../definitions/schema";
+import { RESERVED_IDS, isSafeVaultPath } from "../definitions/schema";
+import { repairExclude } from "../lifecycle/pathRepair";
 import type { MemberEntry } from "../types";
 
 /**
@@ -248,12 +249,25 @@ export async function renameSpace(
  * reclassify a folder space as an empty curated one. So this ALWAYS assigns
  * `s.root`, never `delete`s it.
  *
+ * Which is a promise this cannot keep on its own, hence the guard below:
+ * `validateSpace` drops `root` for a path `isSafeVaultPath` rejects, so
+ * writing one here produced exactly the reclassification the paragraph above
+ * refuses to perform, and now takes the exclusions with it because they are
+ * rewritten against that path first. Unreachable from the picker today,
+ * which commits either a real folder or an Enter path that re-checks the
+ * kind; the guard is what makes the promise true rather than true by luck.
+ *
  * Usability — does the path resolve to a real folder now — is deliberately
  * NOT checked here; that is `rootOf`'s call at READ time.
  *
  * A no-op when `s.root` is not already a string: this setter only changes
  * an EXISTING folder space's root, not turns a curated one into a folder
  * space as a side effect.
+ *
+ * The space's exclusions follow the root, through the same `repairExclude`
+ * the restore gate and a rename use. This is the same gesture the restore
+ * gate's root row offers, and it must not depend on which door the user came
+ * through.
  */
 export async function setSpaceRoot(
   defs: DefinitionStore,
@@ -261,8 +275,30 @@ export async function setSpaceRoot(
   root: string
 ): Promise<void> {
   const normalized = normalizeMemberPath(root);
+  // "" and "/" are the two spellings of "no folder chosen" and are stored as
+  // given (see `validateSpace`); anything else must survive the loader.
+  if (normalized !== "" && normalized !== "/" && !isSafeVaultPath(normalized)) return;
   await defs.mutate((d) => {
     const s = d.spaces.find((x) => x.id === id);
-    if (s && typeof s.root === "string") s.root = normalized;
+    if (!s || typeof s.root !== "string") return;
+    const from = s.root;
+    s.root = normalized;
+    // `exclude` holds LITERAL vault paths that sit UNDER the root, so a
+    // re-point that left them behind would put the notes the user took out
+    // back in the space, silently, and exclude whatever later occupies the
+    // old path in their place. `repairExclude` is that rule, in one place
+    // (`lifecycle/pathRepair.ts`, where the failure is documented).
+    //
+    // Only between two named folders. `""` is "no folder chosen yet" rather
+    // than a path anything sits under, so there is nothing to carry from or
+    // to; the list is kept as it stands, which is the direction `pathRepair`
+    // deliberately takes when a path goes away.
+    if (from === "" || normalized === "") return;
+    const next = repairExclude(s.exclude, from, normalized);
+    // Assigned or deleted, never spread: `repairExclude` returns `undefined`
+    // for a space that now excludes nothing, and leaving the key in place
+    // would keep the stale list.
+    if (next) s.exclude = next;
+    else delete s.exclude;
   });
 }

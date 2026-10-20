@@ -12,6 +12,7 @@ import { resolveMembers } from "./resolveMembers";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex, PropertySnapshot } from "../visibility/PropertyIndex";
 import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from "../types";
+import { isArchived } from "../definitions/archived";
 
 /**
  * The property accessor a disposed controller is left with.
@@ -59,6 +60,14 @@ export type TransitionAborted = { kind: "aborted"; reason: string };
 interface LayoutHooks {
   transition(from: ActiveSelection, to: ActiveSelection): Promise<SwitchOutcome>;
   onOutcome?(outcome: SwitchOutcome | TransitionAborted): void;
+  /**
+   * The selection was dropped to All because the space it named stopped
+   * being active: archived, deleted, or gone from a sync. See `recompute`.
+   *
+   * Optional, so a controller built without it (every test that does not
+   * care, and the pre-layout wiring) behaves exactly as before.
+   */
+  onSelectionDropped?(from: ActiveSelection): void;
 }
 
 /**
@@ -181,11 +190,54 @@ export class SpaceController {
   activeSpace(): SpaceDefinition | null {
     const sel = this.runtime.getSelection();
     if (sel.kind === "all") return null;
-    return this.defs.get().spaces.find((s) => s.id === sel.id) ?? null;
+    const space = this.defs.get().spaces.find((s) => s.id === sel.id);
+    // An archived space is away, which is the same state as one that is not in
+    // the array: All. `recompute` then rewrites the stored selection to All on
+    // the next refresh, so restoring the space does NOT put the user back in it.
+    return space && !isArchived(space) ? space : null;
   }
 
   currentSnapshot(): VisibilitySnapshot | null {
     return this.snapshot;
+  }
+
+  /**
+   * Run a layout job with the same serialization and the same `switching`
+   * guard a switch gets.
+   *
+   * `onSelectionDropped` hands `main.ts` a transition to run, and the obvious
+   * way to run it is to just call it. That is wrong twice over, and both ways
+   * reintroduce the corruption the dropped-selection fix exists to prevent:
+   *
+   *  - **Off the queue.** `LayoutCoordinator.transition` has no reentrancy
+   *    guard and captures the live workspace before its first await. A strip
+   *    click landing while the settle transition is parked would start a
+   *    second transition that captures a HALF-RESTORED workspace into All's
+   *    slot, which is the exact corruption, in a narrower window.
+   *  - **Without `switching`.** `refresh()` and `onFileOpened` return early
+   *    on that flag. With it clear, any ordinary recompute during the settle
+   *    reaches `host.apply`, releasing the switch mask mid-transition.
+   *
+   * Fire and forget by design: the caller is inside `recompute`, so awaiting
+   * the queue from there would be awaiting a slot this call may itself be
+   * inside. Saving and restoring `switching` rather than clearing it keeps
+   * that nesting harmless if the queue is ever drained re-entrantly.
+   */
+  runQueuedLayoutJob(job: () => Promise<void>): Promise<void> {
+    const run = this.queue.then(async () => {
+      if (this.disposed) return;
+      const prev = this.switching;
+      this.switching = true;
+      try {
+        await job();
+      } catch (e) {
+        console.error("[spaces] queued layout job failed", e);
+      } finally {
+        this.switching = prev;
+      }
+    });
+    this.queue = run.catch(() => undefined);
+    return run;
   }
 
   /**
@@ -506,8 +558,29 @@ export class SpaceController {
     const space = this.activeSpace();
     if (!space) {
       // Either All, or an active space that no longer exists: fail to All.
-      if (this.runtime.getSelection().kind === "space") {
+      const current = this.runtime.getSelection();
+      if (current.kind === "space") {
+        // THE SELECTION MOVES HERE AND THE WORKSPACE DOES NOT, which is the
+        // whole reason the hook below exists.
+        //
+        // `LayoutCoordinator.transition` captures `from`'s workspace as its
+        // first act, on the standing assumption that what is on screen
+        // belongs to the current selection. Resetting the selection without
+        // a transition breaks that: the departed space's tabs stay on screen
+        // while the selection says All, so the NEXT switch captures them
+        // into All's slot and the workspace the user had saved for All is
+        // gone. Archiving the space you are in is the routine, documented
+        // way to reach that; Delete and a sync removing the space reach the
+        // same arm.
+        //
+        // Only once the tree has actually been drawn for that space
+        // (`snapshot` non-null). At the first recompute of a session nothing
+        // has been captured or restored yet, the workspace on screen is the
+        // one Obsidian itself restored, and moving it on load is not this
+        // fallback's business.
+        const wasDrawn = this.snapshot !== null;
         this.runtime.setSelection({ kind: "all" });
+        if (wasDrawn) this.layout?.onSelectionDropped?.(current);
       }
       this.snapshot = null;
       this.host.apply(null);

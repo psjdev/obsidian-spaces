@@ -1,14 +1,19 @@
 import {
   Notice,
   PluginSettingTab,
+  TFile,
+  TFolder,
   type App,
   type Plugin,
   type Setting,
+  type SettingDefinition,
   type SettingDefinitionItem,
 } from "obsidian";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
-import type { SpacesDefinitions, StripPlacement } from "../types";
+import type { SpaceDefinition, SpacesDefinitions, StripPlacement } from "../types";
 import { deleteSpace, renameSpace, type SpaceLifecycleHooks } from "../actions/spaceLifecycle";
+import { archiveSpace, restoreSpace } from "../actions/archiveSpace";
+import { activeSpaces, archivedSpaces, isArchived } from "../definitions/archived";
 import { setStripPlacement } from "../actions/stripPlacement";
 import { memberRows, missingCount, spaceRowSummary } from "./memberList";
 import {
@@ -22,6 +27,9 @@ import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { ConfirmModal } from "./ConfirmModal";
 import { SpaceContentsModal } from "./SpaceContentsModal";
+import { restoreProblems } from "./restoreCheck";
+import { RestoreSpaceModal, commitRestore, restoreRows } from "./RestoreSpaceModal";
+import type { VaultSource } from "./createSpaceForm";
 import {
   BlurCommitLedger,
   deleteWithConfirm,
@@ -204,16 +212,16 @@ export class SpacesSettingTab extends PluginSettingTab {
   /**
    * What the Spaces page is built from, as a string.
    *
-   * Ids and names in order, because those are the three things a change to
+   * Ids, names and the archived flag in order, because those are the things a change to
    * the space list can do that the rendered page must follow: add, remove,
-   * rename, reorder. Settings live on the other page and are read through
+   * rename, reorder, archive. Settings live on the other page and are read through
    * `getControlValue`, so a toggle changes no definition and must not cost a
    * redraw.
    */
   private spaceSignature(): string {
     return this.defs
       .get()
-      .spaces.map((s) => `${s.id}\u0000${s.name}`)
+      .spaces.map((s) => `${s.id}\u0000${s.name}\u0000${isArchived(s) ? 1 : 0}`)
       .join("\u0001");
   }
 
@@ -237,11 +245,48 @@ export class SpacesSettingTab extends PluginSettingTab {
    * every toggle on the Preferences page writes to the same store, and
    * redrawing the whole tab under the user's cursor each time they flip a
    * switch is the cost `save()` has always deliberately avoided.
+   *
+   * **The buttons in this file redraw themselves as well, and that second
+   * redraw is kept deliberately.** `mutate` notifies its subscribers before
+   * it resolves, and the archived flag is part of the signature, so in the
+   * plugin an Archive, Restore or Delete click reaches `update()` twice: once
+   * from the subscription above this handler's `.then`, once from the handler
+   * itself. The alternative is a tab whose own buttons redraw it only because
+   * `main.ts` wired a subscriber to the store, which is the invisible coupling
+   * this method exists to make up for, pointing the other way. The second pass
+   * re-renders the same definitions on a settings page the user just clicked,
+   * not in the tree or the strip; it has NOT been measured in a real Obsidian,
+   * and if it ever shows, the handlers can call this method instead, where the
+   * signature check makes the second pass a no-op.
    */
   refreshIfSpacesChanged(): void {
     const next = this.spaceSignature();
     if (next === this.lastSignature) return;
     this.lastSignature = next;
+    this.update();
+  }
+
+  /**
+   * Rebuild the rows once the vault can answer what exists.
+   *
+   * `addSettingTab` builds this tab's definitions inside `onload()`, one line
+   * before `onLayoutReady`, and a row's `(missing)` marker is a plain string
+   * computed right there. `desc` is `string | DocumentFragment` and never a
+   * function, so nothing re-evaluates it per render; Obsidian does not re-ask
+   * a declarative tab for its definitions when the window is opened; and the
+   * only other refresh, `refreshIfSpacesChanged`, no-ops unless the SPACE LIST
+   * moved. So every folder-existence answer on this page was sampled before
+   * the vault was able to give one, and a folder space whose folder is
+   * perfectly healthy read `Folder pinned - <path> (missing)` for the whole
+   * session. Measured in a real Obsidian: the rendered row said `(missing)`
+   * while `getSettingDefinitions()` recomputed at the same moment did not.
+   *
+   * Unconditional, unlike `refreshIfSpacesChanged`: the space list has NOT
+   * changed here, the vault's answer has, and the signature cannot see that.
+   * One redraw, once, after startup and off the path `onload` makes Obsidian
+   * wait for.
+   */
+  resampleVault(): void {
     this.update();
   }
 
@@ -573,16 +618,8 @@ export class SpacesSettingTab extends PluginSettingTab {
    * name in the settings search.
    */
   private spaceItems(): SettingDefinitionItem[] {
-    const spaces = this.defs.get().spaces;
-    if (spaces.length === 0) {
-      return [
-        {
-          name: "No spaces yet",
-          desc: "Use the + button at the bottom of the file explorer to make one.",
-        },
-      ];
-    }
-
+    const all = this.defs.get().spaces;
+    const spaces = activeSpaces(all);
     const exists = (path: string): boolean => this.app.vault.getAbstractFileByPath(path) !== null;
 
     // NOTHING HERE MAY COUNT A TAG'S NOTES, and no `matchCount` is passed
@@ -605,7 +642,7 @@ export class SpacesSettingTab extends PluginSettingTab {
     // one rather than as its contents. The per-tag note count lives in the
     // Contents dialog, one button to the right of this line, which the user
     // opens deliberately and which can afford the walk.
-    return spaces.map((space) => {
+    const rowsFor = spaces.map((space) => {
       // One row per stored member, tags included. `missing` is unaffected: a
       // tag row is never missing.
       // No property count either, for the tag reason above: unavailable,
@@ -651,32 +688,198 @@ export class SpacesSettingTab extends PluginSettingTab {
             );
           }
 
+          // Immediately before Delete on every row, so it does not move
+          // between a curated row and a folder row, which has no Contents….
           setting.addButton((b) =>
             b
-              .setButtonText("Delete")
-              .setDestructive()
-              .onClick(async () => {
-                await deleteWithConfirm(
-                  { name: space.name, memberCount: rows.length, missingCount: missing },
-                  {
-                    confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
-                    remove: () => deleteSpace(this.defs, space.id, this.hooks),
-                    // One fewer row is a change to the definitions themselves,
-                    // not to a rendered value, so this is `update()` and not
-                    // `refreshDomState()`.
-                    onDeleted: () => {
-                      this.update();
-                    },
-                    onError: (message) => {
-                      new Notice(message);
-                    },
-                  }
-                );
+              .setButtonText("Archive")
+              .setTooltip(`Put ${space.name} away without deleting it`)
+              .onClick(() => {
+                void archiveSpace(this.defs, space.id)
+                  .then(() => {
+                    // The row vanishes from here and reappears in a list that
+                    // may be below the fold, with no other sign anything
+                    // happened. Delete names the space it took; so does this.
+                    new Notice(`Archived "${space.name}". Find it under Archived below.`);
+                    // Twice in the plugin, deliberately: see
+                    // `refreshIfSpacesChanged`.
+                    this.update();
+                  })
+                  .catch((e: unknown) => {
+                    new Notice(`Spaces: could not archive "${space.name}" (${String(e)})`);
+                  });
               })
           );
+
+          this.addDeleteButton(setting, space, rows.length, missing);
         },
       };
     });
+
+    return [
+      ...(rowsFor.length > 0
+        ? rowsFor
+        : [
+            all.length === 0
+              ? {
+                  name: "No spaces yet",
+                  desc: "Use the + button at the bottom of the file explorer to make one.",
+                }
+              : {
+                  name: "Every space is archived",
+                  desc: "Restore one below to put it back on the strip.",
+                },
+          ]),
+      // A DELIBERATE NARROWING OF THE DESIGN, recorded here because it is one.
+      // The design says the Archived section is "always visible, even when
+      // empty", and it is: a vault with spaces and nothing archived still gets
+      // the heading and "Nothing archived". The carve-out is only the vault
+      // with NO SPACES AT ALL, where "No spaces yet" is the whole answer and a
+      // heading plus an empty state under it describes a feature of a thing
+      // the reader does not have one of.
+      ...(all.length === 0
+        ? []
+        : [
+            {
+              type: "list" as const,
+              heading: "Archived",
+              emptyState: "Nothing archived. Click Archive beside a space to put it here.",
+              items: archivedSpaces(all).map((space) => this.archivedRow(space, exists)),
+            },
+          ]),
+    ];
+  }
+
+  /** An archived space: name and summary, Restore and Delete. No name field, no Contents…. */
+  private archivedRow(space: SpaceDefinition, exists: (path: string) => boolean): SettingDefinition {
+    const rows = memberRows(space, exists, undefined, () => null);
+    const missing = missingCount(rows);
+    return {
+      name: space.name,
+      desc: spaceRowSummary(space, exists),
+      render: (setting: Setting) => {
+        setting.addButton((b) =>
+          b
+            .setButtonText("Restore")
+            .setTooltip(`Put ${space.name} back on the strip`)
+            .onClick(() => {
+              this.restore(space);
+            })
+        );
+        this.addDeleteButton(setting, space, rows.length, missing);
+      },
+    };
+  }
+
+  /**
+   * Restore, gated on what no longer resolves.
+   *
+   * **Half of this is fresh and half of it is not, and the difference
+   * matters.** `vaultSource().kindOf` is read at the click, so a path the
+   * vault has since gained at the same spelling is seen as present, and one
+   * whose kind changed is reported as the wrong kind rather than as missing.
+   * `space` is the object `spaceItems()` captured the last time the page was
+   * built, and `spaceSignature` covers id, name and the archived flag only,
+   * so a member path rewritten by a rename does not redraw this tab: the gate
+   * can open naming a path that has already been repaired to a new spelling.
+   * What makes that safe is downstream rather than here. `applyRestoreFixes`
+   * re-checks every staged fix against the live document, applies only what
+   * still matches, and reports the rest.
+   *
+   * With nothing to stage this is `restoreSpace` and no modal at all — a gate
+   * shown for a space that is whole would be a dialog in front of a one-click
+   * action. With something to stage, nothing is written here:
+   * `RestoreSpaceModal` applies the fixes and clears the flag together, in
+   * one write.
+   */
+  private restore(space: SpaceDefinition): void {
+    // `vaultSource().kindOf`, not the `exists` the row's summary uses: the
+    // gate asks whether a note is still a note and a folder still a folder,
+    // which is the rule `pointProblem` already applies to what the user types
+    // into it.
+    const source = this.vaultSource();
+    const rows = restoreRows(space, restoreProblems(space, (path) => source.kindOf(path)));
+    if (rows.length === 0) {
+      void restoreSpace(this.defs, space.id)
+        .then(() => {
+          // Says where it went, as Archive does, and says that restoring is
+          // not entering: nothing switches to the space.
+          new Notice(`Restored "${space.name}". Click it on the strip to open it.`);
+          // As on Archive, and for the reason given on
+          // `refreshIfSpacesChanged`.
+          this.update();
+        })
+        .catch((e: unknown) => {
+          new Notice(`Spaces: could not restore "${space.name}" (${String(e)})`);
+        });
+      return;
+    }
+    new RestoreSpaceModal(this.app, {
+      space,
+      rows,
+      source,
+      apply: (fixes) => commitRestore(this.defs, space.id, fixes),
+      onRestored: () => {
+        this.update();
+      },
+    }).open();
+  }
+
+  /**
+   * The Delete button, identical on an active row and an archived one.
+   *
+   * Shared rather than written twice: the confirmation carries the member and
+   * missing counts, the lifecycle hooks and the error notice, and two copies
+   * of that drift the first time one of them is edited. Archive and Restore
+   * stay separate — they are different actions on different rows.
+   */
+  private addDeleteButton(
+    setting: Setting,
+    space: SpaceDefinition,
+    memberCount: number,
+    missing: number
+  ): void {
+    setting.addButton((b) =>
+      b
+        .setButtonText("Delete")
+        .setDestructive()
+        .onClick(async () => {
+          await deleteWithConfirm(
+            { name: space.name, memberCount, missingCount: missing },
+            {
+              confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
+              remove: () => deleteSpace(this.defs, space.id, this.hooks),
+              // One fewer row is a change to the definitions themselves, not
+              // to a rendered value, so this is `update()` and not
+              // `refreshDomState()`.
+              onDeleted: () => {
+                this.update();
+              },
+              onError: (message) => {
+                new Notice(message);
+              },
+            }
+          );
+        })
+    );
+  }
+
+  /**
+   * The vault, as the restore gate's suggester and kind check read it. Built
+   * at the click, like `main.ts`'s `folderSource()`, so a folder created
+   * since the settings page was drawn is offered.
+   */
+  private vaultSource(): VaultSource {
+    const vault = this.app.vault;
+    return {
+      allPaths: () => vault.getAllLoadedFiles().map((f) => f.path),
+      kindOf: (path) => {
+        const f = vault.getAbstractFileByPath(path);
+        if (f instanceof TFolder) return "folder";
+        if (f instanceof TFile) return "file";
+        return null;
+      },
+    };
   }
 
   /**

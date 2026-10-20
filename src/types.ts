@@ -79,6 +79,13 @@ export interface SpaceDefinition {
    * hand-edited `data.json` state only.
    */
   exclude?: string[];
+  /**
+   * A finished space, kept but set aside. `true` only, never `false`: absent
+   * means active, so a document written before this field existed round-trips
+   * unchanged, the way `exclude` does. Read it through `isArchived` in
+   * `definitions/archived.ts`, not directly.
+   */
+  archived?: true;
   members: MemberEntry[];
 }
 
@@ -293,12 +300,17 @@ export type SwitchOutcome =
 /**
  * The highest document version this build understands.
  *
- * NOT what every write stamps. See `schemaVersionFor`: a document is marked 2
- * or 3 only once it uses something an older build cannot represent, so someone
- * who never adds a tag member, an exclusion or a property member keeps a
- * document an older install can still open.
+ * NOT what every write stamps. See `schemaVersionFor`: a document earns 2, 3
+ * or 4 only once it uses something an older build cannot represent, so someone
+ * who never adds a tag member, an exclusion, a property member or an archived
+ * space keeps a document an older install can still open.
+ *
+ * 4 is the archived flag. An older build that dropped it as an unknown key
+ * would put every archived space back on the strip and persist that, so this
+ * is the first version bump whose purpose is to make the older build REFUSE
+ * the file rather than read it approximately.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
   // Literal 1, not `SCHEMA_VERSION`. An empty document holds no spaces, so
@@ -391,10 +403,28 @@ export interface SpaceSummary {
  * and nothing here mutates. Arrays and objects returned are copies.
  */
 export interface SpacesApi {
-  /** The space filtering the tree, or `null` in *All* or while paused. */
+  /**
+   * The space filtering the tree, or `null` in *All*, while paused, or while
+   * the stored selection names a space that has since been archived (the
+   * selection is rewritten to *All* on the next recompute).
+   */
   getActiveSpace(): SpaceSummary | null;
-  /** Every defined space, in definition order — the order the strip uses. */
+  /**
+   * Every active space, in definition order — the order the strip uses.
+   * Archived spaces are not included; `listArchivedSpaces` lists them.
+   */
   listSpaces(): SpaceSummary[];
+  /**
+   * Every archived space, in definition order, and empty when nothing is
+   * archived.
+   *
+   * Why it exists: archiving takes a space off the strip, not out of the
+   * document. The ids this returns stay valid arguments to `isMember` and
+   * `memberPaths`, so a consumer holding one can go on answering questions
+   * about a space the user has put away. None of them appear in
+   * `listSpaces`, and none of them can be the active space.
+   */
+  listArchivedSpaces(): SpaceSummary[];
   /**
    * Whether `spaceId`'s stored PATH rules hold `path` (default: the active
    * space).
@@ -402,6 +432,12 @@ export interface SpacesApi {
    * MEMBERSHIP, not visibility: a path inherited from a member folder is a
    * member, and a member that `globalIgnore` hides is still a member.
    * False for *All*, for an unknown id, and while there is no active space.
+   *
+   * An ARCHIVED space answers normally when its id is passed explicitly: its
+   * stored rules are untouched by archiving, which is what makes an id from
+   * `listArchivedSpaces` worth holding. There is no such answer by default,
+   * though: while the stored selection names an archived space there is no
+   * active space, so a call with no `spaceId` is false.
    *
    * **Narrow, deliberately, and it does not answer "is this note in the
    * space".** Everything on this surface is a projection of `data.json` and
@@ -436,6 +472,10 @@ export interface SpacesApi {
    * they reach are not stored anywhere to be listed. A space whose members
    * are all tags or all properties returns an empty array, which is not the
    * same as a space with no members.
+   *
+   * An ARCHIVED space lists its members like any other when its id is passed
+   * explicitly. With no `spaceId` and an archived selection the result is
+   * empty, for the same reason `isMember` is false there: nothing is active.
    */
   memberPaths(spaceId?: string): string[];
   /**

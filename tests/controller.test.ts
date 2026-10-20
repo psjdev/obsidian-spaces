@@ -8,6 +8,7 @@ import { tagIndexOf } from "./helpers/tagIndex";
 import { SCHEMA_VERSION, type MemberEntry } from "../src/types";
 import type { SwitchOutcome } from "../src/types";
 import { createSpace } from "../src/actions/spaceLifecycle";
+import { archiveSpace } from "../src/actions/archiveSpace";
 import { createPropertyIndex } from "../src/visibility/PropertyIndex";
 
 const vault = buildFakeVault({
@@ -160,6 +161,182 @@ describe("SpaceController", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].from).toEqual({ kind: "all" });
     expect(calls[0].to).toEqual({ kind: "space", id: "research" });
+  });
+
+  it("reports the selection it dropped to All, so the layout can follow", async () => {
+    // `recompute` resets the selection synchronously and the workspace stays
+    // on screen, so the layout machine is left believing All's tabs are the
+    // ones showing. The next switch then captures the departed space's tabs
+    // into All's slot and the user's saved All workspace is gone. The hook
+    // is what lets main.ts run the transition a deliberate switch would.
+    const dropped: unknown[] = [];
+    let stored: unknown = defs();
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await store.load();
+    const rt = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    rt.load();
+    const controller = new SpaceController(
+      store,
+      rt,
+      vault,
+      { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] }),
+      {
+        transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
+        onSelectionDropped: (from) => dropped.push(from),
+      }
+    );
+
+    await controller.switchTo({ kind: "space", id: "research" });
+    expect(controller.activeSpace()?.id).toBe("research");
+    expect(dropped).toEqual([]);
+
+    // Archived: the space is still in the document, so the layout belongs to
+    // it and must be captured there rather than left to land on All.
+    await archiveSpace(store, "research");
+    controller.refresh();
+
+    expect(rt.getSelection()).toEqual({ kind: "all" });
+    expect(dropped).toEqual([{ kind: "space", id: "research" }]);
+
+    // Once only: the selection is All now, so a second refresh has nothing
+    // to drop and must not re-run a transition.
+    controller.refresh();
+    expect(dropped).toHaveLength(1);
+  });
+
+  it("does not report a dropped selection before the tree was ever drawn", async () => {
+    // A stored selection naming an archived space at startup: nothing has
+    // been captured or restored yet, the workspace on screen is the one
+    // Obsidian restored, and moving it on load is not this fallback's
+    // business.
+    const dropped: unknown[] = [];
+    const stored: unknown = {
+      ...defs(),
+      spaces: [{ ...defs().spaces[0], archived: true }],
+    };
+    const store = new DefinitionStore({ read: async () => stored, write: async () => undefined });
+    await store.load();
+    const rt = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    rt.load();
+    rt.setSelection({ kind: "space", id: "research" });
+    const controller = new SpaceController(
+      store,
+      rt,
+      vault,
+      { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] }),
+      {
+        transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
+        onSelectionDropped: (from) => dropped.push(from),
+      }
+    );
+
+    controller.refresh();
+
+    expect(rt.getSelection()).toEqual({ kind: "all" });
+    expect(dropped).toEqual([]);
+  });
+
+  it("runs a queued layout job serialized against a switch, not alongside it", async () => {
+    // The dropped-selection fix hands main.ts a transition to run. Running it
+    // bare let a strip click start a SECOND transition while the first was
+    // parked, and `LayoutCoordinator.transition` captures the live workspace
+    // before its first await, so that second one captures a half-restored
+    // workspace into All's slot. That is the corruption the fix exists to
+    // prevent, reintroduced in a narrower window.
+    const order: string[] = [];
+    let releaseJob: () => void = () => undefined;
+    let stored: unknown = defs();
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => { stored = d; },
+    });
+    await store.load();
+    const rt = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    rt.load();
+    const controller = new SpaceController(
+      store,
+      rt,
+      vault,
+      { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] }),
+      {
+        transition: async (): Promise<SwitchOutcome> => {
+          order.push("transition");
+          return { kind: "skipped" };
+        },
+      }
+    );
+
+    const job = controller.runQueuedLayoutJob(async () => {
+      order.push("job:start");
+      await new Promise<void>((r) => {
+        releaseJob = r;
+      });
+      order.push("job:end");
+    });
+    // Issued while the job is parked. It must not reach `transition` until
+    // the job has finished.
+    const switched = controller.switchTo({ kind: "space", id: "research" });
+    await Promise.resolve();
+    expect(order).toEqual(["job:start"]);
+
+    releaseJob();
+    await job;
+    await switched;
+    expect(order).toEqual(["job:start", "job:end", "transition"]);
+  });
+
+  it("holds the switching guard for the length of a queued layout job", async () => {
+    // `refresh()` and `onFileOpened` return early on that flag. With it clear
+    // during the settle transition, an ordinary recompute reaches
+    // `host.apply` and releases the switch mask mid-transition.
+    const applied: unknown[] = [];
+    let releaseJob: () => void = () => undefined;
+    let stored: unknown = defs();
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => { stored = d; },
+    });
+    await store.load();
+    const rt = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    rt.load();
+    const controller = new SpaceController(
+      store,
+      rt,
+      vault,
+      { apply: (s) => applied.push(s), livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] }),
+      { transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }) }
+    );
+
+    const job = controller.runQueuedLayoutJob(async () => {
+      applied.length = 0;
+      controller.refresh();
+      await new Promise<void>((r) => {
+        releaseJob = r;
+      });
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(applied).toEqual([]);
+
+    releaseJob();
+    await job;
+    // And it comes back down, so the very next refresh works.
+    applied.length = 0;
+    controller.refresh();
+    expect(applied.length).toBeGreaterThan(0);
   });
 
   it("commits the selection only after the transition resolves", async () => {

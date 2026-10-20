@@ -415,6 +415,29 @@ describe("folder spaces — the root field", () => {
     }
   });
 
+  it("collapses a trailing slash on a root rather than keeping or dropping it", () => {
+    // `"Dir/"` passes `isSafeVaultPath` (the empty final segment is neither
+    // `.` nor `..`) and then resolves to nothing, so a folder space spelled
+    // that way draws an empty tree and reports a restore-gate row on every
+    // restore, permanently. It is the same folder spelled differently, and
+    // `normalizeMemberPath` already strips it from every root the interface
+    // writes, so only a hand-edited `data.json` arrives with one. Dropping
+    // the key instead would silently reclassify a folder space as an empty
+    // curated one, which is the outcome this block exists to avoid.
+    for (const [stored, expected] of [
+      ["Projects/Work/", "Projects/Work"],
+      ["Projects/Work//", "Projects/Work"],
+    ]) {
+      const d = validateDefinitions({
+        schemaVersion: SCHEMA_VERSION,
+        settings: {},
+        spaces: [{ ...base, root: stored, members: [] }],
+      });
+      expect(d.ok, stored).toBe(true);
+      expect(d.ok && d.value.spaces[0].root, stored).toBe(expected);
+    }
+  });
+
   it("drops a root that escapes the vault, but keeps the space", () => {
     // Unlike "" or "/", this is not a spelling of the vault root — it is a
     // shape `isSafeVaultPath` refuses outright (traversal). Refusing to
@@ -541,5 +564,33 @@ describe("showPinnedFolder", () => {
   it("does not trust a present non-boolean", () => {
     expect(settingsOf({ showPinnedFolder: 1 }).showPinnedFolder).toBe(false);
     expect(settingsOf({ showPinnedFolder: "yes" }).showPinnedFolder).toBe(false);
+  });
+});
+
+describe("archived", () => {
+  const withArchived = (archived: unknown) =>
+    validateDefinitions({
+      ...valid,
+      spaces: [{ ...valid.spaces[0], archived }],
+    });
+
+  it("loads archived: true", () => {
+    const r = withArchived(true);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.spaces[0].archived).toBe(true);
+  });
+
+  it("loads a non-boolean archived as not archived, keeping the space", () => {
+    for (const bad of ["true", 1, null, {}]) {
+      const r = withArchived(bad);
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      const sp = r.value.spaces[0];
+      expect(sp.archived).toBeUndefined();
+      expect(sp.name).toBe("Research");
+      expect(sp.icon).toBe("microscope");
+      expect(sp.color).toBe("#4ecdc4");
+      expect(sp.members).toEqual([{ path: "Papers", kind: "folder" }]);
+    }
   });
 });

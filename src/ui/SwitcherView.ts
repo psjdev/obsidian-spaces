@@ -11,7 +11,8 @@ import {
   gapCenterAt,
   insertionIndexAt,
   isNoOpMove,
-  moveTo,
+  visibleIndexOf,
+  moveVisibleTo,
   type ItemBox,
 } from "./spaceReorder";
 import { axisFor, pointerAlong, spanOf, type Axis, type Span } from "./stripAxis";
@@ -1038,12 +1039,13 @@ export class SwitcherView {
       // deleted while the drag was in flight: there is no position to compute
       // and nothing the user could have meant, so nothing is written.
       const from = this.draggedIndex();
+      const id = this.dragFromId;
       this.endDrag(rail, line);
-      if (from === null) return;
+      if (from === null || id === null) return;
       if (isNoOpMove(from, index)) return;
       void this.defs
         .mutate((d) => {
-          d.spaces = moveTo(d.spaces, from, index);
+          d.spaces = moveVisibleTo(d.spaces, id, index);
         })
         .catch((err) => {
           console.error("Spaces: reordering spaces failed", err);
@@ -1074,7 +1076,8 @@ export class SwitcherView {
   }
 
   /**
-   * Where the dragged space sits in `spaces` right now, or null when no drag
+   * Where the dragged space sits among the VISIBLE spaces right now (the
+   * index space `insertionIndexAt` measures in), or null when no drag
    * is running or the space is no longer in the definitions.
    *
    * Asked per use rather than cached, because the whole point is that the
@@ -1084,8 +1087,7 @@ export class SwitcherView {
   private draggedIndex(): number | null {
     const id = this.dragFromId;
     if (id === null) return null;
-    const at = this.defs.get().spaces.findIndex((sp) => sp.id === id);
-    return at < 0 ? null : at;
+    return visibleIndexOf(this.defs.get().spaces, id);
   }
 
   /**

@@ -197,6 +197,47 @@ describe("the declared read-only API", () => {
   });
 });
 
+describe("archived spaces in the API", () => {
+  let plugin: SpacesPlugin;
+  const OLD: SpaceDefinition = { ...ADMIN, id: "old", name: "Old", archived: true };
+
+  beforeEach(async () => {
+    document.body.removeAttribute("data-spaces-space");
+    plugin = makePlugin();
+    // Archived one sits between two active ones to prove order is kept.
+    await plugin["defs"].mutate((d) => {
+      d.spaces = [RESEARCH, OLD, ADMIN, { ...RESEARCH, id: "old2", name: "Old 2", archived: true }];
+    });
+  });
+
+  it("listSpaces omits an archived space", () => {
+    expect(plugin.api.listSpaces().map((s) => s.id)).toEqual(["research", "admin"]);
+  });
+
+  it("listArchivedSpaces returns only archived spaces, in definition order", () => {
+    expect(plugin.api.listArchivedSpaces()).toEqual([
+      { id: "old", name: "Old", icon: "briefcase", color: "#ff6b6b" },
+      { id: "old2", name: "Old 2", icon: "microscope", color: "#4ecdc4" },
+    ]);
+  });
+
+  it("isMember still answers for an archived space id", () => {
+    expect(plugin.api.isMember("Invoices/2026.md", "old")).toBe(true);
+  });
+
+  it("memberPaths still answers for an archived space id", () => {
+    expect(plugin.api.memberPaths("old")).toEqual(["Invoices/2026.md"]);
+  });
+
+  it("getActiveSpace never returns an archived space, even if the stored selection names one", () => {
+    plugin["runtime"].setSelection({ kind: "space", id: "old" });
+    expect(plugin.api.getActiveSpace()).toBeNull();
+    // The default target of isMember follows the same rule.
+    expect(plugin.api.isMember("Invoices/2026.md")).toBe(false);
+    expect(plugin.api.memberPaths()).toEqual([]);
+  });
+});
+
 describe("onSpaceChange", () => {
   let plugin: SpacesPlugin;
   let seen: (SpaceSummary | null)[];

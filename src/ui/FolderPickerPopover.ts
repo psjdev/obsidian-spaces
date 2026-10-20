@@ -34,6 +34,20 @@ interface FolderPickerPopoverDeps {
    * caller is told why the field did not change.
    */
   apply(path: string): Promise<void>;
+  /**
+   * Whether to draw the "Clear" button. On by default, for the missing-root
+   * caller this was written for, where clearing is a real answer: the space
+   * stays folder pinned with no folder chosen, which is what the button's
+   * own label says.
+   *
+   * The restore gate passes `false`, because there that label would be a lie.
+   * The gate asks "where is it now", and empty is not one of the answers it
+   * offers: on a note row `""` composes a path at the vault root, on a folder
+   * or root row it is refused, and "I am not deciding now" is already
+   * "Leave as is" on the row itself. A button whose wording describes a
+   * different dialog's semantics is worse than no button.
+   */
+  offerClear?: boolean;
 }
 
 /** Returns the popover so its opener can close it (see `AnchoredPopover`'s own docstring: it does not own its lifetime). */
@@ -117,16 +131,18 @@ export function openFolderPickerPopover(deps: FolderPickerPopoverDeps): Anchored
         }
       });
 
-      const clear = doc.win.createEl("button");
-      clear.textContent = "Clear";
-      clear.setAttribute(
-        "aria-label",
-        "Clear the folder. The space stays folder pinned, with no folder chosen."
-      );
-      clear.addEventListener("click", () => commit(""));
-
       root.appendChild(input);
-      root.appendChild(clear);
+
+      if (deps.offerClear !== false) {
+        const clear = doc.win.createEl("button");
+        clear.textContent = "Clear";
+        clear.setAttribute(
+          "aria-label",
+          "Clear the folder. The space stays folder pinned, with no folder chosen."
+        );
+        clear.addEventListener("click", () => commit(""));
+        root.appendChild(clear);
+      }
 
       input.focus();
       input.select();

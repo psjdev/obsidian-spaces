@@ -77,6 +77,37 @@ describe("repairOnRename", () => {
     expect(out.spaces[0].members).toContainEqual({ path: "Papers/Focus.md", kind: "file" });
   });
 
+  it("repairs an archived space's root, members and exclusions", () => {
+    // This is the whole reason an archived space stays in the `spaces` array
+    // instead of moving to a list of its own. A rename that skipped it would
+    // let every path it holds decay while it sat archived, and the restore
+    // gate would then report the entire space as missing rather than the one
+    // thing that actually moved. The `archived` flag must survive the repair
+    // too: a repair that dropped it would put the space back on the strip.
+    const d = defs();
+    d.spaces.push({
+      id: "closed",
+      name: "Closed",
+      icon: "box",
+      color: "#888888",
+      archived: true,
+      root: "Papers",
+      members: [{ path: "Papers/Attention.md", kind: "file" }],
+      exclude: ["Papers/skip.md"],
+    });
+
+    const out = repairOnRename(d, "Papers", "Research Papers");
+    const archived = out.spaces[1];
+
+    expect(archived.root).toBe("Research Papers");
+    expect(archived.members).toContainEqual({
+      path: "Research Papers/Attention.md",
+      kind: "file",
+    });
+    expect(archived.exclude).toEqual(["Research Papers/skip.md"]);
+    expect(archived.archived).toBe(true);
+  });
+
   it("follows a renamed folder-space root", () => {
     // The whole of a folder space's persisted state is this one string, so a
     // rename that does not reach it silently empties the space.

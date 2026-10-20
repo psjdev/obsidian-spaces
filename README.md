@@ -48,6 +48,8 @@ The two overlap on tabs, so Spaces defers. If the core Workspaces plugin is enab
 
 **Reorder as you see fit.** Drag rows in the tree to arrange them, remembered separately for each space. Drag the icons in the space strip to reorder your spaces.
 
+**Puts finished spaces away.** Archive a space instead of deleting it, and restore it later with its notes, folders and order intact. See [Archiving](#archiving).
+
 ## Requirements
 
 - **Obsidian 1.13.0 or later**
@@ -143,6 +145,22 @@ A property leaves out any note whose path matches **Ignored paths** under Settin
 
 To drop a single note without dropping the property, right-click it inside the space and choose `Remove from <space name>`. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
 
+## Archiving
+
+Archive a space you are finished with instead of deleting it. In Settings → Spaces, click **Archive** beside the space.
+
+An archived space leaves the space strip, the dropdown in the space header, the **Switch to space** picker, the next and previous space commands, and **Add to space**. It keeps its notes and folders and its place in the order. If you were in the space when you archived it, the file tree goes back to **All**.
+
+Archived spaces are listed under **Archived** at the bottom of Settings → Spaces. Each has **Restore** and **Delete**. Delete is permanent.
+
+To bring one back, click **Restore**. The space returns to the same position on the strip. Restoring does not open it, and the file tree stays where it is. Click the space to go in.
+
+If a note or folder the space held has been moved, renamed or deleted, a window lists each one before the space comes back. Each row shows the path that no longer resolves, and under it whether you added that note or folder to the space yourself or it is the folder the space is pinned to. Click **Choose folder…** to pick the folder it moved to, which keeps a note's own name. Click **Type path…** for a note that was renamed as well as moved, then enter its new path. Click **Remove from space** to take it out of the space. Leave a row alone to restore it unchanged, and click **Undo** to clear an answer you have given. A folder space's own folder can be pointed or left, not removed. Nothing changes until you click **Restore** in that window, and **Cancel** leaves the space archived. A tag or a property is never listed.
+
+If a note or folder moves while that window is open, the change you made for it is skipped and a notice names it. Open the space and set it again.
+
+If **Restore tabs when switching spaces** is on, an archived space keeps any tabs Spaces saved for it. Archiving the space you are in saves its tabs first, the same as switching away from it.
+
 ## Sorting
 
 Drag a row in the file tree and that arrangement is saved for the space you are in. Spaces keeps those orders separately for each space and for **All**, and nothing moves on disk.
@@ -214,7 +232,7 @@ All available from the command palette, and bindable to hotkeys.
 
 ## Settings
 
-Settings → Spaces has three pages. **Appearance** holds the settings that change how the explorer looks; **Preferences** holds the behavioural ones; **Spaces** lists your spaces, where you can rename one, review its members, or delete it. Every setting here is findable from Obsidian's own settings search.
+Settings → Spaces has three pages. **Appearance** holds the settings that change how the explorer looks; **Preferences** holds the behavioral ones; **Spaces** lists your spaces, where you can rename one, review its members, archive it, or delete it. Every setting here is findable from Obsidian's own settings search.
 
 | Setting | Default | What it controls |
 |---|---|---|

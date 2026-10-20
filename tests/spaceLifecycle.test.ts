@@ -467,6 +467,22 @@ describe("setSpaceRoot — the 'Change folder…' write path", () => {
     })();
   });
 
+  it("refuses a path validateSpace would drop, rather than losing the root and the exclusions", async () => {
+    // `validateSpace` keeps `root` only for "", "/" or a path passing
+    // `isSafeVaultPath`, so writing anything else here deleted the key and
+    // silently reclassified a folder space as an empty curated one, which is
+    // the exact outcome this setter's docblock refuses to perform. The
+    // exclusions are rewritten against that path first, so they went too.
+    const defs = await threeSpaces();
+    await setSpaceRoot(defs, "a", "../Secret");
+    const a = defs.get().spaces.find((s) => s.id === "a");
+    expect(a?.root).toBe("Projects/Gone");
+    expect(Object.prototype.hasOwnProperty.call(a, "root")).toBe(true);
+
+    await setSpaceRoot(defs, "a", "C:\\stuff");
+    expect(defs.get().spaces.find((s) => s.id === "a")?.root).toBe("Projects/Gone");
+  });
+
   it("is a no-op for an unknown space id", async () => {
     const defs = await threeSpaces();
     await setSpaceRoot(defs, "nope", "Projects/New Home");
@@ -496,6 +512,63 @@ describe("setSpaceRoot — the 'Change folder…' write path", () => {
       color: "#ff5b5b",
       root: "Projects/Console 2030",
     });
+  });
+
+  // The restore gate follows a re-pointed root's exclusions
+  // (`RestoreSpaceModal.applyRestoreFixes`). This is the same gesture through
+  // the missing-root Notice's door, so it follows them the same way, through
+  // the same `repairExclude`.
+  async function withExclusions(): Promise<DefinitionStore> {
+    let stored: unknown = {
+      schemaVersion: SCHEMA_VERSION,
+      settings: { globalIgnore: [], restoreLayouts: true, revealVisitors: true },
+      spaces: [
+        {
+          id: "a",
+          name: "A",
+          icon: "briefcase",
+          color: "#5b5bff",
+          root: "Projects/Gone",
+          members: [],
+          exclude: ["Projects/Gone/skip.md", "Projects/Gone/Sub", "Elsewhere/keep.md"],
+        },
+      ],
+    };
+    const defs = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await defs.load();
+    return defs;
+  }
+
+  const excludeOf = (defs: DefinitionStore): string[] | undefined =>
+    defs.get().spaces.find((s) => s.id === "a")?.exclude;
+
+  it("carries the exclusions under the old root to the new one, and leaves the others alone", async () => {
+    const defs = await withExclusions();
+    await setSpaceRoot(defs, "a", "Projects/New Home");
+    // Without this, the notes the user took out come back the moment the
+    // space re-points, and `Projects/Gone/skip.md` excludes whatever lands
+    // at that path next.
+    expect(excludeOf(defs)).toEqual([
+      "Projects/New Home/skip.md",
+      "Projects/New Home/Sub",
+      "Elsewhere/keep.md",
+    ]);
+  });
+
+  it("keeps the exclusions untouched when the root is cleared", async () => {
+    const defs = await withExclusions();
+    await setSpaceRoot(defs, "a", "");
+    // `""` is "no folder chosen yet", not a path to rewrite them onto.
+    expect(excludeOf(defs)).toEqual([
+      "Projects/Gone/skip.md",
+      "Projects/Gone/Sub",
+      "Elsewhere/keep.md",
+    ]);
   });
 });
 

@@ -9,6 +9,14 @@ import { canonicalPath } from "../visibility/glob";
 import { memberIdentity } from "../definitions/schema";
 
 
+/**
+ * "Is this path at or under that one", answered in one place. Every repair in
+ * this file goes through it; a second spelling of that question is a second
+ * thing to get wrong.
+ *
+ * Module-private. What the re-point callers outside this file need is
+ * `repairExclude` below, which is the whole rule rather than one step of it.
+ */
 function rewritePrefix(path: string, oldBase: string, newBase: string): string {
   if (path === oldBase) return newBase;
   if (path.startsWith(oldBase + "/")) {
@@ -54,8 +62,15 @@ function dedupe(members: MemberEntry[]): MemberEntry[] {
  *
  * Absent rather than empty, matching the schema: a space that leaves nothing
  * out carries no `exclude` key at all.
+ *
+ * Exported for the two re-point paths outside this file: the restore gate
+ * (`ui/RestoreSpaceModal.ts`) and `setSpaceRoot` (`actions/spaceLifecycle.ts`,
+ * behind the missing-root Notice's "Change folder…"). Re-pointing at a folder
+ * that exists is the same statement a rename makes about the paths under it,
+ * and the failure it guards against is the same one, so both doors answer it
+ * the same way.
  */
-function repairExclude(
+export function repairExclude(
   exclude: readonly string[] | undefined,
   oldPath: string,
   newPath: string
