@@ -474,6 +474,10 @@ export function validateDefinitions(raw: unknown): ValidationResult {
           typeof st.stripPlacement === "string" && STRIP_PLACEMENTS.has(st.stripPlacement)
             ? (st.stripPlacement as StripPlacement)
             : "bottom",
+        // Strict like `useThemeIconColor`: shape only, and a present non-boolean
+        // falls back to off rather than being trusted. A document written before
+        // this setting existed carries no key, which also reads as off.
+        hideStrip: st.hideStrip === true,
         // Degrades for the same reason as the placement above, and to the
         // look every existing vault already has: a document written before
         // this setting existed carries no key at all.

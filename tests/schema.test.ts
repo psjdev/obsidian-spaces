@@ -508,6 +508,33 @@ describe("autoAssignColor", () => {
   });
 });
 
+describe("hideStrip", () => {
+  function settingsOf(raw: Record<string, unknown>) {
+    const r = validateDefinitions({ ...valid, settings: { ...valid.settings, ...raw } });
+    if (!r.ok) throw new Error(r.error);
+    return r.value;
+  }
+
+  it("keeps hideStrip through a round trip", () => {
+    const first = settingsOf({ hideStrip: true });
+    expect(first.settings.hideStrip).toBe(true);
+    const again = validateDefinitions(JSON.parse(JSON.stringify(first)));
+    if (!again.ok) throw new Error(again.error);
+    expect(again.value.settings.hideStrip).toBe(true);
+  });
+
+  it("defaults hideStrip to false when the key is absent", () => {
+    expect(settingsOf({}).settings.hideStrip).toBe(false);
+    expect(DEFAULT_DEFINITIONS.settings.hideStrip).toBe(false);
+  });
+
+  it("drops a non-boolean hideStrip rather than trusting it", () => {
+    for (const bad of ["yes", 1, {}, null]) {
+      expect(settingsOf({ hideStrip: bad }).settings.hideStrip).toBe(false);
+    }
+  });
+});
+
 describe("useThemeIconColor", () => {
   function settingsOf(raw: Record<string, unknown>) {
     const r = validateDefinitions({ ...valid, settings: { ...valid.settings, ...raw } });

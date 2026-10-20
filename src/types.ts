@@ -223,6 +223,11 @@ interface SpacesSettings {
   revealVisitors: boolean;
   /** Where the strip sits. See `StripPlacement`. */
   stripPlacement: StripPlacement;
+  /**
+   * Hides the strip at the pane's left edge until the pointer reaches it.
+   * Applies only while `stripPlacement` is `left`; ignored for every other placement.
+   */
+  hideStrip: boolean;
   /** How the active space is marked. See `ActiveSpaceStyle`. */
   activeSpaceStyle: ActiveSpaceStyle;
   /** How a drag's destination is drawn. See `DropIndicatorStyle`. */
@@ -365,6 +370,8 @@ export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
     useThemeIconColor: false,
     customColors: [],
     stripPlacement: "bottom",
+    // OFF, like every setting that changes how an existing install looks.
+    hideStrip: false,
     activeSpaceStyle: "shaded",
     // `box` even though it changes how an existing install looks on upgrade,
     // which the neighbouring defaults deliberately avoid doing. The gap is the
