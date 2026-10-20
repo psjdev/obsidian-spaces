@@ -19,6 +19,11 @@ remove it from the space, or leave it as is. Nothing changes until you click
 **Restore** in that window, and **Cancel** leaves the space archived. A tag or
 a property is never listed.
 
+Changing a folder space's folder now carries the notes and folders you left
+out of that space across to the new folder. Before, if that folder had moved
+and you pointed the space at its new location, everything you had left out
+came back into the space.
+
 ## 0.12.0 — 2026-10-19
 
 A tag or a property now leaves out notes whose path matches **Ignored paths**
