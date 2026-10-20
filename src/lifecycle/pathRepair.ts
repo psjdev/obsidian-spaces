@@ -10,12 +10,14 @@ import { memberIdentity } from "../definitions/schema";
 
 
 /**
- * Exported for the restore gate (`ui/RestoreSpaceModal.ts`), which re-points
- * a member the user has just identified and needs the same prefix rule a
- * rename uses. One rule in one place: a second spelling of "is this path at
- * or under that one" is a second thing to get wrong.
+ * "Is this path at or under that one", answered in one place. Every repair in
+ * this file goes through it; a second spelling of that question is a second
+ * thing to get wrong.
+ *
+ * Module-private. What the re-point callers outside this file need is
+ * `repairExclude` below, which is the whole rule rather than one step of it.
  */
-export function rewritePrefix(path: string, oldBase: string, newBase: string): string {
+function rewritePrefix(path: string, oldBase: string, newBase: string): string {
   if (path === oldBase) return newBase;
   if (path.startsWith(oldBase + "/")) {
     return newBase + path.slice(oldBase.length);
@@ -61,9 +63,12 @@ function dedupe(members: MemberEntry[]): MemberEntry[] {
  * Absent rather than empty, matching the schema: a space that leaves nothing
  * out carries no `exclude` key at all.
  *
- * Exported for the restore gate (`ui/RestoreSpaceModal.ts`): re-pointing a
- * member at a folder that exists is the same statement a rename makes about
- * the paths under it, and the failure this guards against is the same one.
+ * Exported for the two re-point paths outside this file: the restore gate
+ * (`ui/RestoreSpaceModal.ts`) and `setSpaceRoot` (`actions/spaceLifecycle.ts`,
+ * behind the missing-root Notice's "Change folder…"). Re-pointing at a folder
+ * that exists is the same statement a rename makes about the paths under it,
+ * and the failure it guards against is the same one, so both doors answer it
+ * the same way.
  */
 export function repairExclude(
   exclude: readonly string[] | undefined,
