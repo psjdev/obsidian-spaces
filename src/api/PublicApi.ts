@@ -1,4 +1,5 @@
 import { inheritedFromFolder } from "../actions/membershipMenu";
+import { activeSpaces, archivedSpaces, isArchived } from "../definitions/archived";
 import { pathMembers } from "../definitions/membership";
 import { canonicalPath } from "../visibility/glob";
 import type {
@@ -62,7 +63,10 @@ export class PublicApi {
   activeSpace(): SpaceDefinition | null {
     const sel = this.deps.selection();
     if (!sel || sel.kind === "all") return null;
-    return this.spaceById(sel.id);
+    const space = this.spaceById(sel.id);
+    // Judged from the stored state, not from the controller having reset the
+    // selection: a hand-edited document can name an archived space.
+    return space && !isArchived(space) ? space : null;
   }
 
   /**
@@ -117,7 +121,8 @@ export class PublicApi {
       const space = this.markedSpace();
       return space ? summarise(space) : null;
     },
-    listSpaces: () => this.allSpaces().map(summarise),
+    listSpaces: () => activeSpaces(this.allSpaces()).map(summarise),
+    listArchivedSpaces: () => archivedSpaces(this.allSpaces()).map(summarise),
     // The contract, and why it is narrow rather than wrong, is on
     // `SpacesApi.isMember` in `types.ts`. Three rules, in this order.
     isMember: (path, spaceId) => {

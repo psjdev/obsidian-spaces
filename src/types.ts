@@ -400,8 +400,13 @@ export interface SpaceSummary {
 export interface SpacesApi {
   /** The space filtering the tree, or `null` in *All* or while paused. */
   getActiveSpace(): SpaceSummary | null;
-  /** Every defined space, in definition order — the order the strip uses. */
+  /**
+   * Every active space, in definition order — the order the strip uses.
+   * Archived spaces are not included; `listArchivedSpaces` lists them.
+   */
   listSpaces(): SpaceSummary[];
+  /** Every archived space, in definition order. */
+  listArchivedSpaces(): SpaceSummary[];
   /**
    * Whether `spaceId`'s stored PATH rules hold `path` (default: the active
    * space).
