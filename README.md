@@ -143,6 +143,20 @@ A property leaves out any note whose path matches **Ignored paths** under Settin
 
 To drop a single note without dropping the property, right-click it inside the space and choose `Remove from <space name>`. The note is listed under **Left out** in **Contents…**, where **Put back** returns it.
 
+## Archiving
+
+Archive a space you are finished with instead of deleting it. In Settings → Spaces, click **Archive** beside the space.
+
+An archived space leaves the space strip, the dropdown in the space header, the **Switch to space** picker, the next and previous space commands, and **Add to space**. It keeps its notes and folders and its place in the order. If you were in the space when you archived it, the file tree goes back to **All**.
+
+Archived spaces are listed under **Archived**, below your other spaces. Each has **Restore** and **Delete**. Delete is permanent, the same as deleting any other space.
+
+To bring one back, click **Restore**. The space returns to the same position on the strip. Restoring does not open it. You land in **All**, so click the space to go in.
+
+If a note or folder the space held has been moved, renamed or deleted, a window lists each one before the space comes back. For each, choose **Point here** or **Choose…** to point it at the right note or folder, **Remove** to take it out of the space, or **Leave as is** to restore it anyway. Nothing changes until you click **Restore** in that window, and **Cancel** leaves the space archived. A tag or a property is never listed, because it does not point at a place in your vault.
+
+If **Restore tabs when switching spaces** is on, an archived space keeps any tabs Spaces saved for it. Archiving does not save tabs for you.
+
 ## Sorting
 
 Drag a row in the file tree and that arrangement is saved for the space you are in. Spaces keeps those orders separately for each space and for **All**, and nothing moves on disk.

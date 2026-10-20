@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.13.0 — 2026-10-20
+
+A space you are finished with can now be archived instead of deleted. In
+Settings → Spaces, click **Archive** beside the space. It leaves the space
+strip, the space header dropdown, the **Switch to space** picker, the next and
+previous space commands, and **Add to space**. It keeps its notes and folders
+and its place in the order. If you were in the space, the file tree goes back
+to **All**.
+
+Archived spaces are listed under **Archived**, with **Restore** and **Delete**
+beside each. Delete is permanent. Restore puts the space back at the same
+position on the strip. It does not open the space, so you land in **All** and
+click the space to go in.
+
+If a note or folder the space held has been moved or deleted, a window lists
+each one before the space comes back. Point it at the right note or folder,
+remove it from the space, or leave it as is. Nothing changes until you click
+**Restore** in that window, and **Cancel** leaves the space archived. A tag or
+a property is never listed.
+
 ## 0.12.0 — 2026-10-19
 
 A tag or a property now leaves out notes whose path matches **Ignored paths**
