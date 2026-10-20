@@ -27,6 +27,7 @@ import SpacesPlugin from "../src/main";
 import { SwitcherView } from "../src/ui/SwitcherView";
 import { moveVisibleTo, visibleIndexOf } from "../src/ui/spaceReorder";
 import { decorate } from "../src/actions/membership";
+import { armsParseStall } from "../src/definitions/membership";
 import { archiveSpace, restoreSpace } from "../src/actions/archiveSpace";
 import { PublicApi } from "../src/api/PublicApi";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
@@ -311,6 +312,25 @@ describe("archived spaces stop appearing", () => {
     expect(runtime.getLayoutFor(sel)).toEqual({ tabs: 1 });
     runtime.reconcileLayouts(["a", "c"]);
     expect(runtime.getLayoutFor(sel)).toBeNull();
+  });
+
+  it("an archived property space does not arm the parse-stall sampler", () => {
+    // `main.ts` asks this at load and `main.ts` has no harness here, so the
+    // predicate is exported and pinned instead of the call site. An unfiltered
+    // ask arms a five-second sampler for a vault whose only property space is
+    // archived, and `reportParseStall` gates on `activeSpace()`, which is null
+    // for an archived space, so that sampler can never have anything to say.
+    const withProperty = (id: string, archived?: true): SpaceDefinition => ({
+      ...space(id, id),
+      members: [{ kind: "property", key: "due" }],
+      ...(archived === undefined ? {} : { archived }),
+    });
+
+    expect(armsParseStall([withProperty("live")])).toBe(true);
+    expect(armsParseStall([withProperty("closed", true)])).toBe(false);
+    expect(armsParseStall([withProperty("closed", true), withProperty("live")])).toBe(true);
+    expect(armsParseStall([space("plain", "Plain")])).toBe(false);
+    expect(armsParseStall([])).toBe(false);
   });
 
   it("archiving the last space leaves the strip with All and does not throw", async () => {

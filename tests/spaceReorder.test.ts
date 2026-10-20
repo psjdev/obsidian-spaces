@@ -16,6 +16,18 @@ const boxes = [
   { start: 96, size: 28 },
 ];
 
+/**
+ * **The visible-index wrappers are pinned in `tests/archivedHiding.test.ts`,
+ * not here.** This file covers the drop geometry and `moveTo`, which works in
+ * STORED indexes. `moveVisibleTo` and `visibleIndexOf`, which translate a drop
+ * gap on the rendered strip into one of those indexes, are only tested there,
+ * because a list with no archived space in it makes the two index spaces the
+ * same number and the translation unobservable.
+ *
+ * Measured, not assumed: making `moveVisibleTo` treat the gap as a stored
+ * index leaves this file green at 25 tests and fails exactly 6 of the 30 in
+ * `archivedHiding.test.ts`. Run both before trusting a change to either.
+ */
 describe("insertionIndexAt", () => {
   it("returns 0 anywhere left of the first icon's midpoint", () => {
     expect(insertionIndexAt(-50, boxes)).toBe(0);

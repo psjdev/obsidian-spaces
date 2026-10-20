@@ -67,7 +67,12 @@ import { installNativeCreateRedirect } from "./actions/nativeNewFileParent";
 import { armIntent, matchIntent, type CreationIntent } from "./actions/creationIntent";
 import { canOfferCreateSpaceFromFolder } from "./actions/createSpaceMenu";
 import { inheritedFromFolder } from "./actions/membershipMenu";
-import { holdsPropertyMember, pathMembers, watchesMetadata } from "./definitions/membership";
+import {
+  armsParseStall,
+  holdsPropertyMember,
+  pathMembers,
+  watchesMetadata,
+} from "./definitions/membership";
 import { canonicalPath, compileIgnore } from "./visibility/glob";
 import { buildPreview } from "./ui/previewSeam";
 import { PublicApi } from "./api/PublicApi";
@@ -743,7 +748,7 @@ export default class SpacesPlugin extends Plugin {
     // `controller.activeSpace()`, which is null for an archived space, so an
     // unfiltered ask armed a 5-second sampler that was guaranteed to have
     // nothing to say for a vault whose only property space is archived.
-    if (activeSpaces(this.defs.get().spaces).some(holdsPropertyMember)) this.parseStall.arm();
+    if (armsParseStall(this.defs.get().spaces)) this.parseStall.arm();
     this.adapter.onHealthChange((healthy) => {
       if (healthy) {
         this.explorerHealthWarned = false;
