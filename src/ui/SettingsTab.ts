@@ -1,6 +1,8 @@
 import {
   Notice,
   PluginSettingTab,
+  TFile,
+  TFolder,
   type App,
   type Plugin,
   type Setting,
@@ -8,7 +10,7 @@ import {
   type SettingDefinitionItem,
 } from "obsidian";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
-import type { SpacesDefinitions, StripPlacement } from "../types";
+import type { SpaceDefinition, SpacesDefinitions, StripPlacement } from "../types";
 import { deleteSpace, renameSpace, type SpaceLifecycleHooks } from "../actions/spaceLifecycle";
 import { archiveSpace, restoreSpace } from "../actions/archiveSpace";
 import { activeSpaces, archivedSpaces, isArchived } from "../definitions/archived";
@@ -25,6 +27,9 @@ import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex } from "../visibility/PropertyIndex";
 import { ConfirmModal } from "./ConfirmModal";
 import { SpaceContentsModal } from "./SpaceContentsModal";
+import { restoreProblems } from "./restoreCheck";
+import { RestoreSpaceModal, commitRestore, restoreRows } from "./RestoreSpaceModal";
+import type { VaultSource } from "./createSpaceForm";
 import {
   BlurCommitLedger,
   deleteWithConfirm,
@@ -663,29 +668,7 @@ export class SpacesSettingTab extends PluginSettingTab {
               })
           );
 
-          setting.addButton((b) =>
-            b
-              .setButtonText("Delete")
-              .setDestructive()
-              .onClick(async () => {
-                await deleteWithConfirm(
-                  { name: space.name, memberCount: rows.length, missingCount: missing },
-                  {
-                    confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
-                    remove: () => deleteSpace(this.defs, space.id, this.hooks),
-                    // One fewer row is a change to the definitions themselves,
-                    // not to a rendered value, so this is `update()` and not
-                    // `refreshDomState()`.
-                    onDeleted: () => {
-                      this.update();
-                    },
-                    onError: (message) => {
-                      new Notice(message);
-                    },
-                  }
-                );
-              })
-          );
+          this.addDeleteButton(setting, space, rows.length, missing);
         },
       };
     });
@@ -715,10 +698,7 @@ export class SpacesSettingTab extends PluginSettingTab {
   }
 
   /** An archived space: name and summary, Restore and Delete. No name field, no Contents…. */
-  private archivedRow(
-    space: SpacesDefinitions["spaces"][number],
-    exists: (path: string) => boolean
-  ): SettingDefinition {
+  private archivedRow(space: SpaceDefinition, exists: (path: string) => boolean): SettingDefinition {
     const rows = memberRows(space, exists, undefined, () => null);
     const missing = missingCount(rows);
     return {
@@ -730,35 +710,100 @@ export class SpacesSettingTab extends PluginSettingTab {
             .setButtonText("Restore")
             .setTooltip(`Put ${space.name} back on the strip`)
             .onClick(() => {
-              void restoreSpace(this.defs, space.id)
-                .then(() => {
-                  this.update();
-                })
-                .catch((e: unknown) => {
-                  new Notice(`Spaces: could not restore (${String(e)})`);
-                });
+              this.restore(space, exists);
             })
         );
-        setting.addButton((b) =>
-          b
-            .setButtonText("Delete")
-            .setDestructive()
-            .onClick(async () => {
-              await deleteWithConfirm(
-                { name: space.name, memberCount: rows.length, missingCount: missing },
-                {
-                  confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
-                  remove: () => deleteSpace(this.defs, space.id, this.hooks),
-                  onDeleted: () => {
-                    this.update();
-                  },
-                  onError: (message) => {
-                    new Notice(message);
-                  },
-                }
-              );
-            })
-        );
+        this.addDeleteButton(setting, space, rows.length, missing);
+      },
+    };
+  }
+
+  /**
+   * Restore, gated on what no longer resolves.
+   *
+   * The check runs at the click rather than at render, so a path repaired
+   * since the page was drawn is seen as repaired. With nothing to stage this
+   * is `restoreSpace` and no modal at all — a gate shown for a space that is
+   * whole would be a dialog in front of a one-click action. With something to
+   * stage, nothing is written here: `RestoreSpaceModal` applies the fixes and
+   * clears the flag together, in one write.
+   */
+  private restore(space: SpaceDefinition, exists: (path: string) => boolean): void {
+    const rows = restoreRows(space, restoreProblems(space, exists));
+    if (rows.length === 0) {
+      void restoreSpace(this.defs, space.id)
+        .then(() => {
+          this.update();
+        })
+        .catch((e: unknown) => {
+          new Notice(`Spaces: could not restore (${String(e)})`);
+        });
+      return;
+    }
+    new RestoreSpaceModal(this.app, {
+      space,
+      rows,
+      source: this.vaultSource(),
+      apply: (fixes) => commitRestore(this.defs, space.id, fixes),
+      onRestored: () => {
+        this.update();
+      },
+    }).open();
+  }
+
+  /**
+   * The Delete button, identical on an active row and an archived one.
+   *
+   * Shared rather than written twice: the confirmation carries the member and
+   * missing counts, the lifecycle hooks and the error notice, and two copies
+   * of that drift the first time one of them is edited. Archive and Restore
+   * stay separate — they are different actions on different rows.
+   */
+  private addDeleteButton(
+    setting: Setting,
+    space: SpaceDefinition,
+    memberCount: number,
+    missing: number
+  ): void {
+    setting.addButton((b) =>
+      b
+        .setButtonText("Delete")
+        .setDestructive()
+        .onClick(async () => {
+          await deleteWithConfirm(
+            { name: space.name, memberCount, missingCount: missing },
+            {
+              confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
+              remove: () => deleteSpace(this.defs, space.id, this.hooks),
+              // One fewer row is a change to the definitions themselves, not
+              // to a rendered value, so this is `update()` and not
+              // `refreshDomState()`.
+              onDeleted: () => {
+                this.update();
+              },
+              onError: (message) => {
+                new Notice(message);
+              },
+            }
+          );
+        })
+    );
+  }
+
+  /**
+   * The vault, as the restore gate's suggester and kind check read it. Built
+   * at the click, like `main.ts`'s `folderSource()`, so a folder created
+   * since the settings page was drawn is offered.
+   */
+  private vaultSource(): VaultSource {
+    const vault = this.app.vault;
+    return {
+      allPaths: () => vault.getAllLoadedFiles().map((f) => f.path),
+      kindOf: (path) => {
+        const f = vault.getAbstractFileByPath(path);
+        if (f instanceof TFolder) return "folder";
+        if (f instanceof TFile) return "file";
+        return null;
       },
     };
   }
