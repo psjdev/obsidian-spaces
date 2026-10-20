@@ -744,10 +744,12 @@ export default class SpacesPlugin extends Plugin {
     // `tests/propertyWorkBudget.test.ts` still holds: a vault with no property
     // space arms nothing and pays nothing. `arm()` is a no-op while already
     // sampling, so doing this as well as the listener costs nothing twice.
-    // ACTIVE spaces only. `reportParseStall` gates on
+    // ACTIVE spaces only: `reportParseStall` gates on
     // `controller.activeSpace()`, which is null for an archived space, so an
-    // unfiltered ask armed a 5-second sampler that was guaranteed to have
-    // nothing to say for a vault whose only property space is archived.
+    // archived property space can never be told anything. This re-arm is not
+    // what decides whether sampling happens at all — the `resolved` listener
+    // above arms unconditionally — so the filter buys a truthful ask, not a
+    // saved sampler. See `armsParseStall`.
     if (armsParseStall(this.defs.get().spaces)) this.parseStall.arm();
     this.adapter.onHealthChange((healthy) => {
       if (healthy) {
@@ -804,7 +806,7 @@ export default class SpacesPlugin extends Plugin {
           this.reportLayoutOutcome(outcome);
         },
         onSelectionDropped: (from) => {
-          void this.settleLayoutAfterDrop(from);
+          void this.controller.runQueuedLayoutJob(() => this.settleLayoutAfterDrop(from));
         },
       }
     );
@@ -1859,10 +1861,16 @@ export default class SpacesPlugin extends Plugin {
    *    the captured blob is dropped rather than left for `reconcileLayouts`
    *    to find at the next load.
    *
-   * Fire and forget, and deliberately NOT routed through `switchTo`: the
-   * selection is already All by the time this runs, so `switchTo` would see
-   * `from === to` and skip, and a failed transition would leave the fallback
-   * to be retried on every subsequent refresh.
+   * Deliberately NOT routed through `switchTo`: the selection is already All
+   * by the time this runs, so `switchTo` would see `from === to` and skip,
+   * and a failed transition would leave the fallback to be retried on every
+   * subsequent refresh.
+   *
+   * It IS routed through `controller.runQueuedLayoutJob`, which gives it the
+   * switch queue and the `switching` guard without the idempotence check.
+   * Calling it bare let a strip click start a second, concurrent transition
+   * that captured a half-restored workspace, and let an ordinary recompute
+   * release the switch mask mid-transition. See that method for both.
    */
   private async settleLayoutAfterDrop(from: ActiveSelection): Promise<void> {
     if (from.kind !== "space") return;
@@ -1874,7 +1882,11 @@ export default class SpacesPlugin extends Plugin {
       console.error("[spaces] layout transition after a dropped selection failed", e);
     }
     // The mask comes off, and the tree is re-applied against All, on this
-    // recompute: `host.apply` is what releases it.
+    // recompute: `host.apply` is what releases it. Unconditional, including
+    // after a `skipped` transition that installed no mask: one extra recompute
+    // against a selection that is already All is cheaper than working out
+    // which outcomes left a mask behind, and getting that wrong strands the
+    // explorer under one.
     this.controller.refresh();
     if (!this.defs.get().spaces.some((s) => s.id === from.id)) {
       this.runtime.dropLayoutFor(from.id);

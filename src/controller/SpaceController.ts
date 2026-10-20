@@ -202,6 +202,45 @@ export class SpaceController {
   }
 
   /**
+   * Run a layout job with the same serialization and the same `switching`
+   * guard a switch gets.
+   *
+   * `onSelectionDropped` hands `main.ts` a transition to run, and the obvious
+   * way to run it is to just call it. That is wrong twice over, and both ways
+   * reintroduce the corruption the dropped-selection fix exists to prevent:
+   *
+   *  - **Off the queue.** `LayoutCoordinator.transition` has no reentrancy
+   *    guard and captures the live workspace before its first await. A strip
+   *    click landing while the settle transition is parked would start a
+   *    second transition that captures a HALF-RESTORED workspace into All's
+   *    slot, which is the exact corruption, in a narrower window.
+   *  - **Without `switching`.** `refresh()` and `onFileOpened` return early
+   *    on that flag. With it clear, any ordinary recompute during the settle
+   *    reaches `host.apply`, releasing the switch mask mid-transition.
+   *
+   * Fire and forget by design: the caller is inside `recompute`, so awaiting
+   * the queue from there would be awaiting a slot this call may itself be
+   * inside. Saving and restoring `switching` rather than clearing it keeps
+   * that nesting harmless if the queue is ever drained re-entrantly.
+   */
+  runQueuedLayoutJob(job: () => Promise<void>): Promise<void> {
+    const run = this.queue.then(async () => {
+      if (this.disposed) return;
+      const prev = this.switching;
+      this.switching = true;
+      try {
+        await job();
+      } catch (e) {
+        console.error("[spaces] queued layout job failed", e);
+      } finally {
+        this.switching = prev;
+      }
+    });
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
    * `target` may be a resolver instead of a fixed selection, so a caller whose
    * target is RELATIVE to the current one ("next space") computes it from the
    * committed selection inside the queue. Two rapid presses then advance two
