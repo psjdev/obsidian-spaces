@@ -232,7 +232,7 @@ All available from the command palette, and bindable to hotkeys.
 
 ## Settings
 
-Settings → Spaces has three pages. **Appearance** holds the settings that change how the explorer looks; **Preferences** holds the behavioural ones; **Spaces** lists your spaces, where you can rename one, review its members, archive it, or delete it. Every setting here is findable from Obsidian's own settings search.
+Settings → Spaces has three pages. **Appearance** holds the settings that change how the explorer looks; **Preferences** holds the behavioral ones; **Spaces** lists your spaces, where you can rename one, review its members, archive it, or delete it. Every setting here is findable from Obsidian's own settings search.
 
 | Setting | Default | What it controls |
 |---|---|---|
