@@ -34,7 +34,12 @@ import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { buildFakeVault } from "./helpers/fakeVault";
-import { DEFAULT_DEFINITIONS, type ActiveSelection, type SpaceDefinition } from "../src/types";
+import {
+  DEFAULT_DEFINITIONS,
+  type ActiveSelection,
+  type SpaceDefinition,
+  type SpaceSummary,
+} from "../src/types";
 import { DEFAULT_SPACE_COLOR } from "../src/definitions/appearance";
 
 const vault = buildFakeVault({ "notes.md": "file" });
@@ -190,6 +195,44 @@ describe("archived spaces stop appearing", () => {
     expect(api.markedSpace()).toBeNull();
   });
 
+  it("announces All, marks nothing, and answers for nothing while the selection names an archived space", async () => {
+    // Named rather than left to the `getActiveSpace` test above, because the
+    // no-id knock-on is a decision: `onSpaceChange`, the body marker and the
+    // two path questions all route through `activeSpace()`, so archiving the
+    // selected space silently takes all four to "no space". `main.ts`'s
+    // `syncSpaceSurface` sets the marker from `markedSpace()` and then calls
+    // `announce()`. The state is reachable without a refresh: archiving
+    // writes the definitions, and the selection is only rewritten when the
+    // controller next runs.
+    const { defs, runtime } = await build(THREE());
+    const api = new PublicApi({
+      spaces: () => defs.get().spaces,
+      selection: () => runtime.getSelection(),
+      filteringPaused: () => false,
+    });
+    const seen: (SpaceSummary | null)[] = [];
+    api.surface.onSpaceChange((s) => seen.push(s));
+    runtime.setSelection({ kind: "space", id: "b" });
+    api.announce();
+    expect(seen).toEqual([{ id: "b", name: "Beta", icon: "leaf", color: DEFAULT_SPACE_COLOR }]);
+
+    await archiveSpace(defs, "b");
+    api.announce();
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toBeNull();
+    // The body marker is removed for exactly this answer.
+    expect(api.markedSpace()).toBeNull();
+    expect(api.surface.getActiveSpace()).toBeNull();
+
+    // The knock-on, stated on `SpacesApi` in types.ts: the no-id calls answer
+    // for nothing, while the archived id itself still answers.
+    expect(api.surface.isMember("x.md")).toBe(false);
+    expect(api.surface.memberPaths()).toEqual([]);
+    expect(api.surface.isMember("x.md", "b")).toBe(true);
+    expect(api.surface.memberPaths("b")).toEqual(["x.md"]);
+    expect(api.surface.listArchivedSpaces().map((s) => s.id)).toEqual(["b"]);
+  });
+
   it("still hands every space id to reconcileLayouts, archived included", () => {
     // onload cannot run under the obsidian stub, so the call is pinned at its
     // source: the argument must stay the full list. Filtering it would make
@@ -286,6 +329,49 @@ describe("reordering the strip while something is archived", () => {
     const b = await build([space("a", "A"), arch("x"), space("c", "C")]);
     // c's own gap (after A's midpoint 54, before C's 86): a visible no-op
     expect(await dragTo(b, "c", 70)).toEqual(["a", "x", "c"]);
+  });
+});
+
+describe("the dragged space goes away mid-drag", () => {
+  // `draggedIndex()` re-derives the position at the drop instead of trusting
+  // the one the dragstart saw, so both of these answer null and nothing is
+  // written. Pinned because the alternative is a write that moves whichever
+  // space now sits at a remembered index.
+  async function dropAfter(
+    b: Awaited<ReturnType<typeof build>>,
+    id: string,
+    between: () => Promise<void>
+  ) {
+    const { host } = mountStrip(b);
+    layOut(host);
+    host
+      .querySelector<HTMLElement>(`[data-space-id="${id}"]`)!
+      .dispatchEvent(new MouseEvent("dragstart", { bubbles: true }));
+    await between();
+    const mutate = vi.spyOn(b.defs, "mutate");
+    host
+      .querySelector<HTMLElement>(".spaces-switcher-rail")!
+      .dispatchEvent(new MouseEvent("drop", { bubbles: true, cancelable: true, clientX: 9999, clientY: 10 }));
+    await new Promise((r) => setTimeout(r, 0));
+    return mutate;
+  }
+
+  it("writes nothing when the dragged space is archived between the dragstart and the drop", async () => {
+    const b = await build(THREE());
+    const mutate = await dropAfter(b, "a", () => archiveSpace(b.defs, "a"));
+    expect(mutate).not.toHaveBeenCalled();
+    expect(b.defs.get().spaces.map((s) => s.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("writes nothing when the dragged space is deleted between the dragstart and the drop", async () => {
+    const b = await build(THREE());
+    const mutate = await dropAfter(b, "a", () =>
+      b.defs.mutate((d) => {
+        d.spaces = d.spaces.filter((s) => s.id !== "a");
+      })
+    );
+    expect(mutate).not.toHaveBeenCalled();
+    expect(b.defs.get().spaces.map((s) => s.id)).toEqual(["b", "c"]);
   });
 });
 

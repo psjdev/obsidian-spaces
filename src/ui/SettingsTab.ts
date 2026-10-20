@@ -245,6 +245,19 @@ export class SpacesSettingTab extends PluginSettingTab {
    * every toggle on the Preferences page writes to the same store, and
    * redrawing the whole tab under the user's cursor each time they flip a
    * switch is the cost `save()` has always deliberately avoided.
+   *
+   * **The buttons in this file redraw themselves as well, and that second
+   * redraw is kept deliberately.** `mutate` notifies its subscribers before
+   * it resolves, and the archived flag is part of the signature, so in the
+   * plugin an Archive, Restore or Delete click reaches `update()` twice: once
+   * from the subscription above this handler's `.then`, once from the handler
+   * itself. The alternative is a tab whose own buttons redraw it only because
+   * `main.ts` wired a subscriber to the store, which is the invisible coupling
+   * this method exists to make up for, pointing the other way. The second pass
+   * re-renders the same definitions on a settings page the user just clicked,
+   * not in the tree or the strip; it has NOT been measured in a real Obsidian,
+   * and if it ever shows, the handlers can call this method instead, where the
+   * signature check makes the second pass a no-op.
    */
   refreshIfSpacesChanged(): void {
     const next = this.spaceSignature();
@@ -660,6 +673,8 @@ export class SpacesSettingTab extends PluginSettingTab {
               .onClick(() => {
                 void archiveSpace(this.defs, space.id)
                   .then(() => {
+                    // Twice in the plugin, deliberately: see
+                    // `refreshIfSpacesChanged`.
                     this.update();
                   })
                   .catch((e: unknown) => {
@@ -733,6 +748,8 @@ export class SpacesSettingTab extends PluginSettingTab {
     if (rows.length === 0) {
       void restoreSpace(this.defs, space.id)
         .then(() => {
+          // As on Archive, and for the reason given on
+          // `refreshIfSpacesChanged`.
           this.update();
         })
         .catch((e: unknown) => {

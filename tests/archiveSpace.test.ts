@@ -61,11 +61,19 @@ describe("archiveSpace", () => {
   });
 
   it("archiving a space that is already archived changes nothing", async () => {
+    // What this pins is the second CLICK, not the `!isArchived(s)` guard.
+    // Setting the flag twice writes the same document with the guard or
+    // without it, so the guard itself is not observable and no test can
+    // reach it. The test is kept because the shape a second Archive could
+    // plausibly take is a toggle, and against that it fails: Archive on a
+    // row that is already archived (a stale render, a double click) must
+    // never put the space back on the strip.
     const s = await loaded();
     await archiveSpace(s, "b");
     const once = JSON.stringify(s.get());
     await archiveSpace(s, "b");
     expect(JSON.stringify(s.get())).toBe(once);
+    expect(s.get().spaces[1].archived).toBe(true);
   });
 
   it("archiving an id that does not exist changes nothing", async () => {

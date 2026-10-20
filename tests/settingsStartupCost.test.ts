@@ -18,6 +18,11 @@
  *
  * `getMarkdownFiles` is the first thing `createObsidianTagIndex` does and
  * nothing else on this path calls it, so a throwing stub is a precise tripwire.
+ *
+ * The fixture carries an ARCHIVED space holding a tag member as well. Archived
+ * rows are built by `archivedRow`, which hands `memberRows` a `() => null`
+ * index of its own, so they cost nothing today; nothing but this stops that
+ * changing.
  */
 import { describe, expect, it } from "vitest";
 import { SpacesSettingTab } from "../src/ui/SettingsTab";
@@ -46,6 +51,17 @@ const WITH_TAGS: SpacesDefinitions = {
         { path: "Papers/A.md", kind: "file" },
       ],
     },
+    {
+      id: "shelved",
+      name: "Shelved",
+      icon: "box",
+      color: "#ff6b6b",
+      archived: true,
+      members: [
+        { kind: "tag", tag: "done" },
+        { path: "Papers/B.md", kind: "file" },
+      ],
+    },
   ],
 };
 
@@ -68,8 +84,16 @@ function tab(defs: SpacesDefinitions): { tab: SpacesSettingTab; walks: () => num
       },
     },
   };
+  // Production hands the tab `createObsidianTagIndex`, whose first act is
+  // `getMarkdownFiles()`. Charging the walk here is what makes the counter
+  // catch the tab ASKING for an index while it builds, rather than only a
+  // direct call to the vault.
+  const getTagIndex = (): ReturnType<typeof createMapTagIndex> => {
+    app.vault.getMarkdownFiles();
+    return createMapTagIndex(new Map());
+  };
   return {
-    tab: new SpacesSettingTab(app as never, {} as never, store, () => createMapTagIndex(new Map())),
+    tab: new SpacesSettingTab(app as never, {} as never, store, getTagIndex),
     walks: () => walks,
   };
 }
@@ -103,5 +127,12 @@ describe("building the settings tab", () => {
     const rows = (spacesPage(t).items ?? []).filter((r) => r.type !== "list");
     expect(rows.map((r) => r.name)).toEqual(["Research"]);
     expect(rows[0].desc).toBe("Curated · 2 members");
+  });
+
+  it("draws the archived row too, which is what makes the walk count cover it", () => {
+    const { tab: t, walks } = tab(WITH_TAGS);
+    const list = (spacesPage(t).items ?? []).find((r) => r.type === "list");
+    expect((list?.items ?? []).map((r) => r.name)).toEqual(["Shelved"]);
+    expect(walks()).toBe(0);
   });
 });
