@@ -184,8 +184,8 @@ export class SpaceController {
     if (sel.kind === "all") return null;
     const space = this.defs.get().spaces.find((s) => s.id === sel.id);
     // An archived space is away, which is the same state as one that is not in
-    // the array: All. The stored selection keeps its id, so restoring the space
-    // puts the user back in it.
+    // the array: All. `recompute` then rewrites the stored selection to All on
+    // the next refresh, so restoring the space does NOT put the user back in it.
     return space && !isArchived(space) ? space : null;
   }
 

@@ -26,7 +26,8 @@ vi.mock("../src/ui/SpaceSuggestModal", () => ({
 import SpacesPlugin from "../src/main";
 import { SwitcherView } from "../src/ui/SwitcherView";
 import { decorate } from "../src/actions/membership";
-import { archiveSpace } from "../src/actions/archiveSpace";
+import { archiveSpace, restoreSpace } from "../src/actions/archiveSpace";
+import { PublicApi } from "../src/api/PublicApi";
 import { DefinitionStore } from "../src/definitions/DefinitionStore";
 import { RuntimeStateStore } from "../src/runtime/RuntimeStateStore";
 import { SpaceController } from "../src/controller/SpaceController";
@@ -159,8 +160,33 @@ describe("archived spaces stop appearing", () => {
     expect(controller.activeSpace()?.id).toBe("b");
     await archiveSpace(defs, "b");
     expect(controller.activeSpace()).toBeNull();
-    // The stored selection is left alone, so restoring puts the user back.
-    expect(runtime.getSelection()).toEqual({ kind: "space", id: "b" } satisfies ActiveSelection);
+  });
+
+  it("a refresh rewrites the selection to All, and restoring does not bring it back", async () => {
+    const { defs, runtime, controller } = await build(THREE());
+    runtime.setSelection({ kind: "space", id: "b" });
+    await archiveSpace(defs, "b");
+    controller.refresh();
+    expect(runtime.getSelection()).toEqual({ kind: "all" } satisfies ActiveSelection);
+    await restoreSpace(defs, "b");
+    controller.refresh();
+    // Intended: landing in All after a restore is the documented behavior.
+    expect(runtime.getSelection()).toEqual({ kind: "all" } satisfies ActiveSelection);
+    expect(controller.activeSpace()).toBeNull();
+  });
+
+  it("the public API reports no marked space after archive plus refresh", async () => {
+    const { defs, runtime, controller } = await build(THREE());
+    const api = new PublicApi({
+      spaces: () => defs.get().spaces,
+      selection: () => runtime.getSelection(),
+      filteringPaused: () => false,
+    });
+    runtime.setSelection({ kind: "space", id: "b" });
+    expect(api.markedSpace()?.id).toBe("b");
+    await archiveSpace(defs, "b");
+    controller.refresh();
+    expect(api.markedSpace()).toBeNull();
   });
 
   it("still hands every space id to reconcileLayouts, archived included", () => {
