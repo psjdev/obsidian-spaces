@@ -13,16 +13,25 @@ Archived spaces are listed under **Archived**, with **Restore** and **Delete**
 beside each. Delete is permanent. Restore puts the space back at the same
 position on the strip. It does not open the space, so click it to go in.
 
+Once a vault holds an archived space, update Spaces on every device that syncs
+it. An older version refuses the file and says so, rather than dropping the
+archived mark and putting every archived space back on the strip.
+
 If a note or folder the space held has been moved or deleted, a window lists
 each one before the space comes back. Point it at the right note or folder,
 remove it from the space, or leave it as is. Nothing changes until you click
 **Restore** in that window, and **Cancel** leaves the space archived. A tag or
-a property is never listed.
+a property is never listed. If one of them moves again while the window is
+open, that change is skipped and a notice names it, so a note that came back
+on its own is never removed by a decision you made about the old path.
 
-Changing a folder space's folder now carries the notes and folders you left
-out of that space across to the new folder. Before, if that folder had moved
-and you pointed the space at its new location, everything you had left out
-came back into the space.
+Changing a folder space's folder, from the missing-folder notice or from the
+restore window, now carries the notes you left out of that space across to the
+new folder. Before, if that folder had moved and you pointed the space at its
+new location, everything you had left out came back into the space. If you
+point the space at a different folder rather than at where the old one went,
+open **Contents…** and put back anything under **Left out** that belongs in the
+space.
 
 ## 0.12.0 — 2026-10-19
 
