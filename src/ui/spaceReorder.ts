@@ -21,6 +21,7 @@
  * never a dead zone, and a drop that changes nothing draws no line.
  */
 
+import { activeSpaces, isArchived } from "../definitions/archived";
 import type { Span } from "./stripAxis";
 
 /** How close to the rail's edge the pointer must be before it scrolls. */
@@ -126,3 +127,46 @@ export function gapCenterAt(index: number, boxes: readonly ItemBox[]): number {
 
 /** How far outside the strip the first and last positions sit. */
 const EDGE_LINE_INSET_PX = 2;
+
+/**
+ * Where the dragged space sits among the VISIBLE (non-archived) spaces, or
+ * null when it is not in the list or is itself archived.
+ *
+ * The strip measures its drop gap against rendered icons, so every index the
+ * drag logic compares or draws is a visible index. `spaces` is the full
+ * stored list.
+ */
+export function visibleIndexOf(
+  spaces: readonly { id: string; archived?: boolean }[],
+  id: string
+): number | null {
+  const at = activeSpaces(spaces).findIndex((sp) => sp.id === id);
+  return at < 0 ? null : at;
+}
+
+/**
+ * The stored list after dragging the space `id` to a gap measured among the
+ * visible spaces (`visibleGap`, as `insertionIndexAt` returns it).
+ *
+ * An archived space keeps its slot among its neighbours: the gap is
+ * translated to the stored position directly before the active space that
+ * currently sits at that gap, so the drop never steps over, displaces or
+ * repositions an archived one. A gap past the last active space lands right
+ * after it, which leaves a trailing archived run trailing. Returns the list
+ * unchanged when `id` is not an active space.
+ */
+export function moveVisibleTo<T extends { id: string; archived?: boolean }>(
+  spaces: readonly T[],
+  id: string,
+  visibleGap: number
+): T[] {
+  const from = spaces.findIndex((sp) => sp.id === id);
+  if (from < 0 || isArchived(spaces[from])) return [...spaces];
+  const visible = activeSpaces(spaces);
+  const gap = Math.max(0, Math.min(visibleGap, visible.length));
+  const stored =
+    gap < visible.length
+      ? spaces.indexOf(visible[gap])
+      : spaces.indexOf(visible[visible.length - 1]) + 1;
+  return moveTo(spaces, from, stored);
+}

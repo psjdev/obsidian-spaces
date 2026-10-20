@@ -25,6 +25,7 @@ vi.mock("../src/ui/SpaceSuggestModal", () => ({
 
 import SpacesPlugin from "../src/main";
 import { SwitcherView } from "../src/ui/SwitcherView";
+import { moveVisibleTo, visibleIndexOf } from "../src/ui/spaceReorder";
 import { decorate } from "../src/actions/membership";
 import { archiveSpace, restoreSpace } from "../src/actions/archiveSpace";
 import { PublicApi } from "../src/api/PublicApi";
@@ -216,5 +217,109 @@ describe("archived spaces stop appearing", () => {
     expect(host.innerHTML).not.toContain("Alpha");
     expect(host.innerHTML).toContain("All");
     await expect(b.p["cycle"](1)).resolves.toBeUndefined();
+  });
+});
+
+/** Gives each rendered icon a 28px box along x, so a drop resolves by pointer. */
+function layOut(host: HTMLElement): void {
+  const rect = (left: number, width: number) =>
+    ({ left, right: left + width, top: 0, bottom: 28, width, height: 28, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+  host.querySelector<HTMLElement>(".spaces-switcher-rail")!.getBoundingClientRect = () => rect(0, 400);
+  let at = 40;
+  for (const el of Array.from(host.querySelectorAll<HTMLElement>("[data-space-id]"))) {
+    const left = at;
+    el.getBoundingClientRect = () => rect(left, 28);
+    at += 32;
+  }
+}
+
+/** Drag `id` and drop with the pointer at `x`, then return the stored order. */
+async function dragTo(b: Awaited<ReturnType<typeof build>>, id: string, x: number): Promise<string[]> {
+  const { host } = mountStrip(b);
+  layOut(host);
+  host
+    .querySelector<HTMLElement>(`[data-space-id="${id}"]`)!
+    .dispatchEvent(new MouseEvent("dragstart", { bubbles: true }));
+  host
+    .querySelector<HTMLElement>(".spaces-switcher-rail")!
+    .dispatchEvent(new MouseEvent("drop", { bubbles: true, cancelable: true, clientX: x, clientY: 10 }));
+  await new Promise((r) => setTimeout(r, 0));
+  return b.defs.get().spaces.map((s) => s.id);
+}
+
+const arch = (id: string): SpaceDefinition => ({ ...space(id, id.toUpperCase()), archived: true });
+
+describe("reordering the strip while something is archived", () => {
+  // Visible gaps by pointer x with icons at 40, 72, 104...: x=0 is gap 0,
+  // x=9999 is the last gap. The stored index and the visible index are not the
+  // same thing once anything is hidden: the drag reads the full array while the
+  // gap is measured from rendered icons.
+  it("drops a dragged space where it was dropped when an earlier space is archived", async () => {
+    const b = await build([space("a", "A"), arch("b"), space("c", "C"), space("d", "D")]);
+    expect(await dragTo(b, "d", 0)).toEqual(["d", "a", "b", "c"]);
+  });
+
+  it("the review's example: [A archived, B, C], C before B lands before B, not before A", async () => {
+    const b = await build([arch("a"), space("b", "B"), space("c", "C")]);
+    // gap 0 is "before B": x just left of B's midpoint (54)
+    expect(await dragTo(b, "c", 45)).toEqual(["a", "c", "b"]);
+  });
+
+  it("dropping at the very end leaves a trailing archived space trailing", async () => {
+    const b = await build([space("a", "A"), space("b", "B"), arch("c")]);
+    expect(await dragTo(b, "a", 9999)).toEqual(["b", "a", "c"]);
+  });
+
+  it("dropping at the very start leaves a leading archived space leading", async () => {
+    const b = await build([arch("a"), space("b", "B"), space("c", "C")]);
+    expect(await dragTo(b, "c", 0)).toEqual(["a", "c", "b"]);
+  });
+
+  it("swapping two spaces with an archived run between them keeps the run in place", async () => {
+    const b = await build([space("a", "A"), arch("x"), arch("y"), space("c", "C")]);
+    expect(await dragTo(b, "c", 0)).toEqual(["c", "a", "x", "y"]);
+    const b2 = await build([space("a", "A"), arch("x"), arch("y"), space("c", "C")]);
+    expect(await dragTo(b2, "a", 9999)).toEqual(["x", "y", "c", "a"]);
+  });
+
+  it("a drop that changes nothing visibly writes nothing", async () => {
+    const b = await build([space("a", "A"), arch("x"), space("c", "C")]);
+    // c's own gap (after A's midpoint 54, before C's 86): a visible no-op
+    expect(await dragTo(b, "c", 70)).toEqual(["a", "x", "c"]);
+  });
+});
+
+describe("moveVisibleTo and visibleIndexOf", () => {
+  const list = () => [arch("x"), space("a", "A"), arch("y"), arch("z"), space("b", "B"), space("c", "C"), arch("w")];
+  const order = (l: SpaceDefinition[]) => l.map((s) => s.id).join("");
+
+  it("never reorders the archived spaces relative to each other", () => {
+    for (const id of ["a", "b", "c"]) {
+      for (let gap = 0; gap <= 3; gap++) {
+        const out = moveVisibleTo(list(), id, gap);
+        expect(out.filter((s) => s.archived).map((s) => s.id)).toEqual(["x", "y", "z", "w"]);
+        expect(out).toHaveLength(7);
+      }
+    }
+  });
+
+  it("translates each gap to the slot before the active space there", () => {
+    expect(order(moveVisibleTo(list(), "c", 0))).toBe("xcayzbw");
+    expect(order(moveVisibleTo(list(), "c", 1))).toBe("xayzcbw");
+    expect(order(moveVisibleTo(list(), "a", 3))).toBe("xyzbcaw");
+    expect(order(moveVisibleTo(list(), "a", 2))).toBe("xyzbacw");
+  });
+
+  it("clamps an out-of-range gap and ignores an archived or unknown id", () => {
+    expect(order(moveVisibleTo(list(), "a", 99))).toBe("xyzbcaw");
+    expect(order(moveVisibleTo(list(), "a", -4))).toBe("xayzbcw");
+    expect(order(moveVisibleTo(list(), "x", 2))).toBe("xayzbcw");
+    expect(order(moveVisibleTo(list(), "nope", 2))).toBe("xayzbcw");
+  });
+
+  it("counts visible position only", () => {
+    expect(visibleIndexOf(list(), "c")).toBe(2);
+    expect(visibleIndexOf(list(), "x")).toBeNull();
+    expect(visibleIndexOf(list(), "nope")).toBeNull();
   });
 });
