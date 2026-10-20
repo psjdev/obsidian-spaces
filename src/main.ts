@@ -19,6 +19,7 @@ import { SwitcherView } from "./ui/SwitcherView";
 import { SpaceHeaderView } from "./ui/SpaceHeaderView";
 import { SpaceSuggestModal } from "./ui/SpaceSuggestModal";
 import { spaceEntries } from "./ui/spaceEntries";
+import { activeSpaces } from "./definitions/archived";
 import { knownIconIds } from "./ui/knownIcons";
 import { CreateSpacePanel } from "./ui/CreateSpacePanel";
 import { nativeKnownTags } from "./ui/nativeTagCounts";
@@ -1122,7 +1123,7 @@ export default class SpacesPlugin extends Plugin {
             // started, and commands are registered exactly once.
             entries: () =>
               spaceEntries(
-                this.defs.get().spaces,
+                activeSpaces(this.defs.get().spaces),
                 this.runtime.getSelection(),
                 knownIconIds()
               ),
@@ -1796,7 +1797,7 @@ export default class SpacesPlugin extends Plugin {
   }
 
   private async cycle(delta: number): Promise<void> {
-    const spaces = this.defs.get().spaces;
+    const spaces = activeSpaces(this.defs.get().spaces);
     if (spaces.length === 0) return;
     const order: ActiveSelection[] = [
       { kind: "all" },

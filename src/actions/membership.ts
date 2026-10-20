@@ -7,6 +7,7 @@ import type { PropertyIndex } from "../visibility/PropertyIndex";
 import type { TagIndex } from "../visibility/TagIndex";
 import { decorate as decorateMenu } from "./membershipMenu";
 import { removeMembers } from "./definitionWrites";
+import { activeSpaces } from "../definitions/archived";
 import { heldBy, holdsPropertyMember, pathMembers, resolvedPaths } from "../definitions/membership";
 
 interface MembershipContext {
@@ -280,7 +281,7 @@ async function removeAll(ctx: MembershipContext, files: TAbstractFile[]): Promis
 export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFile[]): void {
   const decorateCtx = {
     controller: ctx.controller,
-    spaces: (): readonly SpaceDefinition[] => ctx.defs.get().spaces,
+    spaces: (): readonly SpaceDefinition[] => activeSpaces(ctx.defs.get().spaces),
     // The controller's own snapshot, so *All*'s "Add to space" answers from
     // the same picture the tree was drawn from. Lazy behind
     // `createLazyTagIndex`, so a vault whose spaces hold no tag member pays

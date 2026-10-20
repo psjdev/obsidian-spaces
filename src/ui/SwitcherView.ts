@@ -4,6 +4,7 @@ import { openIconPicker } from "./IconPickerPopover";
 import { openColorPicker } from "./ColorPickerPopover";
 import { openRenamePopover } from "./RenamePopover";
 import { knownIconIds } from "./knownIcons";
+import { activeSpaces } from "../definitions/archived";
 import { spaceEntries, splitPinnedEntry, type SpaceEntry } from "./spaceEntries";
 import { railScrollOffset, railWheelDelta } from "./railScroll";
 import {
@@ -582,7 +583,7 @@ export class SwitcherView {
     // One list, read by the strip, the header and the header's
     // dropdown. Inline copies of it drifted the moment a third reader existed.
     const entries = spaceEntries(
-      this.defs.get().spaces,
+      activeSpaces(this.defs.get().spaces),
       this.runtime.getSelection(),
       knownIconIds()
     );

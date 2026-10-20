@@ -12,6 +12,7 @@ import { resolveMembers } from "./resolveMembers";
 import type { TagIndex } from "../visibility/TagIndex";
 import type { PropertyIndex, PropertySnapshot } from "../visibility/PropertyIndex";
 import type { ActiveSelection, PathMember, SpaceDefinition, SwitchOutcome } from "../types";
+import { isArchived } from "../definitions/archived";
 
 /**
  * The property accessor a disposed controller is left with.
@@ -181,7 +182,11 @@ export class SpaceController {
   activeSpace(): SpaceDefinition | null {
     const sel = this.runtime.getSelection();
     if (sel.kind === "all") return null;
-    return this.defs.get().spaces.find((s) => s.id === sel.id) ?? null;
+    const space = this.defs.get().spaces.find((s) => s.id === sel.id);
+    // An archived space is away, which is the same state as one that is not in
+    // the array: All. The stored selection keeps its id, so restoring the space
+    // puts the user back in it.
+    return space && !isArchived(space) ? space : null;
   }
 
   currentSnapshot(): VisibilitySnapshot | null {
