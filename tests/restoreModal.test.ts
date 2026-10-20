@@ -19,7 +19,9 @@
  * button-to-method wiring inside `onOpen` is out of reach, exactly as
  * `ConfirmModal`'s is.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { openFolderPickerPopover } from "../src/ui/FolderPickerPopover";
+import type { VaultSource } from "../src/ui/createSpaceForm";
 import {
   RestoreGate,
   actionsFor,
@@ -97,13 +99,14 @@ describe("which problems the gate shows", () => {
     expect(restoreRows(s, restoreProblems(s, has()))).toEqual([rootRow("Projects/X")]);
   });
 
-  it("leaves a folder space's members out, because nothing ever renders them", () => {
+  it("leaves a folder space's members out, because the tree never draws them", () => {
     // `SpaceController.membersForSnapshot` answers `[{ path: root }]` for any
-    // space that DECLARES a root, usable or not. A missing member of such a
-    // space is true and invisible, so the gate neither shows it nor touches
-    // it: deciding it would be deciding about something the user cannot see,
-    // and Remove would discard stored curation that only matters if the root
-    // is ever cleared.
+    // space that DECLARES a root, usable or not, so such a space's members
+    // are not what a restore puts back on screen. They are still listed by
+    // `memberRows` for the row summary and the Contents dialog, which is the
+    // reason to leave them alone HERE: the place to remove a member is where
+    // members are managed, and Remove in this dialog would discard curation
+    // that matters again the moment the root is cleared.
     const s = space({ root: "Projects/X" }, [
       { kind: "file", path: "a.md" },
       { kind: "folder", path: "Dir" },
@@ -170,6 +173,37 @@ describe("what the gate offers", () => {
     );
     expect(pointProblem(rootRow("Gone"), "Dir", kindOf)).toBeNull();
   });
+
+  it("refuses the vault root, which is the state a missing root is already in", () => {
+    const kindOf = (): "file" | "folder" | null => "folder";
+    expect(pointProblem(rootRow("Gone"), "/", kindOf)).toBe(
+      "A space cannot show the whole vault. Pick a folder inside it."
+    );
+    expect(pointProblem(memberRow("Dir", "folder"), "/", kindOf)).toBe(
+      "The vault root is not a note or a folder a space can hold. Pick one inside it."
+    );
+  });
+
+  it("refuses a path the schema would reject, rather than failing the whole write", () => {
+    // `validateMembers` rejects a leading slash, a backslash and a `..`
+    // segment, and one rejected member fails the ENTIRE mutation: nothing
+    // restored, and "invalid mutation: invalid space definition" in a notice.
+    const unsafe = "Not a vault path. Give a path inside the vault, with no leading slash.";
+    expect(pointProblem(memberRow("a.md"), "/Notes/a.md", () => "file")).toBe(unsafe);
+    expect(pointProblem(memberRow("a.md"), "../a.md", () => "file")).toBe(unsafe);
+    expect(pointProblem(memberRow("Dir", "folder"), "C:/Dir", () => "folder")).toBe(unsafe);
+  });
+
+  it("says the folder is fine and the name is not, when the folder was just chosen", () => {
+    // `Choose…` composed the path, so "check the spelling" would be about a
+    // path the user never typed. Only the name at the end is theirs.
+    expect(pointProblem(memberRow("Old/a.md"), "New/a.md", () => null, "folder-pick")).toBe(
+      "Nothing by that name in that folder. Edit the name, or choose another folder."
+    );
+    expect(pointProblem(memberRow("Old/a.md"), "New/a.md", () => null)).toBe(
+      "No note or folder at that path. Check the spelling."
+    );
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -234,6 +268,13 @@ describe("the gate's copy", () => {
       restoreFooter([memberRow("a.md"), rootRow("X")]),
       pointProblem(memberRow("a.md"), "", () => null) ?? "",
       pointProblem(memberRow("a.md"), "Nope.md", () => null) ?? "",
+      pointProblem(memberRow("a.md"), "Nope.md", () => null, "folder-pick") ?? "",
+      pointProblem(memberRow("a.md"), "a.md", () => null) ?? "",
+      pointProblem(memberRow("a.md"), "/a.md", () => "file") ?? "",
+      pointProblem(memberRow("a.md"), "Dir", () => "folder") ?? "",
+      pointProblem(memberRow("Dir", "folder"), "a.md", () => "file") ?? "",
+      pointProblem(rootRow("Gone"), "/", () => "folder") ?? "",
+      pointProblem(memberRow("Dir", "folder"), "/", () => "folder") ?? "",
     ];
     for (const s of strings) {
       expect(s).not.toMatch(/—/);
@@ -342,6 +383,72 @@ describe("committing the staged fixes", () => {
       { kind: "file", path: "New/a.md" },
       { kind: "folder", path: "New/a.md" },
     ]);
+  });
+
+  it("follows the exclusions under a re-pointed member folder", () => {
+    // `exclude` holds LITERAL paths and `archiveSpace` preserves them, so a
+    // re-point that left them spelled the old way would silently put the
+    // notes the user took out of this space back into it.
+    const draft = draftOf([
+      {
+        ...archived(),
+        members: [{ kind: "folder", path: "Old/Dir" }],
+        exclude: ["Old/Dir/skip.md", "Old/Dir/Deep/also.md", "Elsewhere/keep-out.md"],
+      },
+    ]);
+
+    applyRestoreFixes(draft, "b", [{ kind: "point-member", from: "Old/Dir", to: "New/Dir" }]);
+
+    expect(draft.spaces[0].exclude).toEqual([
+      "New/Dir/skip.md",
+      "New/Dir/Deep/also.md",
+      // Not under the re-pointed member, so not this re-point's business.
+      "Elsewhere/keep-out.md",
+    ]);
+  });
+
+  it("follows the exclusions under a re-pointed root", () => {
+    const draft = draftOf([
+      { ...archived(), root: "Old/Dir", exclude: ["Old/Dir/skip.md", "Other/x.md"] },
+    ]);
+    applyRestoreFixes(draft, "b", [{ kind: "point-root", to: "New/Dir" }]);
+    expect(draft.spaces[0].root).toBe("New/Dir");
+    expect(draft.spaces[0].exclude).toEqual(["New/Dir/skip.md", "Other/x.md"]);
+  });
+
+  it("leaves a removed member's exclusions alone", () => {
+    // `exclude` leaves a path out whatever pulled it in, so it is not owned
+    // by the member it sits under: a tag member of the same space can still
+    // reach that note, and dropping the exclusion would put it back on
+    // screen as a side effect of removing something else. A kept entry
+    // excludes nothing and is one click to clear in the Contents dialog.
+    const draft = draftOf([
+      {
+        ...archived(),
+        members: [
+          { kind: "folder", path: "Old/Dir" },
+          { kind: "tag", tag: "work" },
+        ],
+        exclude: ["Old/Dir/skip.md"],
+      },
+    ]);
+    applyRestoreFixes(draft, "b", [{ kind: "remove-member", path: "Old/Dir" }]);
+    expect(draft.spaces[0].exclude).toEqual(["Old/Dir/skip.md"]);
+    expect(draft.spaces[0].members).toEqual([{ kind: "tag", tag: "work" }]);
+  });
+
+  it("would fail the whole write on a path the schema rejects, which pointProblem catches", () => {
+    // The hazard the unsafe-path refusal exists for, stated where it can be
+    // seen: nothing is partially applied, and the user gets a schema error.
+    return storeOf(docWith([archived()])).then(async ({ store, writes }) => {
+      await expect(
+        commitRestore(store, "b", [
+          { kind: "point-member", from: "Old/a.md", to: "/Notes/a.md" },
+        ])
+      ).rejects.toThrow(/invalid mutation/);
+      expect(writes()).toBe(0);
+      expect(store.get().spaces[0].archived).toBe(true);
+    });
   });
 
   it("keeps a re-pointed member's position in orders.bySpaceId", () => {
@@ -477,6 +584,54 @@ describe("staging", () => {
     expect(closed()).toBe(0);
     expect(errors[0]).toContain("disk full");
     expect(gate.fixes()).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The folder picker, as the gate opens it
+ * ------------------------------------------------------------------ */
+
+describe("the folder picker the gate reuses", () => {
+  const source: VaultSource = { allPaths: () => [], kindOf: () => null };
+
+  function openPicker(offerClear?: boolean): HTMLElement {
+    const anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    // `FolderSuggest` needs a real `App`; the stub refuses to invent one, and
+    // the popover's own try/catch degrades to the plain input, which is the
+    // path under test here.
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    openFolderPickerPopover({
+      anchor,
+      app: {} as never,
+      folders: source,
+      current: "Old",
+      apply: () => Promise.resolve(),
+      ...(offerClear === undefined ? {} : { offerClear }),
+    });
+    quiet.mockRestore();
+    return document.querySelector(".spaces-folder-picker-popover") as HTMLElement;
+  }
+
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("offers Clear to the missing-root caller it was written for", () => {
+    const root = openPicker();
+    expect(Array.from(root.querySelectorAll("button")).map((b) => b.textContent)).toEqual([
+      "Clear",
+    ]);
+  });
+
+  it("offers no Clear to the gate, where its wording would be untrue", () => {
+    // "The space stays folder pinned, with no folder chosen" describes the
+    // missing-root dialog. Here clearing is not one of the three answers:
+    // on a note row `""` composes a path at the vault root, on a folder or
+    // root row it is refused, and "not deciding now" is "Leave as is".
+    const root = openPicker(false);
+    expect(root.querySelector("button")).toBeNull();
+    expect(root.querySelector("input")).not.toBeNull();
   });
 });
 

@@ -9,7 +9,13 @@ import { canonicalPath } from "../visibility/glob";
 import { memberIdentity } from "../definitions/schema";
 
 
-function rewritePrefix(path: string, oldBase: string, newBase: string): string {
+/**
+ * Exported for the restore gate (`ui/RestoreSpaceModal.ts`), which re-points
+ * a member the user has just identified and needs the same prefix rule a
+ * rename uses. One rule in one place: a second spelling of "is this path at
+ * or under that one" is a second thing to get wrong.
+ */
+export function rewritePrefix(path: string, oldBase: string, newBase: string): string {
   if (path === oldBase) return newBase;
   if (path.startsWith(oldBase + "/")) {
     return newBase + path.slice(oldBase.length);
@@ -54,8 +60,12 @@ function dedupe(members: MemberEntry[]): MemberEntry[] {
  *
  * Absent rather than empty, matching the schema: a space that leaves nothing
  * out carries no `exclude` key at all.
+ *
+ * Exported for the restore gate (`ui/RestoreSpaceModal.ts`): re-pointing a
+ * member at a folder that exists is the same statement a rename makes about
+ * the paths under it, and the failure this guards against is the same one.
  */
-function repairExclude(
+export function repairExclude(
   exclude: readonly string[] | undefined,
   oldPath: string,
   newPath: string

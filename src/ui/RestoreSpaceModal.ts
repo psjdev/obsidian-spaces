@@ -2,7 +2,9 @@ import { Modal, Notice, Setting, type App } from "obsidian";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpaceDefinition, SpacesDefinitions, OrderMap } from "../types";
 import type { RestoreProblem } from "./restoreCheck";
-import { hasRoot, rootOf } from "../visibility/folderSpace";
+import { hasRoot, isVaultRoot, rootOf } from "../visibility/folderSpace";
+import { isSafeVaultPath } from "../definitions/schema";
+import { repairExclude } from "../lifecycle/pathRepair";
 import { insertAt } from "../order/orderModel";
 import { FolderSuggest } from "./FolderSuggest";
 import { openFolderPickerPopover } from "./FolderPickerPopover";
@@ -60,10 +62,17 @@ export type StagedFix =
  *
  * **A space that declares a root is checked on its root alone.**
  * `SpaceController.membersForSnapshot` answers `[{ path: root }]` for any
- * space with a `root`, usable or not, so a stored member of a folder space is
- * never rendered and a missing one is true but invisible. Counting it would
- * make the lede describe notes the user will not see, and offering to remove
- * it would discard curation that matters only if the root is ever cleared.
+ * space with a `root`, usable or not, so a folder space's member list is
+ * never what the TREE draws: a missing member of one is true, and invisible
+ * in the thing a restore puts back. Counting it would make the lede describe
+ * notes the restored space will not show.
+ *
+ * The member list itself is not hidden — `memberRows` lists it for the
+ * settings row's summary and for the Contents dialog — and that is the
+ * argument for leaving it alone here rather than the argument against: the
+ * place to remove a member is where members are listed and managed, not a
+ * dialog about what the tree will draw. Removing one HERE would discard
+ * curation that matters again the moment the root is cleared.
  *
  * Distinct, because the same path can be stored twice — see `restoreRows`.
  * Tag and property members name no path and are not checked at all, matching
@@ -102,7 +111,8 @@ export function checkedPaths(space: SpaceDefinition): string[] {
  *    which keeps stored order.
  *  - **A folder space shows its root only.** See `checkedPaths`. A member of
  *    such a space is dropped from the display AND left untouched by whatever
- *    is staged, so nothing is decided about something that is never drawn.
+ *    is staged, so nothing is decided here about something the restored tree
+ *    will not draw. It stays listed where members are listed.
  *
  * Members come before the root in `restoreProblems`' output and the two never
  * appear together here, so the result needs no sorting.
@@ -138,6 +148,9 @@ export function actionsFor(row: RestoreRow): RestoreAction[] {
   return row.kind === "root" ? ["point", "leave"] : ["point", "remove", "leave"];
 }
 
+/** Where the candidate path came from, which changes one refusal's wording. */
+export type PointSource = "typed" | "folder-pick";
+
 /**
  * Why `to` cannot be pointed at, or null when it can.
  *
@@ -145,17 +158,44 @@ export function actionsFor(row: RestoreRow): RestoreAction[] {
  * the problem into the restored space, which is the one thing this gate
  * exists to prevent. Each message says what to do rather than what went
  * wrong.
+ *
+ * Two refusals are about what the document can HOLD rather than about the
+ * vault, and both would otherwise be felt somewhere worse:
+ *
+ *  - The vault root answers a root row with the missing-root state all over
+ *    again, which is what the gate was opened to settle.
+ *  - A path `isSafeVaultPath` rejects (a leading slash, a backslash, `..`)
+ *    fails `validateMembers`, and the whole `mutate` is then rejected as an
+ *    "invalid mutation" with nothing restored and a schema error in a
+ *    notice. Refusing it here costs one message instead.
  */
 export function pointProblem(
   row: RestoreRow,
   to: string,
-  kindOf: (path: string) => "file" | "folder" | null
+  kindOf: (path: string) => "file" | "folder" | null,
+  source: PointSource = "typed"
 ): string | null {
   const path = to.trim();
   if (path === "") return "Type a path first.";
   if (path === row.path) return "That is the path that is missing. Pick a different one.";
+  if (isVaultRoot(path)) {
+    return row.kind === "root"
+      ? "A space cannot show the whole vault. Pick a folder inside it."
+      : "The vault root is not a note or a folder a space can hold. Pick one inside it.";
+  }
+  if (!isSafeVaultPath(path)) {
+    return "Not a vault path. Give a path inside the vault, with no leading slash.";
+  }
   const kind = kindOf(path);
-  if (kind === null) return "No note or folder at that path. Check the spelling.";
+  if (kind === null) {
+    // The folder came from the picker, so it is there; only the name at the
+    // end is in doubt, and saying so is the difference between "check the
+    // spelling" of a path the user did not type and the one word that is
+    // actually theirs to correct.
+    return source === "folder-pick"
+      ? "Nothing by that name in that folder. Edit the name, or choose another folder."
+      : "No note or folder at that path. Check the spelling.";
+  }
   if (kind !== row.memberKind) {
     return kind === "folder" ? "That is a folder. Pick a note." : "That is a note. Pick a folder.";
   }
@@ -272,6 +312,28 @@ function dropFromOrder(map: OrderMap, path: string): void {
 }
 
 /**
+ * A space's exclusions, followed through a re-point.
+ *
+ * `exclude` holds LITERAL vault paths that `archiveSpace` preserves, so
+ * without this, re-pointing `Old/Dir` at `New/Dir` leaves `Old/Dir/skip.md`
+ * naming nothing: the notes the user deliberately left out of the space come
+ * back with the restore, silently, and whatever later occupies the old path
+ * is excluded in their place. `repairExclude` is the rule a rename already
+ * uses for this (`lifecycle/pathRepair.ts`, where the same failure is
+ * documented), and a re-point is the same statement about the paths under a
+ * folder — made deliberately rather than inferred from a move.
+ *
+ * Assigned or deleted, never spread: `repairExclude` returns `undefined` for
+ * a space that now excludes nothing, and leaving the key in place would keep
+ * the stale list.
+ */
+function followExclusions(space: SpaceDefinition, from: string, to: string): void {
+  const next = repairExclude(space.exclude, from, to);
+  if (next) space.exclude = next;
+  else delete space.exclude;
+}
+
+/**
  * Apply the staged fixes to a mutation DRAFT and clear the archived flag, in
  * place.
  *
@@ -279,6 +341,17 @@ function dropFromOrder(map: OrderMap, path: string): void {
  * "leave" is still a restore. The flag is DELETED rather than set to false,
  * exactly as `restoreSpace` does, so a restored space is byte-identical to
  * one that was never archived.
+ *
+ * **A removed member's exclusions are left alone, deliberately.** `exclude`
+ * leaves a path out "whatever pulled it in" (types.ts) and is not owned by
+ * the member it sits under: a note under the removed folder can still be
+ * reached by a tag or property member of the same space, and dropping the
+ * exclusion would put it back on screen as a side effect of removing
+ * something else. The paths do not resolve anyway — that is why this gate is
+ * open — so a kept entry excludes nothing, stays visible in the Contents
+ * dialog's "Left out" list, and is one click to clear there. This follows
+ * `pathRepair`'s standing position that the dangerous direction is dropping
+ * membership data when a path disappears, not keeping it.
  */
 export function applyRestoreFixes(
   draft: SpacesDefinitions,
@@ -290,6 +363,12 @@ export function applyRestoreFixes(
   const order = draft.orders?.bySpaceId?.[spaceId];
   for (const fix of fixes) {
     if (fix.kind === "point-root") {
+      // The root's exclusions sit under it exactly as a member folder's do.
+      // Its ORDER keys are a different question, and left alone: see
+      // `repointInOrder`. A stale order puts a row in the wrong place, which
+      // is visible and self-correcting; a stale exclusion silently returns a
+      // note the user took out.
+      followExclusions(space, space.root ?? "", fix.to);
       space.root = fix.to;
       continue;
     }
@@ -297,6 +376,7 @@ export function applyRestoreFixes(
       for (const m of space.members) {
         if ((m.kind === "file" || m.kind === "folder") && m.path === fix.from) m.path = fix.to;
       }
+      followExclusions(space, fix.from, fix.to);
       if (order) repointInOrder(order, fix.from, fix.to);
       continue;
     }
@@ -492,8 +572,8 @@ export class RestoreSpaceModal extends Modal {
     };
 
     let input: HTMLInputElement | null = null;
-    const stage = (to: string): void => {
-      const problem = pointProblem(row, to, (p) => this.deps.source.kindOf(p));
+    const stage = (to: string, source: PointSource = "typed"): void => {
+      const problem = pointProblem(row, to, (p) => this.deps.source.kindOf(p), source);
       if (problem !== null) {
         if (input) input.value = to;
         new Notice(`Spaces: ${problem}`);
@@ -542,6 +622,10 @@ export class RestoreSpaceModal extends Modal {
           app: this.app,
           folders: this.deps.source,
           current: dirnameOf(row.path),
+          // No "Clear" here: see `offerClear` in `FolderPickerPopover.ts`.
+          // Its wording describes the missing-root dialog, and empty is not
+          // one of the three answers this row offers.
+          offerClear: false,
           apply: (folder) => {
             // A folder row takes the folder itself; a note row takes the
             // folder it now sits in, keeping the name it had. A note that was
@@ -553,7 +637,7 @@ export class RestoreSpaceModal extends Modal {
                 : folder === ""
                   ? basenameOf(row.path)
                   : `${folder}/${basenameOf(row.path)}`;
-            stage(to);
+            stage(to, "folder-pick");
             return Promise.resolve();
           },
         });
