@@ -33,9 +33,11 @@ import {
   restoreFooter,
   restoreLede,
   restoreRows,
+  restoreReport,
   restoreTitle,
   rowProblem,
   stagedText,
+  type RestoreOutcome,
   type RestoreRow,
   type StagedFix,
 } from "../src/ui/RestoreSpaceModal";
@@ -52,10 +54,13 @@ function space(extra: Partial<SpaceDefinition> = {}, members: MemberEntry[] = []
   return { id: "s", name: "Spring", icon: "box", color: "#aabbcc", members, ...extra };
 }
 
+/** The vault as the gate asks it: by kind, never by bare existence. */
 const has =
   (...paths: string[]) =>
-  (p: string): boolean =>
-    paths.includes(p);
+  (p: string): "file" | "folder" | null => {
+    if (!paths.includes(p)) return null;
+    return p.endsWith(".md") ? "file" : "folder";
+  };
 
 const memberRow = (path: string, memberKind: "file" | "folder" = "file"): RestoreRow => ({
   kind: "member",
@@ -186,19 +191,36 @@ describe("what the gate offers", () => {
   });
 
   it("refuses a path the schema would reject, rather than failing the whole write", () => {
-    // `validateMembers` rejects a leading slash, a backslash and a `..`
-    // segment, and one rejected member fails the ENTIRE mutation: nothing
-    // restored, and "invalid mutation: invalid space definition" in a notice.
+    // On a MEMBER row an unsafe path fails `validateMembers` and the ENTIRE
+    // mutation is rejected: nothing restored, and "invalid mutation: invalid
+    // space definition" in a notice. On a ROOT row `validateSpace` drops the
+    // key instead, the write succeeds, and the folder space silently becomes
+    // a curated one. Refusing here is cheaper than either.
     const unsafe =
-      "Not a vault path. Give a path inside the vault, with forward slashes, " +
-      "no leading slash, no drive letter, and no . or .. steps.";
-    // One message for four causes, so it has to name all four: the
-    // instruction was wrong for three of them when it named only the slash.
+      "Not a vault path. Give a path inside the vault, 1000 characters or " +
+      "fewer, with forward slashes, no leading slash, no drive letter, and " +
+      "no . or .. steps.";
+    // One message for five causes, so it has to name all five. It named four
+    // and left the length cap out, so a path over the cap got an instruction
+    // whose every clause was about something else.
     expect(pointProblem(memberRow("a.md"), "/Notes/a.md", () => "file")).toBe(unsafe);
     expect(pointProblem(memberRow("a.md"), "../a.md", () => "file")).toBe(unsafe);
     expect(pointProblem(memberRow("a.md"), "Notes\\a.md", () => "file")).toBe(unsafe);
     expect(pointProblem(memberRow("a.md"), "./a.md", () => "file")).toBe(unsafe);
     expect(pointProblem(memberRow("Dir", "folder"), "C:/Dir", () => "folder")).toBe(unsafe);
+    expect(pointProblem(memberRow("a.md"), "N/" + "a".repeat(1000), () => "file")).toBe(unsafe);
+  });
+
+  it("refuses a path the space already holds, which the loader would silently absorb", () => {
+    // `validateMembers` keys on `"p:" + path`, so two members naming one path
+    // come out as one. Pointing a row at a path already held therefore does
+    // not point it, it deletes it, and nothing downstream can say so.
+    const kindOf = (): "file" | "folder" | null => "file";
+    const held = new Set(["New/a.md"]);
+    expect(pointProblem(memberRow("Old/x.md"), "New/a.md", kindOf, "typed", held)).toBe(
+      "That is already in this space. Pick a different path, or Remove from space."
+    );
+    expect(pointProblem(memberRow("Old/x.md"), "New/b.md", kindOf, "typed", held)).toBeNull();
   });
 
   it("says the folder is fine and the name is not, when the folder was just chosen", () => {
@@ -233,7 +255,14 @@ describe("the gate's copy", () => {
   it("names what is missing per row", () => {
     expect(rowProblem(memberRow("a.md"))).toBe("No note at this path");
     expect(rowProblem(memberRow("Dir", "folder"))).toBe("No folder at this path");
-    expect(rowProblem(rootRow("Projects/X"))).toBe("No folder at this path");
+    // A root row is the space's own folder, not one of its members, and the
+    // row title is the path: "No folder at this path" never says whose.
+    expect(rowProblem(rootRow("Projects/X"))).toBe(
+      "The folder this space is pinned to is missing"
+    );
+    expect(restoreLede(0, 1, true)).toBe(
+      "The folder this space is pinned to is missing. Nothing has changed yet."
+    );
   });
 
   it("says leaving them is safe, and agrees with how many there are", () => {
@@ -257,7 +286,7 @@ describe("the gate's copy", () => {
     expect(stagedText(row, { kind: "remove-member", path: "Old/a.md" })).toBe(
       "Taking it out of the space"
     );
-    expect(stagedText(rootRow("Gone"), { kind: "point-root", to: "Projects/X" })).toBe(
+    expect(stagedText(rootRow("Gone"), { kind: "point-root", from: "Gone", to: "Projects/X" })).toBe(
       "Pointing at Projects/X"
     );
   });
@@ -271,6 +300,22 @@ describe("the gate's copy", () => {
       restoreTitle(space({ name: "Spring" })),
       stagedText(memberRow("a.md"), { kind: "remove-member", path: "a.md" }),
       stagedText(memberRow("a.md"), { kind: "point-member", from: "a.md", to: "b.md" }),
+      stagedText(rootRow("Gone"), { kind: "point-root", from: "Gone", to: "New" }),
+      restoreLede(0, 1, true),
+      rowProblem(rootRow("Gone")),
+      restoreReport("Spring", { missing: true, skipped: [] }) ?? "",
+      restoreReport("Spring", {
+        missing: false,
+        skipped: [{ kind: "remove-member", path: "Old/a.md" }],
+      }) ?? "",
+      restoreReport("Spring", {
+        missing: false,
+        skipped: [
+          { kind: "remove-member", path: "Old/a.md" },
+          { kind: "point-member", from: "Old/b.md", to: "New/b.md" },
+        ],
+      }) ?? "",
+      pointProblem(memberRow("a.md"), "Held.md", () => "file", "typed", new Set(["Held.md"])) ?? "",
       restoreFooter([memberRow("a.md")]),
       restoreFooter([memberRow("a.md"), rootRow("X")]),
       pointProblem(memberRow("a.md"), "", () => null) ?? "",
@@ -362,7 +407,7 @@ describe("committing the staged fixes", () => {
 
   it("points a root without touching the members", () => {
     const draft = draftOf([archived({ root: "Gone" })]);
-    applyRestoreFixes(draft, "b", [{ kind: "point-root", to: "Projects/X" }]);
+    applyRestoreFixes(draft, "b", [{ kind: "point-root", from: "Gone", to: "Projects/X" }]);
     expect(draft.spaces[0].root).toBe("Projects/X");
     expect(draft.spaces[0].members).toHaveLength(3);
     expect("archived" in draft.spaces[0]).toBe(false);
@@ -418,7 +463,7 @@ describe("committing the staged fixes", () => {
     const draft = draftOf([
       { ...archived(), root: "Old/Dir", exclude: ["Old/Dir/skip.md", "Other/x.md"] },
     ]);
-    applyRestoreFixes(draft, "b", [{ kind: "point-root", to: "New/Dir" }]);
+    applyRestoreFixes(draft, "b", [{ kind: "point-root", from: "Old/Dir", to: "New/Dir" }]);
     expect(draft.spaces[0].root).toBe("New/Dir");
     expect(draft.spaces[0].exclude).toEqual(["New/Dir/skip.md", "Other/x.md"]);
   });
@@ -507,8 +552,148 @@ describe("committing the staged fixes", () => {
   it("does nothing at all for an id that is not there", () => {
     const draft = draftOf([archived()]);
     const before = JSON.stringify(draft);
-    applyRestoreFixes(draft, "nope", [{ kind: "remove-member", path: "Old/a.md" }]);
+    const outcome = applyRestoreFixes(draft, "nope", [
+      { kind: "remove-member", path: "Old/a.md" },
+    ]);
     expect(JSON.stringify(draft)).toBe(before);
+    // ...and SAYS so, rather than letting the gate close as though the space
+    // had been restored. The space really is gone; the report of it was the
+    // thing that was not honest.
+    expect(outcome).toEqual({
+      missing: true,
+      skipped: [{ kind: "remove-member", path: "Old/a.md" }],
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The commit re-checks what it was told, against the live document
+ * ------------------------------------------------------------------ */
+
+describe("a staged fix whose path has moved under the gate", () => {
+  // The gate's rows are built from the SpaceDefinition the settings page was
+  // rendered from, `spaceSignature` does not cover member paths, and
+  // `repairOnRename` repairs archived spaces on purpose. So the decisions can
+  // be about paths the live document no longer holds, and the document is the
+  // only copy of the user's curation.
+
+  it("skips a staged removal when the path it was about has gone", () => {
+    // The loss shape, exactly: the space held a gated `Old/f.md` and a live
+    // `Temp/f.md`; a rename of `Temp` to `Old` collapsed them into the one
+    // live member at `Old/f.md`. Applying the Remove by path would delete
+    // the survivor and leave the space empty.
+    const draft = draftOf([
+      { ...archived(), members: [{ kind: "file", path: "Old/f.md" }] },
+    ]);
+    // The user answered the gate about `Old/f.md` BEFORE the rename, when it
+    // named nothing. It names a real note now, so this must not fire.
+    const outcome = applyRestoreFixes(draft, "b", [
+      { kind: "remove-member", path: "Gone/f.md" },
+    ]);
+    expect(draft.spaces[0].members).toEqual([{ kind: "file", path: "Old/f.md" }]);
+    expect(outcome.skipped).toEqual([{ kind: "remove-member", path: "Gone/f.md" }]);
+    // Still a restore: the flag goes whatever happened to the fixes.
+    expect("archived" in draft.spaces[0]).toBe(false);
+  });
+
+  it("skips a re-point whose source is no longer a member, and touches nothing", () => {
+    const draft = draftOf([
+      {
+        ...archived(),
+        members: [{ kind: "folder", path: "Fresh/Dir" }],
+        exclude: ["Old/Dir/skip.md"],
+      },
+    ], { bySpaceId: { b: { Old: ["Old/Dir"] } } });
+
+    const outcome = applyRestoreFixes(draft, "b", [
+      { kind: "point-member", from: "Old/Dir", to: "New/Dir" },
+    ]);
+
+    expect(draft.spaces[0].members).toEqual([{ kind: "folder", path: "Fresh/Dir" }]);
+    // The exclusions and the order map are not rewritten either: a skipped
+    // fix is skipped whole.
+    expect(draft.spaces[0].exclude).toEqual(["Old/Dir/skip.md"]);
+    expect(draft.orders?.bySpaceId?.b).toEqual({ Old: ["Old/Dir"] });
+    expect(outcome.skipped).toEqual([{ kind: "point-member", from: "Old/Dir", to: "New/Dir" }]);
+  });
+
+  it("skips a root fix when the root is no longer the one the user was shown", () => {
+    const draft = draftOf([archived({ root: "Moved" })]);
+    const outcome = applyRestoreFixes(draft, "b", [
+      { kind: "point-root", from: "Gone", to: "Chosen" },
+    ]);
+    expect(draft.spaces[0].root).toBe("Moved");
+    expect(outcome.skipped).toHaveLength(1);
+  });
+
+  it("refuses to CREATE a root on a space whose root a sync cleared", () => {
+    // `space.root = fix.to` used to be unconditional, so a curated space
+    // acquired a folder and stopped showing any of its members.
+    const draft = draftOf([{ ...archived() }]);
+    const outcome = applyRestoreFixes(draft, "b", [
+      { kind: "point-root", from: "Gone", to: "New/Dir" },
+    ]);
+    expect("root" in draft.spaces[0]).toBe(false);
+    expect(draft.spaces[0].members).toHaveLength(3);
+    expect(outcome.skipped).toHaveLength(1);
+  });
+
+  it("applies the fixes that still match and reports only the ones that do not", () => {
+    const draft = draftOf([archived()]);
+    const outcome = applyRestoreFixes(draft, "b", [
+      { kind: "point-member", from: "Old/a.md", to: "New/a.md" },
+      { kind: "remove-member", path: "Vanished.md" },
+    ]);
+    expect(draft.spaces[0].members).toEqual([
+      { kind: "file", path: "New/a.md" },
+      { kind: "file", path: "Old/b.md" },
+      { kind: "tag", tag: "work" },
+    ]);
+    expect(outcome.skipped).toEqual([{ kind: "remove-member", path: "Vanished.md" }]);
+  });
+
+  it("reports the skipped fixes in the order they were staged", () => {
+    // They are APPLIED longest path first; they are REPORTED in row order,
+    // because the rows are what the user will go back and look at.
+    const draft = draftOf([{ ...archived(), members: [] }]);
+    const outcome = applyRestoreFixes(draft, "b", [
+      { kind: "remove-member", path: "a.md" },
+      { kind: "remove-member", path: "Deep/Nested/b.md" },
+    ]);
+    expect(outcome.skipped.map((f) => (f.kind === "remove-member" ? f.path : ""))).toEqual([
+      "a.md",
+      "Deep/Nested/b.md",
+    ]);
+  });
+});
+
+describe("nested folder re-points", () => {
+  it("leaves each exclusion under the folder it actually belongs to", () => {
+    // Applied in row order the outer fix claimed `Old/Dir/Sub/deep.md` and
+    // carried it to `N1`, while the member it belonged to went to `N2`: the
+    // note the user left out comes back under `N2`, and whatever later
+    // occupies `N1/Sub/deep.md` is excluded in its place.
+    const draft = draftOf([
+      {
+        ...archived(),
+        members: [
+          { kind: "folder", path: "Old/Dir" },
+          { kind: "folder", path: "Old/Dir/Sub" },
+        ],
+        exclude: ["Old/Dir/skip.md", "Old/Dir/Sub/deep.md"],
+      },
+    ]);
+
+    applyRestoreFixes(draft, "b", [
+      { kind: "point-member", from: "Old/Dir", to: "N1" },
+      { kind: "point-member", from: "Old/Dir/Sub", to: "N2" },
+    ]);
+
+    expect(draft.spaces[0].members).toEqual([
+      { kind: "folder", path: "N1" },
+      { kind: "folder", path: "N2" },
+    ]);
+    expect(draft.spaces[0].exclude).toEqual(["N1/skip.md", "N2/deep.md"]);
   });
 });
 
@@ -516,20 +701,29 @@ describe("committing the staged fixes", () => {
  * Staging, and cancel
  * ------------------------------------------------------------------ */
 
+const CLEAN: RestoreOutcome = { missing: false, skipped: [] };
+
 function gateOver(
   rows: RestoreRow[],
-  apply: (fixes: StagedFix[]) => Promise<void>
-): { gate: RestoreGate; closed: () => number; errors: string[] } {
+  apply: (fixes: StagedFix[]) => Promise<RestoreOutcome>
+): {
+  gate: RestoreGate;
+  closed: () => number;
+  errors: string[];
+  reports: RestoreOutcome[];
+} {
   let closed = 0;
   const errors: string[] = [];
+  const reports: RestoreOutcome[] = [];
   const gate = new RestoreGate(rows, {
     apply,
     close: () => {
       closed += 1;
     },
     onError: (m) => errors.push(m),
+    onReport: (o) => reports.push(o),
   });
-  return { gate, closed: () => closed, errors };
+  return { gate, closed: () => closed, errors, reports };
 }
 
 describe("staging", () => {
@@ -556,7 +750,7 @@ describe("staging", () => {
 
   it("holds each row's decision, and lets the last one win", () => {
     const rows = [memberRow("Old/a.md"), rootRow("Gone")];
-    const { gate } = gateOver(rows, async () => undefined);
+    const { gate } = gateOver(rows, async () => CLEAN);
 
     expect(gate.fixes()).toEqual([]);
     gate.remove(0);
@@ -564,11 +758,28 @@ describe("staging", () => {
     gate.point(1, "Projects/X");
     expect(gate.fixes()).toEqual([
       { kind: "point-member", from: "Old/a.md", to: "New/a.md" },
-      { kind: "point-root", to: "Projects/X" },
+      { kind: "point-root", from: "Gone", to: "Projects/X" },
     ]);
 
     gate.leave(0);
-    expect(gate.fixes()).toEqual([{ kind: "point-root", to: "Projects/X" }]);
+    expect(gate.fixes()).toEqual([{ kind: "point-root", from: "Gone", to: "Projects/X" }]);
+  });
+
+  it("reports an outcome that did not do everything, and says nothing when it did", async () => {
+    const rows = [memberRow("Old/a.md")];
+    const left: RestoreOutcome = {
+      missing: false,
+      skipped: [{ kind: "remove-member", path: "Old/a.md" }],
+    };
+    const a = gateOver(rows, async () => left);
+    await a.gate.restore();
+    expect(a.reports).toEqual([left]);
+    expect(restoreReport("Spring", left)).toContain("Old/a.md");
+
+    const b = gateOver(rows, async () => CLEAN);
+    await b.gate.restore();
+    expect(b.reports).toEqual([CLEAN]);
+    expect(restoreReport("Spring", CLEAN)).toBeNull();
   });
 
   it("applies and closes once on Restore", async () => {
@@ -576,6 +787,7 @@ describe("staging", () => {
     const rows = [memberRow("Old/a.md")];
     const { gate, closed } = gateOver(rows, async (f) => {
       seen.push(f);
+      return CLEAN;
     });
     gate.remove(0);
     await gate.restore();
@@ -730,9 +942,18 @@ async function tabOver(
     },
   } as unknown as DefinitionStore;
   const vault = new Set(present);
+  // Real stub instances, because `vaultSource().kindOf` discriminates with
+  // `instanceof`: the gate now asks the vault what KIND is at a path, not
+  // merely whether anything is.
+  const { TFile, TFolder } = await import("obsidian");
   const app = {
     vault: {
-      getAbstractFileByPath: (p: string) => (vault.has(p) ? { path: p } : null),
+      getAbstractFileByPath: (p: string) => {
+        if (!vault.has(p)) return null;
+        const f = p.endsWith(".md") ? new TFile() : new TFolder();
+        f.path = p;
+        return f;
+      },
       getAllLoadedFiles: () => [],
     },
   };
@@ -746,37 +967,66 @@ async function tabOver(
   return { buttons: archivedButtons(tab), spaces, updates: () => updates };
 }
 
+/**
+ * Flush microtasks until `done` answers, or give up.
+ *
+ * These three used `await Promise.resolve()` exactly twice, which asserts how
+ * many ticks `mutate` takes internally rather than what it writes: one more
+ * step inside `persist()` and they go red for a reason unrelated to the
+ * behaviour under test. One of them also hit the 5 s ceiling in a full
+ * parallel run while passing in 716 ms alone, which is why the three carry an
+ * explicit timeout: each pays a dynamic `import` of the settings tab, and a
+ * suite that goes red under load is a suite people learn to re-run.
+ */
+async function settled(done: () => boolean, ticks = 50): Promise<void> {
+  for (let i = 0; i < ticks && !done(); i += 1) await Promise.resolve();
+}
+
+const SLOW = 20_000;
+
 describe("the Restore button", () => {
-  it("restores silently when restoreProblems returns nothing", async () => {
-    opened.calls.length = 0;
-    const { buttons, spaces, updates } = await tabOver([{ kind: "file", path: "a.md" }], ["a.md"]);
+  it(
+    "restores silently when restoreProblems returns nothing",
+    async () => {
+      opened.calls.length = 0;
+      const { buttons, spaces, updates } = await tabOver([{ kind: "file", path: "a.md" }], ["a.md"]);
 
-    buttons.find((b) => b.text === "Restore")!.click();
-    await Promise.resolve();
-    await Promise.resolve();
+      buttons.find((b) => b.text === "Restore")!.click();
+      // The flag clears inside the mutate; `update()` runs in the `.then`
+      // after it, so the later of the two is what settles the click.
+      await settled(() => updates() > 0);
 
-    expect(opened.calls).toHaveLength(0);
-    expect(spaces[0].archived).toBeUndefined();
-    expect(updates()).toBe(1);
-  });
+      expect(opened.calls).toHaveLength(0);
+      expect(spaces[0].archived).toBeUndefined();
+      expect(updates()).toBe(1);
+    },
+    SLOW
+  );
 
-  it("opens the modal and does not restore when there is a problem", async () => {
-    opened.calls.length = 0;
-    const { buttons, spaces, updates } = await tabOver([{ kind: "file", path: "a.md" }], []);
+  it(
+    "opens the modal and does not restore when there is a problem",
+    async () => {
+      opened.calls.length = 0;
+      const { buttons, spaces, updates } = await tabOver([{ kind: "file", path: "a.md" }], []);
 
-    buttons.find((b) => b.text === "Restore")!.click();
-    await Promise.resolve();
-    await Promise.resolve();
+      buttons.find((b) => b.text === "Restore")!.click();
+      await settled(() => opened.calls.length > 0);
 
-    expect(opened.calls).toHaveLength(1);
-    expect(opened.calls[0].open).toBe(true);
-    expect(opened.calls[0].deps.rows).toEqual([memberRow("a.md")]);
-    expect(spaces[0].archived).toBe(true);
-    expect(updates()).toBe(0);
-  });
+      expect(opened.calls).toHaveLength(1);
+      expect(opened.calls[0].open).toBe(true);
+      expect(opened.calls[0].deps.rows).toEqual([memberRow("a.md")]);
+      expect(spaces[0].archived).toBe(true);
+      expect(updates()).toBe(0);
+    },
+    SLOW
+  );
 
-  it("still offers Restore and Delete, in that order", async () => {
-    const { buttons } = await tabOver([{ kind: "file", path: "a.md" }], []);
-    expect(buttons.map((b) => b.text)).toEqual(["Restore", "Delete"]);
-  });
+  it(
+    "still offers Restore and Delete, in that order",
+    async () => {
+      const { buttons } = await tabOver([{ kind: "file", path: "a.md" }], []);
+      expect(buttons.map((b) => b.text)).toEqual(["Restore", "Delete"]);
+    },
+    SLOW
+  );
 });

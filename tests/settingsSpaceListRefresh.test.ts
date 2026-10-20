@@ -19,6 +19,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { SpacesSettingTab } from "../src/ui/SettingsTab";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
+import { noticeLog } from "./helpers/obsidian-stub";
 import type { DefinitionStore } from "../src/definitions/DefinitionStore";
 import type { SpaceDefinition, SpacesDefinitions } from "../src/types";
 
@@ -215,6 +216,11 @@ describe("archiving from the settings tab", () => {
     await Promise.resolve();
     expect(a.archived).toBe(true);
     expect(update).toHaveBeenCalled();
+    // The row vanishes into a list that may be below the fold, so the notice
+    // names the space and says where it went.
+    expect(noticeLog.map((n) => String(n.message))).toContain(
+      'Archived "Alpha". Find it under Archived below.'
+    );
   });
 
   it("lists archived spaces in their own section with Restore and Delete", () => {
@@ -241,15 +247,26 @@ describe("archiving from the settings tab", () => {
     await Promise.resolve();
     expect(b.archived).toBeUndefined();
     expect(update).toHaveBeenCalled();
+    // Restoring does not enter the space, and nothing else says so.
+    expect(noticeLog.map((n) => String(n.message))).toContain(
+      'Restored "Bravo". Click it on the strip to open it.'
+    );
   });
 
   it("shows the Archived section when nothing is archived", () => {
     const { tab } = tabOf([space("a", "Alpha")]);
     const section = archivedSection(tab);
     expect(section.items).toEqual([]);
-    expect(section.emptyState).toBe(
-      "Nothing archived yet. Use Archive on a space to take it off the strip without deleting it."
-    );
+    // An instruction, not an explanation: the one place on this page that
+    // described the feature instead of saying what to click.
+    expect(section.emptyState).toBe("Nothing archived. Click Archive beside a space to put it here.");
+  });
+
+  it("draws no Archived section at all on a vault with no spaces", () => {
+    // "No spaces yet" is the whole answer there. A heading and an empty state
+    // under it describe a feature of a thing the reader has none of.
+    const { tab } = tabOf([]);
+    expect(spacesPage(tab).some((i) => i.heading === "Archived")).toBe(false);
   });
 
   it("redraws the tab after a space is archived", () => {

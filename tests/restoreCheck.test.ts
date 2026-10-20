@@ -6,7 +6,17 @@ function space(extra: Partial<SpaceDefinition> = {}, members: MemberEntry[] = []
   return { id: "s", name: "s", icon: "box", color: "#aabbcc", members, ...extra };
 }
 
-const has = (...paths: string[]) => (p: string) => paths.includes(p);
+/**
+ * The vault, as the gate asks it: by KIND. A path occupied by the other kind
+ * is as broken for the restored space as an empty one, and `pointProblem`
+ * already refuses a typed path of the wrong kind.
+ */
+const has =
+  (...paths: string[]) =>
+  (p: string): "file" | "folder" | null => {
+    if (!paths.includes(p)) return null;
+    return p.endsWith(".md") ? "file" : "folder";
+  };
 
 describe("restoreProblems", () => {
   it("reports nothing when every member resolves", () => {
@@ -61,6 +71,29 @@ describe("restoreProblems", () => {
   it("ignores the exclude list", () => {
     const s = space({ exclude: ["gone.md"] }, [{ kind: "file", path: "a.md" }]);
     expect(restoreProblems(s, has("a.md"))).toEqual([]);
+  });
+
+  it("reports a member whose path is now the other kind", () => {
+    // A folder space whose root path became a note used to pass the gate
+    // silently, restore, and then produce a `no longer exists` Notice: the
+    // design's named anti-goal, reached by a different door.
+    const kindAt = (p: string): "file" | "folder" | null =>
+      p === "Dir" ? "file" : p === "a.md" ? "folder" : null;
+    const s = space({}, [
+      { kind: "folder", path: "Dir" },
+      { kind: "file", path: "a.md" },
+    ]);
+    expect(restoreProblems(s, kindAt)).toEqual([
+      { kind: "member", path: "Dir", memberKind: "folder" },
+      { kind: "member", path: "a.md", memberKind: "file" },
+    ]);
+  });
+
+  it("reports a root whose path is now a note", () => {
+    const s = space({ root: "Projects" });
+    expect(restoreProblems(s, (p) => (p === "Projects" ? "file" : null))).toEqual([
+      { kind: "root", path: "Projects" },
+    ]);
   });
 
   it("reports members and a root together for a space that stores both", () => {

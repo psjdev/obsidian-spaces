@@ -673,12 +673,16 @@ export class SpacesSettingTab extends PluginSettingTab {
               .onClick(() => {
                 void archiveSpace(this.defs, space.id)
                   .then(() => {
+                    // The row vanishes from here and reappears in a list that
+                    // may be below the fold, with no other sign anything
+                    // happened. Delete names the space it took; so does this.
+                    new Notice(`Archived "${space.name}". Find it under Archived below.`);
                     // Twice in the plugin, deliberately: see
                     // `refreshIfSpacesChanged`.
                     this.update();
                   })
                   .catch((e: unknown) => {
-                    new Notice(`Spaces: could not archive (${String(e)})`);
+                    new Notice(`Spaces: could not archive "${space.name}" (${String(e)})`);
                   });
               })
           );
@@ -702,13 +706,19 @@ export class SpacesSettingTab extends PluginSettingTab {
                   desc: "Restore one below to put it back on the strip.",
                 },
           ]),
-      {
-        type: "list",
-        heading: "Archived",
-        emptyState:
-          "Nothing archived yet. Use Archive on a space to take it off the strip without deleting it.",
-        items: archivedSpaces(all).map((space) => this.archivedRow(space, exists)),
-      },
+      // Not on a vault with no spaces at all: "No spaces yet" is the whole
+      // answer there, and a heading plus an empty state under it describes a
+      // feature of a thing the reader does not have one of.
+      ...(all.length === 0
+        ? []
+        : [
+            {
+              type: "list" as const,
+              heading: "Archived",
+              emptyState: "Nothing archived. Click Archive beside a space to put it here.",
+              items: archivedSpaces(all).map((space) => this.archivedRow(space, exists)),
+            },
+          ]),
     ];
   }
 
@@ -725,7 +735,7 @@ export class SpacesSettingTab extends PluginSettingTab {
             .setButtonText("Restore")
             .setTooltip(`Put ${space.name} back on the strip`)
             .onClick(() => {
-              this.restore(space, exists);
+              this.restore(space);
             })
         );
         this.addDeleteButton(setting, space, rows.length, missing);
@@ -736,31 +746,49 @@ export class SpacesSettingTab extends PluginSettingTab {
   /**
    * Restore, gated on what no longer resolves.
    *
-   * The check runs at the click rather than at render, so a path repaired
-   * since the page was drawn is seen as repaired. With nothing to stage this
-   * is `restoreSpace` and no modal at all — a gate shown for a space that is
-   * whole would be a dialog in front of a one-click action. With something to
-   * stage, nothing is written here: `RestoreSpaceModal` applies the fixes and
-   * clears the flag together, in one write.
+   * **Half of this is fresh and half of it is not, and the difference
+   * matters.** `exists` closes over the vault and is read at the click, so a
+   * path the vault has since GAINED at the same spelling is seen as present.
+   * `space` is the object `spaceItems()` captured the last time the page was
+   * built, and `spaceSignature` covers id, name and the archived flag only,
+   * so a member path rewritten by a rename does not redraw this tab: the gate
+   * can open naming a path that has already been repaired to a new spelling.
+   * What makes that safe is downstream rather than here. `applyRestoreFixes`
+   * re-checks every staged fix against the live document, applies only what
+   * still matches, and reports the rest.
+   *
+   * With nothing to stage this is `restoreSpace` and no modal at all — a gate
+   * shown for a space that is whole would be a dialog in front of a one-click
+   * action. With something to stage, nothing is written here:
+   * `RestoreSpaceModal` applies the fixes and clears the flag together, in
+   * one write.
    */
-  private restore(space: SpaceDefinition, exists: (path: string) => boolean): void {
-    const rows = restoreRows(space, restoreProblems(space, exists));
+  private restore(space: SpaceDefinition): void {
+    // `vaultSource().kindOf`, not the `exists` the row's summary uses: the
+    // gate asks whether a note is still a note and a folder still a folder,
+    // which is the rule `pointProblem` already applies to what the user types
+    // into it.
+    const source = this.vaultSource();
+    const rows = restoreRows(space, restoreProblems(space, (path) => source.kindOf(path)));
     if (rows.length === 0) {
       void restoreSpace(this.defs, space.id)
         .then(() => {
+          // Says where it went, as Archive does, and says that restoring is
+          // not entering: nothing switches to the space.
+          new Notice(`Restored "${space.name}". Click it on the strip to open it.`);
           // As on Archive, and for the reason given on
           // `refreshIfSpacesChanged`.
           this.update();
         })
         .catch((e: unknown) => {
-          new Notice(`Spaces: could not restore (${String(e)})`);
+          new Notice(`Spaces: could not restore "${space.name}" (${String(e)})`);
         });
       return;
     }
     new RestoreSpaceModal(this.app, {
       space,
       rows,
-      source: this.vaultSource(),
+      source,
       apply: (fixes) => commitRestore(this.defs, space.id, fixes),
       onRestored: () => {
         this.update();

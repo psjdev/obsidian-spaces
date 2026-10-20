@@ -20,22 +20,38 @@ export type RestoreProblem =
  * gate silently never reports.
  *
  * A folder space's `root` is checked too, since it usually has no members at
- * all, and a moved folder is drift that never self-corrects (folders carry no
- * stat for the move correlator). `""` and `"/"` both mean no folder chosen
- * (see `SpaceDefinition.root`), so neither is a problem.
+ * all. A folder moved while Obsidian is RUNNING is often repaired without
+ * this: `correlateFolder` derives the move from a correlated descendant and
+ * the rename that follows reaches archived spaces through `repairOnRename`.
+ * What does not self-correct is a move made with Obsidian closed, or a move
+ * of a folder with no stat-matchable descendant (a folder carries no stat of
+ * its own for the move correlator), which is the state a space that sat
+ * archived for months is most likely to come back in. `""` and `"/"` both
+ * mean no folder chosen (see `SpaceDefinition.root`), so neither is a
+ * problem.
+ *
+ * **Asked by KIND, not by existence.** A member says what it expects to find,
+ * and a path occupied by the other kind is as broken for the restored space
+ * as an empty one: a folder space pointed at a note draws nothing and then
+ * gets a `"<root>" no longer exists` Notice afterwards, which is the restore
+ * this gate exists to prevent, arriving by a different door. `pointProblem`
+ * already refuses a typed path of the wrong kind, so without this the gate
+ * enforced on INPUT a rule it never applied to the data. Reaching it takes a
+ * filesystem act rather than an in-app one, since Obsidian's notes carry
+ * `.md`.
  */
 export function restoreProblems(
   space: SpaceDefinition,
-  exists: (path: string) => boolean
+  kindAt: (path: string) => "file" | "folder" | null
 ): RestoreProblem[] {
   const problems: RestoreProblem[] = [];
   for (const m of pathMembers(space)) {
-    if (!exists(m.path)) {
+    if (kindAt(m.path) !== m.kind) {
       problems.push({ kind: "member", path: m.path, memberKind: m.kind });
     }
   }
   const root = space.root;
-  if (typeof root === "string" && root !== "" && root !== "/" && !exists(root)) {
+  if (typeof root === "string" && root !== "" && root !== "/" && kindAt(root) !== "folder") {
     problems.push({ kind: "root", path: root });
   }
   return problems;
