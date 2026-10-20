@@ -1,4 +1,5 @@
 import type { StripPlacement } from "../types";
+import { CLS_STRIP_HIDDEN, CLS_STRIP_OPEN } from "../explorer/selectors";
 
 /**
  * The class each placement puts on the EXPLORER PANE, not on the strip.
@@ -13,13 +14,34 @@ export const DOCK_CLASSES: Record<StripPlacement, string | null> = {
   right: "spaces-dock-right",
 };
 
-const ALL = Object.values(DOCK_CLASSES).filter((c): c is string => c !== null);
+const PLACEMENTS = Object.values(DOCK_CLASSES).filter((c): c is string => c !== null);
 
-/** Applies one placement, having removed any other. At most one is ever set. */
+/**
+ * Everything the dock puts on the pane. The hidden and open classes are part
+ * of it: they only mean something next to `spaces-dock-left`, so a pane that
+ * loses that class must not keep them (a stuck transform and a 6px pane).
+ */
+const ALL = [...PLACEMENTS, CLS_STRIP_HIDDEN, CLS_STRIP_OPEN];
+
+/**
+ * Applies one placement, having removed any other. At most one is ever set.
+ * Any placement change also drops the hidden and open classes; the caller
+ * re-applies `applyHidden` afterwards when the placement is `left`.
+ */
 export function applyDock(pane: HTMLElement, placement: StripPlacement): void {
   pane.classList.remove(...ALL);
   const cls = DOCK_CLASSES[placement];
   if (cls) pane.classList.add(cls);
+}
+
+/**
+ * Hides or shows the strip (the pane carries the class, the CSS slides the
+ * strip). Un-hiding also drops the open class so a revealed strip never stays
+ * open with nothing left to close it.
+ */
+export function applyHidden(pane: HTMLElement, hidden: boolean): void {
+  pane.classList.toggle(CLS_STRIP_HIDDEN, hidden);
+  if (!hidden) pane.classList.remove(CLS_STRIP_OPEN);
 }
 
 /**

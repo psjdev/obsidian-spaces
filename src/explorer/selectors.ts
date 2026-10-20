@@ -281,6 +281,18 @@ export const CLS_SPACE_DROP_LINE = "spaces-space-drop-line";
 export const CLS_SPACE_DRAGGING = "is-being-dragged";
 
 /**
+ * A left-docked strip that hides itself. On the PANE, beside the dock class:
+ * it narrows the reserved padding and slides the strip out of view.
+ */
+export const CLS_STRIP_HIDDEN = "spaces-strip-hidden";
+
+/** On the pane while a hidden strip is revealed. Always accompanies the hidden class. */
+export const CLS_STRIP_OPEN = "spaces-strip-open";
+
+/** The invisible hover target along the pane's left edge that reveals a hidden strip. */
+export const CLS_STRIP_ZONE = "spaces-strip-zone";
+
+/**
  * Classes the code sets that `styles.css` deliberately never mentions, each
  * with the reason it needs no rule. Keep it short: a class the code
  * sets and no stylesheet rule reaches is, by default, a rule somebody forgot

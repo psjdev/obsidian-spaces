@@ -1592,6 +1592,39 @@ body.spaces-claims-drop .drag-ghost-action {
   right: 0;
   border-left: 1px solid var(--background-modifier-border);
 }
+
+/* A left strip that hides itself and slides out on hover. The WHOLE block,
+   padding included, sits inside `(hover: hover)`: a device that cannot hover
+   has no way to reveal the strip, so it never hides it, whatever is stored.
+   Only `transform` animates. Measured values: 6px lip, 16px zone, 120ms
+   ease-out open, 90ms ease-in close. The strip needs an opaque background
+   and a shadow because it now overlays the tree. */
+@media (hover: hover) {
+  .spaces-dock-left.spaces-strip-hidden {
+    padding-left: 6px;
+  }
+  .spaces-dock-left.spaces-strip-hidden > .spaces-switcher {
+    transform: translateX(calc(-100% + 6px));
+    transition: transform 90ms ease-in;
+    will-change: transform;
+    background: var(--background-secondary);
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+    z-index: 2;
+  }
+  .spaces-dock-left.spaces-strip-hidden.spaces-strip-open > .spaces-switcher,
+  .spaces-dock-left.spaces-strip-hidden > .spaces-switcher:focus-within {
+    transform: translateX(0);
+    transition: transform 120ms ease-out;
+  }
+  .spaces-dock-left.spaces-strip-hidden > .spaces-strip-zone {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    z-index: 1;
+  }
+}
 .spaces-dock-left > .spaces-switcher > .spaces-switcher-rail,
 .spaces-dock-right > .spaces-switcher > .spaces-switcher-rail {
   flex-direction: column;

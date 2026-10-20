@@ -167,6 +167,30 @@ describe("styles.css — the switch mask is the FILE explorer's", () => {
   });
 });
 
+describe("styles.css — the hidden strip only hides where it can be revealed", () => {
+  it("applies every hidden-strip rule inside a (hover: hover) block", () => {
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) expect(r.media.replace(/\s+/g, "")).toBe("(hover:hover)");
+  });
+
+  it("narrows the pane and slides the strip, opaquely, in the hover block", () => {
+    const pane = selectorsFor(".spaces-strip-hidden").find((r) => r.style.getPropertyValue("padding-left") === "6px");
+    expect(pane).toBeDefined();
+    const strip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("translateX")
+    );
+    expect(strip?.style.getPropertyValue("transform")).toBe("translateX(calc(-100% + 6px))");
+    expect(strip?.style.getPropertyValue("background")).toBe("var(--background-secondary)");
+  });
+
+  it("reveals on the open class and on focus within", () => {
+    const open = selectorsFor("spaces-strip-open");
+    expect(open.some((r) => r.style.getPropertyValue("transform") === "translateX(0)")).toBe(true);
+    expect(selectorsFor(":focus-within").some((r) => r.selector.includes("spaces-strip-hidden"))).toBe(true);
+  });
+});
+
 describe("styles.css — custom-color removal is reachable without hover", () => {
   it("reveals the delete badge on a pointer that cannot hover", () => {
     // The badge is `display: none` until `:hover`/`:focus-visible`. A touch
