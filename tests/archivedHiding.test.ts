@@ -329,6 +329,19 @@ describe("moveVisibleTo and visibleIndexOf", () => {
     expect(order(moveVisibleTo(list(), "nope", 2))).toBe("xayzbcw");
   });
 
+  it("never steps a space over an archived one to reach a gap it already holds", () => {
+    // Both gaps touching the dragged space are no-ops, in the VISIBLE index
+    // space the gap was measured in. `a` is visible index 0 with archived
+    // `y` and `z` stored behind it, so gap 1 is its own trailing gap: it
+    // used to translate to "the slot before `b`" and return "xyzabcw".
+    expect(order(moveVisibleTo(list(), "a", 0))).toBe("xayzbcw");
+    expect(order(moveVisibleTo(list(), "a", 1))).toBe("xayzbcw");
+    expect(order(moveVisibleTo(list(), "b", 1))).toBe("xayzbcw");
+    expect(order(moveVisibleTo(list(), "b", 2))).toBe("xayzbcw");
+    // The review's minimal case, called with no drop handler in front of it.
+    expect(order(moveVisibleTo([space("a", "A"), arch("q"), space("b", "B")], "a", 1))).toBe("aqb");
+  });
+
   it("counts visible position only", () => {
     expect(visibleIndexOf(list(), "c")).toBe(2);
     expect(visibleIndexOf(list(), "x")).toBeNull();

@@ -153,7 +153,8 @@ export function visibleIndexOf(
  * currently sits at that gap, so the drop never steps over, displaces or
  * repositions an archived one. A gap past the last active space lands right
  * after it, which leaves a trailing archived run trailing. Returns the list
- * unchanged when `id` is not an active space.
+ * unchanged when `id` is not an active space, and when the gap is one of the
+ * two touching the dragged space, which are no-ops.
  */
 export function moveVisibleTo<T extends { id: string; archived?: boolean }>(
   spaces: readonly T[],
@@ -164,6 +165,15 @@ export function moveVisibleTo<T extends { id: string; archived?: boolean }>(
   if (from < 0 || isArchived(spaces[from])) return [...spaces];
   const visible = activeSpaces(spaces);
   const gap = Math.max(0, Math.min(visibleGap, visible.length));
+  // `isNoOpMove`'s rule, in the VISIBLE index space the gap was measured in.
+  // Without it the sentence above is not true of this function: `[a, X, b]`
+  // with `X` archived and `a` dropped at gap 1 translated to "the slot before
+  // `b`" and returned `[X, a, b]`, stepping `a` over the archived space to
+  // reach the position it already held. The drop handler returns on
+  // `isNoOpMove` before it ever gets here, but that is the handler's guard,
+  // and this is a pure function that is called directly and documented on its
+  // own terms.
+  if (isNoOpMove(visible.findIndex((sp) => sp.id === id), gap)) return [...spaces];
   const stored =
     gap < visible.length
       ? spaces.indexOf(visible[gap])
