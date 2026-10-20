@@ -15,8 +15,11 @@ export async function archiveSpace(defs: DefinitionStore, id: string): Promise<v
 }
 
 /**
- * Deletes the flag rather than setting it to `false`, so a restored space is
- * byte-identical to one that was never archived.
+ * Deletes the flag rather than setting it to `false`, so the restored space
+ * carries no record of having been archived: no `archived: false` key for a
+ * later reader, a diff or a schema change to interpret. What the rest of the
+ * document looks like afterwards is `validateDefinitions`' business, the same
+ * as it is for every other write.
  */
 export async function restoreSpace(defs: DefinitionStore, id: string): Promise<void> {
   await defs.mutate((d) => {

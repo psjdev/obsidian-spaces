@@ -21,6 +21,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openFolderPickerPopover } from "../src/ui/FolderPickerPopover";
+import type { AnchoredPopover } from "../src/ui/AnchoredPopover";
 import type { VaultSource } from "../src/ui/createSpaceForm";
 import {
   RestoreGate,
@@ -188,9 +189,15 @@ describe("what the gate offers", () => {
     // `validateMembers` rejects a leading slash, a backslash and a `..`
     // segment, and one rejected member fails the ENTIRE mutation: nothing
     // restored, and "invalid mutation: invalid space definition" in a notice.
-    const unsafe = "Not a vault path. Give a path inside the vault, with no leading slash.";
+    const unsafe =
+      "Not a vault path. Give a path inside the vault, with forward slashes, " +
+      "no leading slash, no drive letter, and no . or .. steps.";
+    // One message for four causes, so it has to name all four: the
+    // instruction was wrong for three of them when it named only the slash.
     expect(pointProblem(memberRow("a.md"), "/Notes/a.md", () => "file")).toBe(unsafe);
     expect(pointProblem(memberRow("a.md"), "../a.md", () => "file")).toBe(unsafe);
+    expect(pointProblem(memberRow("a.md"), "Notes\\a.md", () => "file")).toBe(unsafe);
+    expect(pointProblem(memberRow("a.md"), "./a.md", () => "file")).toBe(unsafe);
     expect(pointProblem(memberRow("Dir", "folder"), "C:/Dir", () => "folder")).toBe(unsafe);
   });
 
@@ -594,6 +601,14 @@ describe("staging", () => {
 describe("the folder picker the gate reuses", () => {
   const source: VaultSource = { allPaths: () => [], kindOf: () => null };
 
+  // Every popover opened here is closed in `afterEach`, never discarded. An
+  // open `AnchoredPopover` holds four document and window listeners and drops
+  // them only on `close()`, so one left open outlives the test that made it:
+  // clearing the DOM takes its element away and leaves the listeners behind.
+  // That is the lifetime failure the popover's own docstring warns about, and
+  // a test of the popover is the last place to reproduce it.
+  const openPopovers: AnchoredPopover[] = [];
+
   function openPicker(offerClear?: boolean): HTMLElement {
     const anchor = document.createElement("button");
     document.body.appendChild(anchor);
@@ -601,19 +616,22 @@ describe("the folder picker the gate reuses", () => {
     // the popover's own try/catch degrades to the plain input, which is the
     // path under test here.
     const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    openFolderPickerPopover({
-      anchor,
-      app: {} as never,
-      folders: source,
-      current: "Old",
-      apply: () => Promise.resolve(),
-      ...(offerClear === undefined ? {} : { offerClear }),
-    });
+    openPopovers.push(
+      openFolderPickerPopover({
+        anchor,
+        app: {} as never,
+        folders: source,
+        current: "Old",
+        apply: () => Promise.resolve(),
+        ...(offerClear === undefined ? {} : { offerClear }),
+      })
+    );
     quiet.mockRestore();
     return document.querySelector(".spaces-folder-picker-popover") as HTMLElement;
   }
 
   afterEach(() => {
+    for (const pop of openPopovers.splice(0)) pop.close();
     document.body.replaceChildren();
   });
 

@@ -184,7 +184,14 @@ export function pointProblem(
       : "The vault root is not a note or a folder a space can hold. Pick one inside it.";
   }
   if (!isSafeVaultPath(path)) {
-    return "Not a vault path. Give a path inside the vault, with no leading slash.";
+    // Every cause, not just the first one: this refusal also catches a
+    // backslash, a drive letter and a `.` or `..` segment, and naming only
+    // the leading slash gave the wrong instruction to anyone who typed
+    // `Notes\a.md` or `../a.md`.
+    return (
+      "Not a vault path. Give a path inside the vault, with forward slashes, " +
+      "no leading slash, no drive letter, and no . or .. steps."
+    );
   }
   const kind = kindOf(path);
   if (kind === null) {
@@ -274,10 +281,21 @@ function dirnameOf(path: string): string {
  * that member. Following the precedent would drop the re-pointed note to the
  * bottom of the restored space, which the design names as an anti-goal.
  *
- * Nothing else in the map is rewritten. A re-pointed member FOLDER leaves the
- * order lists of its old descendants where they are: "this folder is that
- * member" is not "everything inside moved too", and claiming it would hand
- * the new folder's children an arrangement made for other notes.
+ * Nothing else in the map is rewritten: a re-pointed member FOLDER leaves the
+ * order lists of its old descendants where they are, while
+ * `followExclusions` below carries the exclusions under that same folder.
+ *
+ * **The two do not agree, and the reason is the cost of being wrong, not a
+ * claim about what the user meant.** A stale order puts a row in the wrong
+ * place, which is visible and corrected by dragging it; a stale exclusion
+ * silently returns a note the user took out, and excludes whatever later
+ * occupies the old path. In the case this gate mostly exists for — a folder
+ * moved outside Obsidian while the space sat archived — the contents moved
+ * with it and kept their names, which is where carrying the keys would be
+ * right. `repairOrderMap` (lifecycle/pathRepair.ts) already has the
+ * key-and-entry rewrite that would do it. That is a change to make
+ * deliberately, with that case in front of it, rather than a line slipped
+ * into this one.
  */
 function repointInOrder(map: OrderMap, from: string, to: string): void {
   let at = -1;
@@ -339,8 +357,8 @@ function followExclusions(space: SpaceDefinition, from: string, to: string): voi
  *
  * The flag goes last and unconditionally: a gate answered with nothing but
  * "leave" is still a restore. The flag is DELETED rather than set to false,
- * exactly as `restoreSpace` does, so a restored space is byte-identical to
- * one that was never archived.
+ * exactly as `restoreSpace` does, so the restored space carries no record of
+ * having been archived.
  *
  * **A removed member's exclusions are left alone, deliberately.** `exclude`
  * leaves a path out "whatever pulled it in" (types.ts) and is not owned by
@@ -376,6 +394,14 @@ export function applyRestoreFixes(
       for (const m of space.members) {
         if ((m.kind === "file" || m.kind === "folder") && m.path === fix.from) m.path = fix.to;
       }
+      // NESTED folder fixes are order-dependent here, and left that way: an
+      // outer `Old/Dir` fix rewrites the exclusions under `Old/Dir/Sub`
+      // before the fix for `Old/Dir/Sub` sees them, so they follow the outer
+      // destination rather than the inner one. Both destinations are folders
+      // the user just named, each entry is still carried rather than
+      // dropped, and the gate stages at most one fix per path — so the
+      // narrow case is "excluded under the wrong one of two chosen folders",
+      // which is stated here rather than solved.
       followExclusions(space, fix.from, fix.to);
       if (order) repointInOrder(order, fix.from, fix.to);
       continue;
