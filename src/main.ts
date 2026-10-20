@@ -1099,6 +1099,17 @@ export default class SpacesPlugin extends Plugin {
     // (`Plugin.addCommand` is not modelled by the `obsidian` stub, and a
     // command that is not in the list is not registered).
     for (const spec of this.commandSpecs()) this.addCommand(spec);
+
+    // LAST, and guarded like the defs-subscription refresh: the settings page
+    // sampled the vault inside `onload()`, before `onLayoutReady`, so every
+    // folder space's row could be claiming its folder is missing. See
+    // `SpacesSettingTab.resampleVault`. A throw here must not take the started
+    // plugin down with it; the page being briefly wrong is not worth that.
+    try {
+      this.settingTab?.resampleVault();
+    } catch (e) {
+      console.error("Spaces: settings resample after layout ready failed", e);
+    }
   }
 
   /**

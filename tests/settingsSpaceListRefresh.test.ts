@@ -296,3 +296,64 @@ describe("archiving from the settings tab", () => {
     expect(first.desc).toBe("Use the + button at the bottom of the file explorer to make one.");
   });
 });
+
+describe("the settings tab resamples the vault after startup", () => {
+  it("cannot see the vault start answering, and resampleVault is what makes it look again", () => {
+    // Reported during manual testing of 0.13.0: a folder space whose folder is
+    // perfectly healthy read "Projects/Kitchen (missing)" in Settings, while
+    // `getSettingDefinitions()` recomputed at the same moment did not say
+    // missing. `addSettingTab` builds the definitions inside `onload()`, one
+    // line before `onLayoutReady`, so `exists` is asked before the vault can
+    // answer; `desc` is a plain string, so nothing re-evaluates it per render;
+    // and `refreshIfSpacesChanged` is gated on the SPACE LIST, which has not
+    // moved. The row stayed wrong for the whole session.
+    let present = false;
+    const { store } = storeOf([
+      {
+        id: "k",
+        name: "Kitchen",
+        icon: "box",
+        color: "#5b5bff",
+        root: "Projects/Kitchen",
+        members: [],
+      },
+    ]);
+    const app = {
+      vault: {
+        getAbstractFileByPath: (path: string): unknown =>
+          present && path === "Projects/Kitchen" ? { path } : null,
+      },
+    };
+    const tab = new SpacesSettingTab(
+      app as never,
+      {} as never,
+      store,
+      () => createMapTagIndex(new Map())
+    );
+    const update = vi.fn();
+    (tab as unknown as { update: () => void }).update = update;
+
+    const summaries = (): string => JSON.stringify(tab.getSettingDefinitions());
+
+    // What the page was built with, before the vault could answer.
+    expect(summaries()).toContain("Projects/Kitchen (missing)");
+
+    tab.refreshIfSpacesChanged(); // establishes the baseline
+    update.mockClear();
+
+    // The vault finishes loading. The space list is byte for byte the same,
+    // so the signature cannot tell anything happened.
+    present = true;
+    tab.refreshIfSpacesChanged();
+    tab.refreshIfSpacesChanged();
+    expect(update).not.toHaveBeenCalled();
+
+    // The resample asks for the redraw anyway, which is the whole point.
+    tab.resampleVault();
+    expect(update).toHaveBeenCalledTimes(1);
+
+    // And what it redraws with is correct.
+    expect(summaries()).toContain("Projects/Kitchen");
+    expect(summaries()).not.toContain("(missing)");
+  });
+});

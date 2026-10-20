@@ -266,6 +266,30 @@ export class SpacesSettingTab extends PluginSettingTab {
     this.update();
   }
 
+  /**
+   * Rebuild the rows once the vault can answer what exists.
+   *
+   * `addSettingTab` builds this tab's definitions inside `onload()`, one line
+   * before `onLayoutReady`, and a row's `(missing)` marker is a plain string
+   * computed right there. `desc` is `string | DocumentFragment` and never a
+   * function, so nothing re-evaluates it per render; Obsidian does not re-ask
+   * a declarative tab for its definitions when the window is opened; and the
+   * only other refresh, `refreshIfSpacesChanged`, no-ops unless the SPACE LIST
+   * moved. So every folder-existence answer on this page was sampled before
+   * the vault was able to give one, and a folder space whose folder is
+   * perfectly healthy read `Folder pinned - <path> (missing)` for the whole
+   * session. Measured in a real Obsidian: the rendered row said `(missing)`
+   * while `getSettingDefinitions()` recomputed at the same moment did not.
+   *
+   * Unconditional, unlike `refreshIfSpacesChanged`: the space list has NOT
+   * changed here, the vault's answer has, and the signature cannot see that.
+   * One redraw, once, after startup and off the path `onload` makes Obsidian
+   * wait for.
+   */
+  resampleVault(): void {
+    this.update();
+  }
+
   override hide(): void {
     this.edits.flush();
     this.edits.clear();
