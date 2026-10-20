@@ -11,8 +11,7 @@ to **All**.
 
 Archived spaces are listed under **Archived**, with **Restore** and **Delete**
 beside each. Delete is permanent. Restore puts the space back at the same
-position on the strip. It does not open the space, so you land in **All** and
-click the space to go in.
+position on the strip. It does not open the space, so click it to go in.
 
 If a note or folder the space held has been moved or deleted, a window lists
 each one before the space comes back. Point it at the right note or folder,
