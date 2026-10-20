@@ -4,11 +4,14 @@ import {
   type App,
   type Plugin,
   type Setting,
+  type SettingDefinition,
   type SettingDefinitionItem,
 } from "obsidian";
 import type { DefinitionStore } from "../definitions/DefinitionStore";
 import type { SpacesDefinitions, StripPlacement } from "../types";
 import { deleteSpace, renameSpace, type SpaceLifecycleHooks } from "../actions/spaceLifecycle";
+import { archiveSpace, restoreSpace } from "../actions/archiveSpace";
+import { activeSpaces, archivedSpaces, isArchived } from "../definitions/archived";
 import { setStripPlacement } from "../actions/stripPlacement";
 import { memberRows, missingCount, spaceRowSummary } from "./memberList";
 import {
@@ -204,16 +207,16 @@ export class SpacesSettingTab extends PluginSettingTab {
   /**
    * What the Spaces page is built from, as a string.
    *
-   * Ids and names in order, because those are the three things a change to
+   * Ids, names and the archived flag in order, because those are the things a change to
    * the space list can do that the rendered page must follow: add, remove,
-   * rename, reorder. Settings live on the other page and are read through
+   * rename, reorder, archive. Settings live on the other page and are read through
    * `getControlValue`, so a toggle changes no definition and must not cost a
    * redraw.
    */
   private spaceSignature(): string {
     return this.defs
       .get()
-      .spaces.map((s) => `${s.id}\u0000${s.name}`)
+      .spaces.map((s) => `${s.id}\u0000${s.name}\u0000${isArchived(s) ? 1 : 0}`)
       .join("\u0001");
   }
 
@@ -573,16 +576,8 @@ export class SpacesSettingTab extends PluginSettingTab {
    * name in the settings search.
    */
   private spaceItems(): SettingDefinitionItem[] {
-    const spaces = this.defs.get().spaces;
-    if (spaces.length === 0) {
-      return [
-        {
-          name: "No spaces yet",
-          desc: "Use the + button at the bottom of the file explorer to make one.",
-        },
-      ];
-    }
-
+    const all = this.defs.get().spaces;
+    const spaces = activeSpaces(all);
     const exists = (path: string): boolean => this.app.vault.getAbstractFileByPath(path) !== null;
 
     // NOTHING HERE MAY COUNT A TAG'S NOTES, and no `matchCount` is passed
@@ -605,7 +600,7 @@ export class SpacesSettingTab extends PluginSettingTab {
     // one rather than as its contents. The per-tag note count lives in the
     // Contents dialog, one button to the right of this line, which the user
     // opens deliberately and which can afford the walk.
-    return spaces.map((space) => {
+    const rowsFor = spaces.map((space) => {
       // One row per stored member, tags included. `missing` is unaffected: a
       // tag row is never missing.
       // No property count either, for the tag reason above: unavailable,
@@ -651,6 +646,23 @@ export class SpacesSettingTab extends PluginSettingTab {
             );
           }
 
+          // Immediately before Delete on every row, so it does not move
+          // between a curated row and a folder row, which has no Contents….
+          setting.addButton((b) =>
+            b
+              .setButtonText("Archive")
+              .setTooltip(`Put ${space.name} away without deleting it`)
+              .onClick(() => {
+                void archiveSpace(this.defs, space.id)
+                  .then(() => {
+                    this.update();
+                  })
+                  .catch((e: unknown) => {
+                    new Notice(`Spaces: could not archive (${String(e)})`);
+                  });
+              })
+          );
+
           setting.addButton((b) =>
             b
               .setButtonText("Delete")
@@ -677,6 +689,73 @@ export class SpacesSettingTab extends PluginSettingTab {
         },
       };
     });
+
+    return [
+      ...(rowsFor.length > 0
+        ? rowsFor
+        : [
+            {
+              name: "No spaces yet",
+              desc: "Use the + button at the bottom of the file explorer to make one.",
+            },
+          ]),
+      {
+        type: "list",
+        heading: "Archived",
+        emptyState:
+          "Nothing archived yet. Use Archive on a space to take it off the strip without deleting it.",
+        items: archivedSpaces(all).map((space) => this.archivedRow(space, exists)),
+      },
+    ];
+  }
+
+  /** An archived space: name and summary, Restore and Delete. No name field, no Contents…. */
+  private archivedRow(
+    space: SpacesDefinitions["spaces"][number],
+    exists: (path: string) => boolean
+  ): SettingDefinition {
+    const rows = memberRows(space, exists, undefined, () => null);
+    const missing = missingCount(rows);
+    return {
+      name: space.name,
+      desc: spaceRowSummary(space, exists),
+      render: (setting: Setting) => {
+        setting.addButton((b) =>
+          b
+            .setButtonText("Restore")
+            .setTooltip(`Put ${space.name} back on the strip`)
+            .onClick(() => {
+              void restoreSpace(this.defs, space.id)
+                .then(() => {
+                  this.update();
+                })
+                .catch((e: unknown) => {
+                  new Notice(`Spaces: could not restore (${String(e)})`);
+                });
+            })
+        );
+        setting.addButton((b) =>
+          b
+            .setButtonText("Delete")
+            .setDestructive()
+            .onClick(async () => {
+              await deleteWithConfirm(
+                { name: space.name, memberCount: rows.length, missingCount: missing },
+                {
+                  confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
+                  remove: () => deleteSpace(this.defs, space.id, this.hooks),
+                  onDeleted: () => {
+                    this.update();
+                  },
+                  onError: (message) => {
+                    new Notice(message);
+                  },
+                }
+              );
+            })
+        );
+      },
+    };
   }
 
   /**

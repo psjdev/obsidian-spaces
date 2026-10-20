@@ -99,7 +99,8 @@ describe("building the settings tab", () => {
     // its contents. That was already the rule; only the per-tag note count is
     // gone from this row.
     const { tab: t } = tab(WITH_TAGS);
-    const rows = spacesPage(t).items ?? [];
+    // The trailing "Archived" list is a section, not a space row.
+    const rows = (spacesPage(t).items ?? []).filter((r) => r.type !== "list");
     expect(rows.map((r) => r.name)).toEqual(["Research"]);
     expect(rows[0].desc).toBe("Curated · 2 members");
   });

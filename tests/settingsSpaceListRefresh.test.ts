@@ -50,6 +50,9 @@ function storeOf(spaces: SpaceDefinition[]): {
         },
         orders: {},
       }) as unknown as SpacesDefinitions,
+    mutate: async (fn: (d: SpacesDefinitions) => void): Promise<void> => {
+      fn({ spaces: current } as unknown as SpacesDefinitions);
+    },
   } as unknown as DefinitionStore;
   return { store, set: (next) => (current = next) };
 }
@@ -62,7 +65,7 @@ function tabOf(spaces: SpaceDefinition[]) {
   // matters here is only whether the tab asks for it.
   const update = vi.fn();
   (tab as unknown as { update: () => void }).update = update;
-  return { tab, update, set };
+  return { tab, update, set, store };
 }
 
 describe("the settings tab follows the space list", () => {
@@ -124,5 +127,140 @@ describe("the settings tab follows the space list", () => {
     tab.refreshIfSpacesChanged();
 
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+/** What a row's render callback asks of Obsidian's Setting, recorded. */
+interface RecordedButton {
+  text: string;
+  tooltip: string;
+  destructive: boolean;
+  click: () => unknown;
+}
+interface RecordedRow {
+  name: string;
+  buttons: RecordedButton[];
+  hasNameField: boolean;
+}
+
+function renderRow(item: unknown): RecordedRow {
+  const def = item as { name: string; render: (s: unknown) => void };
+  const row: RecordedRow = { name: def.name, buttons: [], hasNameField: false };
+  const setting = {
+    addText: (cb: (t: unknown) => void) => {
+      row.hasNameField = true;
+      cb({
+        setValue: () => undefined,
+        getValue: () => "",
+        inputEl: { addEventListener: () => undefined },
+      });
+      return setting;
+    },
+    addButton: (cb: (b: unknown) => void) => {
+      const b: RecordedButton = { text: "", tooltip: "", destructive: false, click: () => undefined };
+      const api = {
+        setButtonText: (t: string) => ((b.text = t), api),
+        setTooltip: (t: string) => ((b.tooltip = t), api),
+        setDestructive: () => ((b.destructive = true), api),
+        onClick: (f: () => unknown) => ((b.click = f), api),
+      };
+      cb(api);
+      row.buttons.push(b);
+      return setting;
+    },
+  };
+  def.render(setting);
+  return row;
+}
+
+function spacesPage(tab: SpacesSettingTab): Array<Record<string, unknown>> {
+  const page = tab
+    .getSettingDefinitions()
+    .find((i) => (i as { name?: string }).name === "Spaces") as unknown as { items: Array<Record<string, unknown>> };
+  return page.items;
+}
+
+function archivedSection(tab: SpacesSettingTab): {
+  heading: string;
+  emptyState: string;
+  items: unknown[];
+} {
+  return spacesPage(tab).find((i) => i.heading === "Archived") as never;
+}
+
+function folderSpace(id: string, name: string): SpaceDefinition {
+  return { ...space(id, name), root: "Projects" };
+}
+
+describe("archiving from the settings tab", () => {
+  it("puts Archive immediately before Delete on a curated space row", () => {
+    const { tab } = tabOf([space("a", "Alpha")]);
+    const row = renderRow(spacesPage(tab)[0]);
+    expect(row.buttons.map((b) => b.text)).toEqual(["Contents…", "Archive", "Delete"]);
+  });
+
+  it("puts Archive immediately before Delete on a folder space row", () => {
+    const { tab } = tabOf([folderSpace("f", "Work")]);
+    const row = renderRow(spacesPage(tab)[0]);
+    expect(row.buttons.map((b) => b.text)).toEqual(["Archive", "Delete"]);
+  });
+
+  it("gives Archive its tooltip, and archives the space when clicked", async () => {
+    const a = space("a", "Alpha");
+    const { tab, update } = tabOf([a]);
+    const archive = renderRow(spacesPage(tab)[0]).buttons.find((b) => b.text === "Archive")!;
+    expect(archive.tooltip).toBe("Put Alpha away without deleting it");
+    archive.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(a.archived).toBe(true);
+    expect(update).toHaveBeenCalled();
+  });
+
+  it("lists archived spaces in their own section with Restore and Delete", () => {
+    const b = { ...space("b", "Bravo"), archived: true as const };
+    const { tab } = tabOf([space("a", "Alpha"), b]);
+
+    const active = spacesPage(tab).filter((i) => i.render);
+    expect(active.map((i) => i.name)).toEqual(["Alpha"]);
+
+    const section = archivedSection(tab);
+    expect(section.items).toHaveLength(1);
+    const row = renderRow(section.items[0]);
+    expect(row.name).toBe("Bravo");
+    expect(row.hasNameField).toBe(false);
+    expect(row.buttons.map((x) => x.text)).toEqual(["Restore", "Delete"]);
+    expect(row.buttons[0]!.tooltip).toBe("Put Bravo back on the strip");
+  });
+
+  it("restores the space when Restore is clicked", async () => {
+    const b = { ...space("b", "Bravo"), archived: true as const };
+    const { tab, update } = tabOf([b]);
+    renderRow(archivedSection(tab).items[0]).buttons[0]!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(b.archived).toBeUndefined();
+    expect(update).toHaveBeenCalled();
+  });
+
+  it("shows the Archived section when nothing is archived", () => {
+    const { tab } = tabOf([space("a", "Alpha")]);
+    const section = archivedSection(tab);
+    expect(section.items).toEqual([]);
+    expect(section.emptyState).toBe(
+      "Nothing archived yet. Use Archive on a space to take it off the strip without deleting it."
+    );
+  });
+
+  it("redraws the tab after a space is archived", () => {
+    const a = space("a", "Alpha");
+    const { tab, update, set } = tabOf([a]);
+    tab.refreshIfSpacesChanged();
+    update.mockClear();
+
+    set([{ ...a, archived: true as const }]);
+    tab.refreshIfSpacesChanged();
+
+    expect(update).toHaveBeenCalledTimes(1);
   });
 });
