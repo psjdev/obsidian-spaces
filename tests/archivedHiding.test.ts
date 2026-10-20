@@ -289,6 +289,18 @@ describe("reordering the strip while something is archived", () => {
   });
 });
 
+describe("the no-op check runs in the visible index space", () => {
+  it("dropping a space on its own visible position never calls mutate", async () => {
+    // [A archived, B, C]: C is at stored index 2 but visible index 1. Dropped at
+    // gap 1 (its own position) that is a no-op only if `from` is the VISIBLE
+    // index. With the stored index (2) the check misses and a write goes out.
+    const b = await build([arch("a"), space("b", "B"), space("c", "C")]);
+    const mutate = vi.spyOn(b.defs, "mutate");
+    expect(await dragTo(b, "c", 70)).toEqual(["a", "b", "c"]);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+});
+
 describe("moveVisibleTo and visibleIndexOf", () => {
   const list = () => [arch("x"), space("a", "A"), arch("y"), arch("z"), space("b", "B"), space("c", "C"), arch("w")];
   const order = (l: SpaceDefinition[]) => l.map((s) => s.id).join("");
