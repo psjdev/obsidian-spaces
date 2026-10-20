@@ -36,6 +36,7 @@ import {
   restoreReport,
   restoreTitle,
   rowProblem,
+  rowSource,
   stagedText,
   type RestoreOutcome,
   type RestoreRow,
@@ -240,41 +241,34 @@ describe("what the gate offers", () => {
  * ------------------------------------------------------------------ */
 
 describe("the gate's copy", () => {
-  it("counts the notes and folders, and says nothing has changed", () => {
-    expect(restoreLede(5, 2)).toBe(
-      "5 of 7 notes and folders are still there. 2 are not, and nothing has changed yet."
-    );
-    expect(restoreLede(1, 1)).toBe(
-      "1 of 2 notes and folders are still there. 1 is not, and nothing has changed yet."
-    );
-    expect(restoreLede(0, 1)).toBe(
-      "0 of 1 note or folder is still there. 1 is not, and nothing has changed yet."
-    );
-  });
-
   it("names what is missing per row", () => {
     expect(rowProblem(memberRow("a.md"))).toBe("No note at this path");
     expect(rowProblem(memberRow("Dir", "folder"))).toBe("No folder at this path");
-    // A root row is the space's own folder, not one of its members, and the
-    // row title is the path: "No folder at this path" never says whose.
-    expect(rowProblem(rootRow("Projects/X"))).toBe(
-      "The folder this space is pinned to is missing"
-    );
-    expect(restoreLede(0, 1, true)).toBe(
-      "The folder this space is pinned to is missing. Nothing has changed yet."
-    );
+    // A root reads the same as any folder row HERE, because `rowSource` is
+    // what says it is the pinned folder, on its own line under the path.
+    // Saying so twice was two lines of the same sentence.
+    expect(rowProblem(rootRow("Projects/X"))).toBe("No folder at this path");
   });
 
-  it("says leaving them is safe, and agrees with how many there are", () => {
-    expect(restoreFooter([memberRow("a.md"), memberRow("Dir", "folder")])).toBe(
-      "Leaving them is safe. They come back if the notes and folders do."
-    );
-    expect(restoreFooter([memberRow("a.md")])).toBe(
-      "Leaving it is safe. It comes back if the note does."
-    );
-    expect(restoreFooter([rootRow("Projects/X")])).toBe(
-      "Leaving it is safe. It comes back if the folder does."
-    );
+  it("says under the path whether somebody put it there by hand", () => {
+    // The gate lists only path members and the root, and `MEMBER_NAMING`
+    // marks file and folder as "picked", so every member row IS hand-added.
+    expect(rowSource(memberRow("a.md"))).toBe("Note you added to this space");
+    expect(rowSource(memberRow("Dir", "folder"))).toBe("Folder you added to this space");
+    expect(rowSource(rootRow("Projects/X"))).toBe("Pinned folder");
+  });
+
+  it("counts what is missing without narrating it", () => {
+    // The old lede read "1 of 3 notes and folders are still there. 2 are not,
+    // and nothing has changed yet." The repo owner asked for a count, not a
+    // paragraph.
+    expect(restoreLede(1, 2)).toBe("2 of 3 missing");
+    expect(restoreLede(0, 1)).toBe("1 of 1 missing");
+    expect(restoreLede(0, 1, true)).toBe("The folder this space is pinned to is missing.");
+  });
+
+  it("says what leaving a row does, in one line", () => {
+    expect(restoreFooter()).toBe("Anything you leave is restored unchanged.");
   });
 
   it("says what a staged row will do, and goes back to the problem when left", () => {
@@ -295,6 +289,7 @@ describe("the gate's copy", () => {
     const strings = [
       restoreLede(5, 2),
       restoreLede(0, 1),
+      restoreLede(1, 2),
       rowProblem(memberRow("a.md")),
       rowProblem(memberRow("Dir", "folder")),
       restoreTitle(space({ name: "Spring" })),
@@ -316,8 +311,10 @@ describe("the gate's copy", () => {
         ],
       }) ?? "",
       pointProblem(memberRow("a.md"), "Held.md", () => "file", "typed", new Set(["Held.md"])) ?? "",
-      restoreFooter([memberRow("a.md")]),
-      restoreFooter([memberRow("a.md"), rootRow("X")]),
+      restoreFooter(),
+      rowSource(memberRow("a.md")),
+      rowSource(memberRow("Dir", "folder")),
+      rowSource(rootRow("Gone")),
       pointProblem(memberRow("a.md"), "", () => null) ?? "",
       pointProblem(memberRow("a.md"), "Nope.md", () => null) ?? "",
       pointProblem(memberRow("a.md"), "Nope.md", () => null, "folder-pick") ?? "",

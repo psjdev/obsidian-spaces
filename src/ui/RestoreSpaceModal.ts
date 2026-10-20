@@ -251,20 +251,38 @@ export function restoreTitle(space: SpaceDefinition): string {
  */
 export function restoreLede(ok: number, bad: number, rootOnly = false): string {
   // A folder space's root is the only row there is when it is a row at all
-  // (see `restoreRows`), and "0 of 1 note or folder is still there" describes
-  // it as a member list the space does not have.
-  if (rootOnly) return "The folder this space is pinned to is missing. Nothing has changed yet.";
-  const total = ok + bad;
-  const subject = total === 1 ? "note or folder is" : "notes and folders are";
-  const not = bad === 1 ? "is" : "are";
-  return `${ok} of ${total} ${subject} still there. ${bad} ${not} not, and nothing has changed yet.`;
+  // (see `restoreRows`), so a count describes a member list the space has not
+  // got.
+  if (rootOnly) return "The folder this space is pinned to is missing.";
+  return `${bad} of ${ok + bad} missing`;
 }
 
-/** What is wrong with one row, in the words of what is expected there. */
+/**
+ * Where this row came from, shown under the path.
+ *
+ * A person looking at a broken path needs to know whether they put it there.
+ * Everything the gate lists is either the folder the space is pinned to, or a
+ * note or folder somebody added by hand: `restoreRows` lists only path
+ * members, and `MEMBER_NAMING` (`resolveMembers.ts`) marks exactly `file` and
+ * `folder` as `"picked"`. A tag or a property is a rule, is never listed, and
+ * so never needs a word here.
+ */
+export function rowSource(row: RestoreRow): string {
+  if (row.kind === "root") return "Pinned folder";
+  return row.memberKind === "folder"
+    ? "Folder you added to this space"
+    : "Note you added to this space";
+}
+
+/**
+ * What is wrong with one row, in the words of what is expected there.
+ *
+ * The root no longer needs its own sentence here. It used to read "The folder
+ * this space is pinned to is missing", because nothing else on the row said a
+ * root was what it was; `rowSource` says so now, directly under the path, and
+ * repeating it would be the same words twice on two lines.
+ */
 export function rowProblem(row: RestoreRow): string {
-  // A root row is not a member that went missing; it is the folder the whole
-  // space is pinned to, and "No folder at this path" never says so.
-  if (row.kind === "root") return "The folder this space is pinned to is missing";
   return row.memberKind === "folder" ? "No folder at this path" : "No note at this path";
 }
 
@@ -283,12 +301,8 @@ export function stagedText(row: RestoreRow, fix: StagedFix | undefined): string 
  * dangling member resolves to `hidden-nonmember` and the row returns the
  * moment the note does.
  */
-export function restoreFooter(rows: readonly RestoreRow[]): string {
-  if (rows.length === 1) {
-    const noun = rows[0].memberKind === "folder" ? "folder" : "note";
-    return `Leaving it is safe. It comes back if the ${noun} does.`;
-  }
-  return "Leaving them is safe. They come back if the notes and folders do.";
+export function restoreFooter(): string {
+  return "Anything you leave is restored unchanged.";
 }
 
 /* ------------------------------------------------------------------ *
@@ -759,7 +773,7 @@ export class RestoreSpaceModal extends Modal {
 
     rows.forEach((row, i) => this.renderRow(row, i));
 
-    this.contentEl.createEl("p", { text: restoreFooter(rows) });
+    this.contentEl.createEl("p", { text: restoreFooter() });
 
     let cancelEl: HTMLElement | null = null;
     new Setting(this.contentEl)
@@ -784,13 +798,30 @@ export class RestoreSpaceModal extends Modal {
     (cancelEl as HTMLElement | null)?.focus();
   }
 
+  /**
+   * One broken path, as a row the person can answer.
+   *
+   * **The path is STATIC.** It used to be the value of a text field, which put
+   * the one thing the row is about into a box the reader could edit and then
+   * no longer recognise, and which duplicated the row name beside it. The
+   * field now appears only when it is asked for, starts EMPTY, and sits on its
+   * own line, so the broken path stays readable above whatever is typed.
+   *
+   * **At most three controls, and never more than one line of them.** Five
+   * (field, Point here, Choose…, Remove from space, Leave as is) overflowed
+   * the modal and squeezed the row name to nothing, which is why the path was
+   * not visible at all. Leaving a row alone is the default and needs no
+   * button; once something IS staged, the three collapse to a single Undo.
+   */
   private renderRow(row: RestoreRow, index: number): void {
-    const setting = new Setting(this.contentEl).setName(row.path).setDesc(rowProblem(row));
-    const say = (): void => {
-      setting.setDesc(stagedText(row, this.gate.stagedAt(index)));
-    };
+    const setting = new Setting(this.contentEl).setName(row.path);
 
+    // Hidden until "Type path…" asks for it, and placed here, immediately
+    // after its own row, so it cannot appear under a different one.
+    const typedRow = new Setting(this.contentEl);
+    typedRow.settingEl.hide();
     let input: HTMLInputElement | null = null;
+
     const stage = (to: string, source: PointSource = "typed"): void => {
       const problem = pointProblem(
         row,
@@ -805,18 +836,25 @@ export class RestoreSpaceModal extends Modal {
         return;
       }
       this.gate.point(index, to.trim());
-      say();
+      redraw();
     };
 
-    setting.addText((t) => {
+    typedRow.addText((t) => {
       input = t.inputEl;
-      t.setPlaceholder(row.memberKind === "folder" ? "Point at a folder" : "Point at a note");
-      t.setValue(row.path);
+      // EMPTY, not seeded with the broken path: the point of typing is to say
+      // where it went, and a prefilled field reads as the answer already
+      // given. The path it is about is the row name directly above.
+      t.setPlaceholder(
+        row.memberKind === "folder" ? "New path of the folder" : "New path of the note"
+      );
+      t.inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") stage(t.inputEl.value);
+      });
       if (row.memberKind !== "folder") return;
       // Folders have a suggester already; there is no file equivalent in this
       // codebase and inventing one is not this task's business. A note is
-      // pointed by typing its path, or by choosing the folder it now sits in
-      // (below), which keeps its name.
+      // pointed by typing its path, or by choosing the folder it now sits in,
+      // which keeps its name.
       try {
         this.suggests.push(
           new FolderSuggest(
@@ -833,63 +871,81 @@ export class RestoreSpaceModal extends Modal {
         console.error("Spaces: folder suggester failed in the restore gate", e);
       }
     });
+    typedRow.addButton((b) => b.setButtonText("Apply").onClick(() => stage(input?.value ?? "")));
 
-    setting.addButton((b) =>
-      b.setButtonText("Point here").onClick(() => {
-        stage(input?.value ?? "");
-      })
-    );
+    const redraw = (): void => {
+      const fix = this.gate.stagedAt(index);
+      setting.setDesc(`${rowSource(row)} · ${stagedText(row, fix)}`);
+      setting.controlEl.empty();
 
-    setting.addButton((b) =>
-      b.setButtonText("Choose…").onClick(() => {
-        // One picker at a time, and this one is held so `onClose` can take
-        // its listeners off. See `picker`.
-        this.picker?.close();
-        this.picker = openFolderPickerPopover({
-          anchor: b.buttonEl,
-          app: this.app,
-          folders: this.deps.source,
-          current: dirnameOf(row.path),
-          // No "Clear" here: see `offerClear` in `FolderPickerPopover.ts`.
-          // Its wording describes the missing-root dialog, and empty is not
-          // one of the three answers this row offers.
-          offerClear: false,
-          apply: (folder) => {
-            // A folder row takes the folder itself; a note row takes the
-            // folder it now sits in, keeping the name it had. A note that was
-            // renamed as well as moved is refused by `pointProblem`, with the
-            // composed path left in the field to edit.
-            const to =
-              row.memberKind === "folder"
-                ? folder
-                : folder === ""
-                  ? basenameOf(row.path)
-                  : `${folder}/${basenameOf(row.path)}`;
-            stage(to, "folder-pick");
-            return Promise.resolve();
-          },
-        });
-      })
-    );
+      if (fix !== undefined) {
+        typedRow.settingEl.hide();
+        setting.addButton((b) =>
+          b.setButtonText("Undo").onClick(() => {
+            this.gate.leave(index);
+            if (input) input.value = "";
+            redraw();
+          })
+        );
+        return;
+      }
 
-    if (actionsFor(row).includes("remove")) {
+      // Named for what is being chosen, which "Choose..." never said. A note
+      // row chooses the FOLDER it moved to and keeps the note's own name, so
+      // the label is the same word for both kinds.
       setting.addButton((b) =>
-        // "Remove from space", not "Remove": the row names a note or folder
-        // that is already missing from the vault, and the shorter label reads
-        // on that row as though it deletes the file.
-        b.setButtonText("Remove from space").onClick(() => {
-          this.gate.remove(index);
-          say();
+        b.setButtonText("Choose folder…").onClick(() => {
+          // One picker at a time, and this one is held so `onClose` can take
+          // its listeners off. See `picker`.
+          this.picker?.close();
+          this.picker = openFolderPickerPopover({
+            anchor: b.buttonEl,
+            app: this.app,
+            folders: this.deps.source,
+            current: dirnameOf(row.path),
+            // No "Clear" here: see `offerClear` in `FolderPickerPopover.ts`.
+            // Its wording describes the missing-root dialog, and empty is not
+            // one of the three answers this row offers.
+            offerClear: false,
+            apply: (folder) => {
+              // A folder row takes the folder itself; a note row takes the
+              // folder it now sits in, keeping the name it had. A note that was
+              // renamed as well as moved is refused by `pointProblem`, and
+              // "Type path…" is the way through for that case.
+              const to =
+                row.memberKind === "folder"
+                  ? folder
+                  : folder === ""
+                    ? basenameOf(row.path)
+                    : `${folder}/${basenameOf(row.path)}`;
+              stage(to, "folder-pick");
+              return Promise.resolve();
+            },
+          });
         })
       );
-    }
 
-    setting.addButton((b) =>
-      b.setButtonText("Leave as is").onClick(() => {
-        this.gate.leave(index);
-        say();
-      })
-    );
+      setting.addButton((b) =>
+        b.setButtonText("Type path…").onClick(() => {
+          typedRow.settingEl.show();
+          input?.focus();
+        })
+      );
+
+      if (actionsFor(row).includes("remove")) {
+        setting.addButton((b) =>
+          // "Remove from space", not "Remove": the row names a note or folder
+          // that is already missing from the vault, and the shorter label reads
+          // on that row as though it deletes the file.
+          b.setButtonText("Remove from space").onClick(() => {
+            this.gate.remove(index);
+            redraw();
+          })
+        );
+      }
+    };
+
+    redraw();
   }
 
   /**
