@@ -30,7 +30,6 @@ import {
   checkedPaths,
   commitRestore,
   pointProblem,
-  restoreFooter,
   restoreLede,
   restoreRows,
   restoreReport,
@@ -267,10 +266,6 @@ describe("the gate's copy", () => {
     expect(restoreLede(0, 1, true)).toBe("The folder this space is pinned to is missing.");
   });
 
-  it("says what leaving a row does, in one line", () => {
-    expect(restoreFooter()).toBe("Anything you leave is restored unchanged.");
-  });
-
   it("says what a staged row will do, and goes back to the problem when left", () => {
     const row = memberRow("Old/a.md");
     expect(stagedText(row, undefined)).toBe("No note at this path");
@@ -311,7 +306,6 @@ describe("the gate's copy", () => {
         ],
       }) ?? "",
       pointProblem(memberRow("a.md"), "Held.md", () => "file", "typed", new Set(["Held.md"])) ?? "",
-      restoreFooter(),
       rowSource(memberRow("a.md")),
       rowSource(memberRow("Dir", "folder")),
       rowSource(rootRow("Gone")),

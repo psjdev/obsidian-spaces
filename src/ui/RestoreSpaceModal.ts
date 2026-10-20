@@ -296,15 +296,6 @@ export function stagedText(row: RestoreRow, fix: StagedFix | undefined): string 
   return `Pointing at ${fix.to}`;
 }
 
-/**
- * The reassurance under the rows. Leaving a path alone is a real answer: a
- * dangling member resolves to `hidden-nonmember` and the row returns the
- * moment the note does.
- */
-export function restoreFooter(): string {
-  return "Anything you leave is restored unchanged.";
-}
-
 /* ------------------------------------------------------------------ *
  * What it writes
  * ------------------------------------------------------------------ */
@@ -773,7 +764,6 @@ export class RestoreSpaceModal extends Modal {
 
     rows.forEach((row, i) => this.renderRow(row, i));
 
-    this.contentEl.createEl("p", { text: restoreFooter() });
 
     let cancelEl: HTMLElement | null = null;
     new Setting(this.contentEl)
