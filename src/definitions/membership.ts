@@ -235,10 +235,15 @@ export function holdsPropertyMember(space: SpaceDefinition): boolean {
  * Named and exported so the archived half is pinnable. `main.ts` is where this
  * is asked and `main.ts` has no harness in this suite, so the call site itself
  * cannot be tested; an ablation sweep found the archived filter there going
- * green against a deliberate break. `reportParseStall` gates on
- * `controller.activeSpace()`, which is null for an archived space, so a vault
- * whose only property space is archived armed a five-second sampler that was
- * guaranteed to report nothing.
+ * green against a deliberate break.
+ *
+ * **What the filter saves is the ASK, not the sampler.** `main.ts` also arms
+ * unconditionally from the `resolved` listener, on every vault, so a false
+ * answer here does not by itself start a run that would not have started.
+ * What it does buy is honesty about who is asking: `reportParseStall` gates
+ * on `controller.activeSpace()`, which is null for an archived space, so an
+ * unfiltered answer re-arms on behalf of a space that could never be told
+ * anything.
  */
 export function armsParseStall(spaces: readonly SpaceDefinition[]): boolean {
   return activeSpaces(spaces).some(holdsPropertyMember);

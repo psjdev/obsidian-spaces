@@ -706,9 +706,13 @@ export class SpacesSettingTab extends PluginSettingTab {
                   desc: "Restore one below to put it back on the strip.",
                 },
           ]),
-      // Not on a vault with no spaces at all: "No spaces yet" is the whole
-      // answer there, and a heading plus an empty state under it describes a
-      // feature of a thing the reader does not have one of.
+      // A DELIBERATE NARROWING OF THE DESIGN, recorded here because it is one.
+      // The design says the Archived section is "always visible, even when
+      // empty", and it is: a vault with spaces and nothing archived still gets
+      // the heading and "Nothing archived". The carve-out is only the vault
+      // with NO SPACES AT ALL, where "No spaces yet" is the whole answer and a
+      // heading plus an empty state under it describes a feature of a thing
+      // the reader does not have one of.
       ...(all.length === 0
         ? []
         : [
@@ -747,8 +751,9 @@ export class SpacesSettingTab extends PluginSettingTab {
    * Restore, gated on what no longer resolves.
    *
    * **Half of this is fresh and half of it is not, and the difference
-   * matters.** `exists` closes over the vault and is read at the click, so a
-   * path the vault has since GAINED at the same spelling is seen as present.
+   * matters.** `vaultSource().kindOf` is read at the click, so a path the
+   * vault has since gained at the same spelling is seen as present, and one
+   * whose kind changed is reported as the wrong kind rather than as missing.
    * `space` is the object `spaceItems()` captured the last time the page was
    * built, and `spaceSignature` covers id, name and the archived flag only,
    * so a member path rewritten by a rename does not redraw this tab: the gate

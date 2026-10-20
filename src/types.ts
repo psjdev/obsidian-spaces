@@ -300,10 +300,15 @@ export type SwitchOutcome =
 /**
  * The highest document version this build understands.
  *
- * NOT what every write stamps. See `schemaVersionFor`: a document is marked 2
- * or 3 only once it uses something an older build cannot represent, so someone
- * who never adds a tag member, an exclusion or a property member keeps a
- * document an older install can still open.
+ * NOT what every write stamps. See `schemaVersionFor`: a document earns 2, 3
+ * or 4 only once it uses something an older build cannot represent, so someone
+ * who never adds a tag member, an exclusion, a property member or an archived
+ * space keeps a document an older install can still open.
+ *
+ * 4 is the archived flag. An older build that dropped it as an unknown key
+ * would put every archived space back on the strip and persist that, so this
+ * is the first version bump whose purpose is to make the older build REFUSE
+ * the file rather than read it approximately.
  */
 export const SCHEMA_VERSION = 4;
 

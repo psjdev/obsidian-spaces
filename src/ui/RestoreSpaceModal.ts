@@ -480,6 +480,14 @@ export function applyRestoreFixes(
   spaceId: string,
   fixes: readonly StagedFix[]
 ): RestoreOutcome {
+  // SOURCE-ONLY, deliberately. Every fix is re-checked against what it claims
+  // to be ABOUT (the member or root it names); a destination is not re-checked
+  // here, so a path the space gained at the staged destination between staging
+  // and commit is still accepted. That asymmetry is benign: the destination
+  // check `pointProblem` runs is about refusing a duplicate, and arriving at a
+  // duplicate is what `validateMembers` de-duplicates on the write anyway,
+  // whereas a fix about a path that no longer exists rewrites the WRONG
+  // member. Only the second one corrupts.
   const space = draft.spaces.find((s) => s.id === spaceId);
   // Deleted on another device while the gate was open. Nothing to restore and
   // nothing to apply the decisions to, which the caller reports rather than

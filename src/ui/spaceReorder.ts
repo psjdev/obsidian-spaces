@@ -162,9 +162,12 @@ export function visibleIndexOf(
  * and `a` crossed it. Crossing is unavoidable when the user drags a space
  * past one that is further along, and an earlier version of this paragraph
  * claimed the drop "never steps over, displaces or repositions an archived
- * one", which an exhaustive enumeration of 1-to-5-space arrangements
- * contradicts in 146 of 1089 cases. Relative order holds in all 1089. Both
- * halves are pinned in `tests/archivedHiding.test.ts`.
+ * one". The counterexample above is the disproof, and it is pinned. An
+ * earlier version of this paragraph also carried a hit rate from an
+ * exhaustive enumeration; a reviewer re-ran that enumeration four ways and
+ * got four different totals, so the figure is gone rather than restated. The
+ * claim that needs to be true is the invariant, and it is pinned by an
+ * exhaustive relative-order test in `tests/archivedHiding.test.ts`.
  */
 export function moveVisibleTo<T extends { id: string; archived?: boolean }>(
   spaces: readonly T[],
