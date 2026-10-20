@@ -75,8 +75,10 @@ describe("the property member's stored shape", () => {
 });
 
 describe("the schema version", () => {
-  it("is 3, so a document written as 3 can be read back", () => {
-    expect(SCHEMA_VERSION).toBe(3);
+  it("is 4, so a document written as 4 can be read back", () => {
+    // Bumped by the archived flag, which is a space field a 0.12.x build
+    // rebuilds its spaces without. See `schemaVersionFor`.
+    expect(SCHEMA_VERSION).toBe(4);
   });
 
   it("writes 3 only when a property member is present", () => {

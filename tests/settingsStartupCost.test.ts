@@ -20,9 +20,10 @@
  * nothing else on this path calls it, so a throwing stub is a precise tripwire.
  *
  * The fixture carries an ARCHIVED space holding a tag member as well. Archived
- * rows are built by `archivedRow`, which hands `memberRows` a `() => null`
- * index of its own, so they cost nothing today; nothing but this stops that
- * changing.
+ * rows are built by `archivedRow`, whose call is `memberRows(space, exists,
+ * undefined, () => null)`: no tag `matchCount` at all, and a property count
+ * that answers "unavailable". Neither costs a walk today; nothing but this
+ * stops that changing.
  */
 import { describe, expect, it } from "vitest";
 import { SpacesSettingTab } from "../src/ui/SettingsTab";

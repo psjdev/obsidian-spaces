@@ -9,6 +9,7 @@ import {
   type ActiveSpaceStyle,
   type DropIndicatorStyle,
 } from "../types";
+import { isArchived } from "./archived";
 import { normalizeTag } from "../visibility/tagMatch";
 import { canonicalPath } from "../visibility/glob";
 import { normalizeValue } from "../visibility/propertyValues";
@@ -292,9 +293,21 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
   // storing both loses nothing — clearing `root` later brings the members
   // straight back, whereas dropping the space cannot be undone by the user
   // at all.
+  //
+  // A TRAILING SLASH is collapsed rather than kept or rejected. `"Dir/"`
+  // passes `isSafeVaultPath` (splitting on `/` leaves an empty final
+  // segment, which is neither `.` nor `..`) and then resolves to nothing:
+  // the vault has no `"Dir/"`, so a folder space spelled that way draws an
+  // empty tree and reports a restore-gate row on every restore. It is the
+  // same folder spelled differently, and `normalizeMemberPath` already
+  // strips it from every root the interface writes, so only a hand-edited
+  // `data.json` arrives with one. Rejecting it would drop the key and
+  // silently reclassify a folder space as an empty curated one, which is the
+  // outcome this block is written to avoid.
   let root: string | undefined;
-  if (typeof r.root === "string" && (r.root === "" || r.root === "/" || isSafeVaultPath(r.root))) {
-    root = r.root;
+  if (typeof r.root === "string") {
+    const spelled = r.root === "" || r.root === "/" ? r.root : r.root.replace(/\/+$/, "");
+    if (spelled === "" || spelled === "/" || isSafeVaultPath(spelled)) root = spelled;
   }
   // Shape only, entry by entry, exactly like `root` above: a bad string is
   // unusable, not incoherent, and dropping the whole space over one would
@@ -337,12 +350,20 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
 /**
  * The version to stamp on a document about to be written.
  *
- * Version 3 added property members; a document earns it by holding one.
- * Version 2 added tag members and per-space exclusions. A build that only
- * understands version 1 rejects the whole document rather than dropping what
- * it does not recognise, which is the safe behaviour, but it is also a
- * plugin that refuses to work. So a document earns version 2 by using
+ * Version 4 added the archived flag; a document earns it by holding an
+ * archived space. Version 3 added property members; a document earns it by
+ * holding one. Version 2 added tag members and per-space exclusions. A build
+ * that only understands version 1 rejects the whole document rather than
+ * dropping what it does not recognise, which is the safe behaviour, but it is
+ * also a plugin that refuses to work. So a document earns version 2 by using
  * something version 1 cannot hold, and nothing else.
+ *
+ * `archived` is gated here for the reason the rest of them are, and the
+ * SETTINGS exemption below does not cover it: it is a space field, which is
+ * what this function reads. A 0.12.x build rebuilds each space from a fixed
+ * key list, has no `archived` case, and would drop the flag, put every
+ * archived space back on the strip and persist that on its next write. The
+ * stamp makes it refuse the document instead and say so.
  *
  * This matters for someone running two devices through Sync who upgrades one
  * of them first.
@@ -369,6 +390,7 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
  * to remember to gate each new key.
  */
 export function schemaVersionFor(spaces: readonly SpaceDefinition[]): number {
+  if (spaces.some(isArchived)) return 4;
   const usesV3 = spaces.some((s) => s.members.some((m) => m.kind === "property"));
   if (usesV3) return 3;
   const usesV2 = spaces.some(

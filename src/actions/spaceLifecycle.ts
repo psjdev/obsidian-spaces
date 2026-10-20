@@ -5,7 +5,7 @@ import {
   isIconIdShape,
   normalizeHex,
 } from "../definitions/appearance";
-import { RESERVED_IDS } from "../definitions/schema";
+import { RESERVED_IDS, isSafeVaultPath } from "../definitions/schema";
 import { repairExclude } from "../lifecycle/pathRepair";
 import type { MemberEntry } from "../types";
 
@@ -249,6 +249,14 @@ export async function renameSpace(
  * reclassify a folder space as an empty curated one. So this ALWAYS assigns
  * `s.root`, never `delete`s it.
  *
+ * Which is a promise this cannot keep on its own, hence the guard below:
+ * `validateSpace` drops `root` for a path `isSafeVaultPath` rejects, so
+ * writing one here produced exactly the reclassification the paragraph above
+ * refuses to perform, and now takes the exclusions with it because they are
+ * rewritten against that path first. Unreachable from the picker today,
+ * which commits either a real folder or an Enter path that re-checks the
+ * kind; the guard is what makes the promise true rather than true by luck.
+ *
  * Usability — does the path resolve to a real folder now — is deliberately
  * NOT checked here; that is `rootOf`'s call at READ time.
  *
@@ -267,6 +275,9 @@ export async function setSpaceRoot(
   root: string
 ): Promise<void> {
   const normalized = normalizeMemberPath(root);
+  // "" and "/" are the two spellings of "no folder chosen" and are stored as
+  // given (see `validateSpace`); anything else must survive the loader.
+  if (normalized !== "" && normalized !== "/" && !isSafeVaultPath(normalized)) return;
   await defs.mutate((d) => {
     const s = d.spaces.find((x) => x.id === id);
     if (!s || typeof s.root !== "string") return;

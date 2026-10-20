@@ -38,8 +38,38 @@ describe("schemaVersion on the way out", () => {
   });
 
   it("refuses a document from a future version", () => {
-    const r = validateDefinitions(doc({}, 4));
+    const r = validateDefinitions(doc({}, 5));
     expect(r.ok).toBe(false);
+  });
+
+  it("becomes 4 once a space is archived", () => {
+    // `archived` is a SPACE field, which is what this function gates. A
+    // 0.12.x build rebuilds each space from a fixed key list with no
+    // `archived` case, so without the stamp it accepts the document, drops
+    // the flag, puts every archived space back on the strip and persists
+    // that. Stamped 4 it refuses the document and says so instead.
+    const r = validateDefinitions(doc({ archived: true }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.schemaVersion).toBe(4);
+  });
+
+  it("drops back once the last archived space is restored", () => {
+    // Same recomputed-from-content rule as the exclusion case above: restore
+    // every space and an older install can open the document again.
+    const r = validateDefinitions(doc({}, 4));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.schemaVersion).toBe(1);
+  });
+
+  it("stays 4 for an archived space that also holds a property member", () => {
+    const r = validateDefinitions(
+      doc({ archived: true, members: [{ kind: "property", key: "due" }] })
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.schemaVersion).toBe(4);
   });
 
   it("DEFAULT_DEFINITIONS is version 1, not SCHEMA_VERSION", () => {

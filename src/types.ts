@@ -305,7 +305,7 @@ export type SwitchOutcome =
  * who never adds a tag member, an exclusion or a property member keeps a
  * document an older install can still open.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const DEFAULT_DEFINITIONS: SpacesDefinitions = {
   // Literal 1, not `SCHEMA_VERSION`. An empty document holds no spaces, so
@@ -398,7 +398,11 @@ export interface SpaceSummary {
  * and nothing here mutates. Arrays and objects returned are copies.
  */
 export interface SpacesApi {
-  /** The space filtering the tree, or `null` in *All* or while paused. */
+  /**
+   * The space filtering the tree, or `null` in *All*, while paused, or while
+   * the stored selection names a space that has since been archived (the
+   * selection is rewritten to *All* on the next recompute).
+   */
   getActiveSpace(): SpaceSummary | null;
   /**
    * Every active space, in definition order — the order the strip uses.

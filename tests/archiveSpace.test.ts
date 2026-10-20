@@ -15,7 +15,14 @@ function store(): DefinitionStore {
       space("a"),
       space("b", {
         members: [{ kind: "folder", path: "Projects" }, { kind: "tag", tag: "work" }],
-        exclude: [{ kind: "folder", path: "Projects/Old" }],
+        // STRING paths, which is what `exclude` is. An array of objects is
+        // what this fixture used to hold, and `validateSpace` keeps only
+        // entries passing `isSafeVaultPath`, which rejects a non-string: the
+        // key was dropped at load and the assertion below compared
+        // `undefined` to `undefined`, passing against any implementation,
+        // including one that deletes the exclusion list outright. In the one
+        // file whose whole point is that archiving preserves things.
+        exclude: ["Projects/Old/skip.md", "Projects/Old/Deep/also.md"],
         root: "Projects",
       }),
       space("c"),
@@ -56,6 +63,9 @@ describe("archiveSpace", () => {
     const after = s.get().spaces[1];
     expect(after.members).toEqual(before.members);
     expect(after.exclude).toEqual(before.exclude);
+    // Spelled out rather than compared to `before` alone: `toEqual` on two
+    // `undefined`s is what made this assertion vacuous.
+    expect(after.exclude).toEqual(["Projects/Old/skip.md", "Projects/Old/Deep/also.md"]);
     expect(after.root).toBe("Projects");
     expect(after.members.length).toBe(2);
   });
