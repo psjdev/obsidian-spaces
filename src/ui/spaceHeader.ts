@@ -26,6 +26,8 @@ export interface HeaderSpace {
   color?: string;
   /** A folder space's root. Absent on a curated space. */
   root?: string;
+  /** Archived spaces are left out of every list `spaceEntries` builds. */
+  archived?: boolean;
 }
 
 interface HeaderModel {

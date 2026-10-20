@@ -1123,7 +1123,7 @@ export default class SpacesPlugin extends Plugin {
             // started, and commands are registered exactly once.
             entries: () =>
               spaceEntries(
-                activeSpaces(this.defs.get().spaces),
+                this.defs.get().spaces,
                 this.runtime.getSelection(),
                 knownIconIds()
               ),

@@ -14,6 +14,7 @@
 import { renderableIcon } from "./iconPicker";
 import type { ActiveSelection } from "../types";
 import type { HeaderSpace } from "./spaceHeader";
+import { activeSpaces } from "../definitions/archived";
 
 /** *All*'s icon and label. Named here so nothing else has to know them. */
 export const ALL_ICON = "layers";
@@ -31,7 +32,7 @@ export interface SpaceEntry {
 }
 
 /**
- * Definition order, *All* first.
+ * Definition order, *All* first. Archived spaces are omitted.
  *
  * When `selection` names a space that no longer exists, NOTHING is marked
  * active — deliberately. The header resolves that case to *All* for display
@@ -51,7 +52,9 @@ export function spaceEntries(
       color: undefined,
       active: selection.kind === "all",
     },
-    ...spaces.map((s) => ({
+    // The one place the rule lives, so every reader (strip, header dropdown,
+    // picker) omits an archived space and a new reader gets it for free.
+    ...activeSpaces(spaces).map((s) => ({
       key: { kind: "space", id: s.id } satisfies ActiveSelection,
       icon: renderableIcon(s.icon, knownIcons),
       label: s.name,
