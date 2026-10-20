@@ -104,6 +104,25 @@ function mountStrip(b: Awaited<ReturnType<typeof build>>) {
 
 const THREE = () => [space("a", "Alpha"), space("b", "Beta"), space("c", "Gamma")];
 
+/** Records nothing; `decorate` only needs something shaped like a Menu. */
+function menuStub(): Menu {
+  const menu = {
+    addItem(build: (item: unknown) => unknown) {
+      const item = {
+        setTitle: () => item,
+        setIcon: () => item,
+        setDisabled: () => item,
+        setSubmenu: () => ({ addItem: menu.addItem }),
+        onClick: () => item,
+      };
+      build(item);
+      return menu;
+    },
+    addSeparator: () => menu,
+  };
+  return menu as unknown as Menu;
+}
+
 describe("archived spaces stop appearing", () => {
   it("the strip renders only active spaces", async () => {
     const b = await build(THREE());
@@ -158,6 +177,48 @@ describe("archived spaces stop appearing", () => {
     expect(all).toContain("Alpha");
     expect(all).toContain("Gamma");
     expect(all).not.toContain("Beta");
+  });
+
+  it("an archived property space no longer makes a context menu walk the frontmatter", async () => {
+    // `main.ts` installs a fresh lazy property snapshot on every metadata
+    // `changed` event, so the first right-click after any note save pays a
+    // whole-vault `getFileCache` walk for every space that holds a property
+    // member. Archiving the space was supposed to stop that; the accessor
+    // nine lines below the one that was converted still saw it.
+    const b = await build([
+      space("a", "Alpha"),
+      { ...space("p", "Props"), members: [{ kind: "property", key: "due" }] },
+    ]);
+    const asked = vi.spyOn(b.controller, "drawnPropertyIndex");
+
+    decorate(menuStub(), { defs: b.defs, controller: b.controller }, [
+      { path: "notes.md", name: "notes.md" } as unknown as TAbstractFile,
+    ]);
+    expect(asked).toHaveBeenCalled();
+
+    asked.mockClear();
+    await archiveSpace(b.defs, "p");
+    decorate(menuStub(), { defs: b.defs, controller: b.controller }, [
+      { path: "notes.md", name: "notes.md" } as unknown as TAbstractFile,
+    ]);
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("previous space from a selection naming an archived space lands on the last space", async () => {
+    // `mutate` notifies after `persist()`, so between the archive write
+    // landing in memory and the recompute that rewrites the selection there
+    // is a disk write during which a keypress can land. `findIndex` answers
+    // -1 there; unhandled it gave All for Next and the SECOND-to-last space
+    // for Previous, which is not an answer to anything.
+    const { p, defs, runtime } = await plugin(THREE());
+    await archiveSpace(defs, "b");
+    runtime.setSelection({ kind: "space", id: "b" });
+    await p["cycle"](-1);
+    expect(runtime.getSelection()).toEqual({ kind: "space", id: "c" });
+
+    runtime.setSelection({ kind: "space", id: "b" });
+    await p["cycle"](1);
+    expect(runtime.getSelection()).toEqual({ kind: "space", id: "a" });
   });
 
   it("falls back to All when the active space is archived", async () => {
@@ -337,6 +398,15 @@ describe("the dragged space goes away mid-drag", () => {
   // the one the dragstart saw, so both of these answer null and nothing is
   // written. Pinned because the alternative is a write that moves whichever
   // space now sits at a remembered index.
+  //
+  // The two are red against DIFFERENT breaks, and the branch's own report
+  // claimed otherwise. The archived case goes red against the pre-branch
+  // `spaces.findIndex(...)` lookup, because an archived space is still in
+  // `spaces` and the index is found. The DELETED case does not: `findIndex`
+  // also answers -1 for an id that is gone, so that lookup stops the write
+  // too. What it is red against is `visibleIndexOf(...) ?? 0`, the
+  // defensive-default shape, which hands the handler a position for a space
+  // that is not there. Both breaks were run.
   async function dropAfter(
     b: Awaited<ReturnType<typeof build>>,
     id: string,
@@ -390,6 +460,28 @@ describe("the no-op check runs in the visible index space", () => {
 describe("moveVisibleTo and visibleIndexOf", () => {
   const list = () => [arch("x"), space("a", "A"), arch("y"), arch("z"), space("b", "B"), space("c", "C"), arch("w")];
   const order = (l: SpaceDefinition[]) => l.map((s) => s.id).join("");
+
+  it("keeps the relative order of every space but the dragged one", () => {
+    // The true invariant, and the only one. Exhaustive over every id and
+    // every gap: the dragged space is removed and reinserted, so nothing
+    // else moves past anything else.
+    for (const id of ["a", "b", "c"]) {
+      for (let gap = 0; gap <= 4; gap++) {
+        const before = list().map((s) => s.id).filter((x) => x !== id);
+        const after = moveVisibleTo(list(), id, gap).map((s) => s.id).filter((x) => x !== id);
+        expect(after).toEqual(before);
+      }
+    }
+  });
+
+  it("does move an archived space's stored index, which the docblock used to deny", () => {
+    // `[a, B(archived), c]`, `a` dragged past `c`: `a` crosses `B` and `B`
+    // goes from index 1 to index 0. The behaviour is right — crossing is
+    // unavoidable — and the sentence that said it never happened was not.
+    const l = [space("a", "A"), arch("x"), space("c", "C")];
+    expect(moveVisibleTo(l, "a", 2).map((s) => s.id)).toEqual(["x", "c", "a"]);
+    expect(l.findIndex((s) => s.id === "x")).toBe(1);
+  });
 
   it("never reorders the archived spaces relative to each other", () => {
     for (const id of ["a", "b", "c"]) {

@@ -60,6 +60,14 @@ export type TransitionAborted = { kind: "aborted"; reason: string };
 interface LayoutHooks {
   transition(from: ActiveSelection, to: ActiveSelection): Promise<SwitchOutcome>;
   onOutcome?(outcome: SwitchOutcome | TransitionAborted): void;
+  /**
+   * The selection was dropped to All because the space it named stopped
+   * being active: archived, deleted, or gone from a sync. See `recompute`.
+   *
+   * Optional, so a controller built without it (every test that does not
+   * care, and the pre-layout wiring) behaves exactly as before.
+   */
+  onSelectionDropped?(from: ActiveSelection): void;
 }
 
 /**
@@ -511,8 +519,29 @@ export class SpaceController {
     const space = this.activeSpace();
     if (!space) {
       // Either All, or an active space that no longer exists: fail to All.
-      if (this.runtime.getSelection().kind === "space") {
+      const current = this.runtime.getSelection();
+      if (current.kind === "space") {
+        // THE SELECTION MOVES HERE AND THE WORKSPACE DOES NOT, which is the
+        // whole reason the hook below exists.
+        //
+        // `LayoutCoordinator.transition` captures `from`'s workspace as its
+        // first act, on the standing assumption that what is on screen
+        // belongs to the current selection. Resetting the selection without
+        // a transition breaks that: the departed space's tabs stay on screen
+        // while the selection says All, so the NEXT switch captures them
+        // into All's slot and the workspace the user had saved for All is
+        // gone. Archiving the space you are in is the routine, documented
+        // way to reach that; Delete and a sync removing the space reach the
+        // same arm.
+        //
+        // Only once the tree has actually been drawn for that space
+        // (`snapshot` non-null). At the first recompute of a session nothing
+        // has been captured or restored yet, the workspace on screen is the
+        // one Obsidian itself restored, and moving it on load is not this
+        // fallback's business.
+        const wasDrawn = this.snapshot !== null;
         this.runtime.setSelection({ kind: "all" });
+        if (wasDrawn) this.layout?.onSelectionDropped?.(current);
       }
       this.snapshot = null;
       this.host.apply(null);

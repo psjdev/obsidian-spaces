@@ -148,13 +148,23 @@ export function visibleIndexOf(
  * The stored list after dragging the space `id` to a gap measured among the
  * visible spaces (`visibleGap`, as `insertionIndexAt` returns it).
  *
- * An archived space keeps its slot among its neighbours: the gap is
- * translated to the stored position directly before the active space that
- * currently sits at that gap, so the drop never steps over, displaces or
- * repositions an archived one. A gap past the last active space lands right
- * after it, which leaves a trailing archived run trailing. Returns the list
- * unchanged when `id` is not an active space, and when the gap is one of the
- * two touching the dragged space, which are no-ops.
+ * The gap is translated to the stored position directly before the active
+ * space that currently sits at that gap. A gap past the last active space
+ * lands right after it, which leaves a trailing archived run trailing.
+ * Returns the list unchanged when `id` is not an active space, and when the
+ * gap is one of the two touching the dragged space, which are no-ops.
+ *
+ * **The invariant is relative order, not stored index.** Every space other
+ * than the dragged one keeps its position relative to every other, archived
+ * ones included, because the move is one removal and one reinsertion. Their
+ * stored INDEXES are not stable and cannot be: `[a, B(archived), c]` with
+ * `a` dragged to the last gap gives `[B, c, a]`, so `B` moved from 1 to 0
+ * and `a` crossed it. Crossing is unavoidable when the user drags a space
+ * past one that is further along, and an earlier version of this paragraph
+ * claimed the drop "never steps over, displaces or repositions an archived
+ * one", which an exhaustive enumeration of 1-to-5-space arrangements
+ * contradicts in 146 of 1089 cases. Relative order holds in all 1089. Both
+ * halves are pinned in `tests/archivedHiding.test.ts`.
  */
 export function moveVisibleTo<T extends { id: string; archived?: boolean }>(
   spaces: readonly T[],

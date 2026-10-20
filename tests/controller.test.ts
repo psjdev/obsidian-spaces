@@ -8,6 +8,7 @@ import { tagIndexOf } from "./helpers/tagIndex";
 import { SCHEMA_VERSION, type MemberEntry } from "../src/types";
 import type { SwitchOutcome } from "../src/types";
 import { createSpace } from "../src/actions/spaceLifecycle";
+import { archiveSpace } from "../src/actions/archiveSpace";
 import { createPropertyIndex } from "../src/visibility/PropertyIndex";
 
 const vault = buildFakeVault({
@@ -160,6 +161,88 @@ describe("SpaceController", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].from).toEqual({ kind: "all" });
     expect(calls[0].to).toEqual({ kind: "space", id: "research" });
+  });
+
+  it("reports the selection it dropped to All, so the layout can follow", async () => {
+    // `recompute` resets the selection synchronously and the workspace stays
+    // on screen, so the layout machine is left believing All's tabs are the
+    // ones showing. The next switch then captures the departed space's tabs
+    // into All's slot and the user's saved All workspace is gone. The hook
+    // is what lets main.ts run the transition a deliberate switch would.
+    const dropped: unknown[] = [];
+    let stored: unknown = defs();
+    const store = new DefinitionStore({
+      read: async () => stored,
+      write: async (d) => {
+        stored = d;
+      },
+    });
+    await store.load();
+    const rt = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    rt.load();
+    const controller = new SpaceController(
+      store,
+      rt,
+      vault,
+      { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] }),
+      {
+        transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
+        onSelectionDropped: (from) => dropped.push(from),
+      }
+    );
+
+    await controller.switchTo({ kind: "space", id: "research" });
+    expect(controller.activeSpace()?.id).toBe("research");
+    expect(dropped).toEqual([]);
+
+    // Archived: the space is still in the document, so the layout belongs to
+    // it and must be captured there rather than left to land on All.
+    await archiveSpace(store, "research");
+    controller.refresh();
+
+    expect(rt.getSelection()).toEqual({ kind: "all" });
+    expect(dropped).toEqual([{ kind: "space", id: "research" }]);
+
+    // Once only: the selection is All now, so a second refresh has nothing
+    // to drop and must not re-run a transition.
+    controller.refresh();
+    expect(dropped).toHaveLength(1);
+  });
+
+  it("does not report a dropped selection before the tree was ever drawn", async () => {
+    // A stored selection naming an archived space at startup: nothing has
+    // been captured or restored yet, the workspace on screen is the one
+    // Obsidian restored, and moving it on load is not this fallback's
+    // business.
+    const dropped: unknown[] = [];
+    const stored: unknown = {
+      ...defs(),
+      spaces: [{ ...defs().spaces[0], archived: true }],
+    };
+    const store = new DefinitionStore({ read: async () => stored, write: async () => undefined });
+    await store.load();
+    const rt = new RuntimeStateStore({ get: () => null, set: () => undefined });
+    rt.load();
+    rt.setSelection({ kind: "space", id: "research" });
+    const controller = new SpaceController(
+      store,
+      rt,
+      vault,
+      { apply: () => undefined, livePaths: () => new Set<string>() },
+      createMapTagIndex(new Map()),
+      () => ({ status: "unavailable", unparsed: [] }),
+      {
+        transition: async (): Promise<SwitchOutcome> => ({ kind: "skipped" }),
+        onSelectionDropped: (from) => dropped.push(from),
+      }
+    );
+
+    controller.refresh();
+
+    expect(rt.getSelection()).toEqual({ kind: "all" });
+    expect(dropped).toEqual([]);
   });
 
   it("commits the selection only after the transition resolves", async () => {

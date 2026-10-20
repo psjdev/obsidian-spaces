@@ -287,10 +287,18 @@ export function decorate(menu: Menu, ctx: MembershipContext, files: TAbstractFil
     // `createLazyTagIndex`, so a vault whose spaces hold no tag member pays
     // nothing for opening a context menu.
     tags: (): TagIndex => ctx.controller.tagIndex(),
-    // Asked only when some space holds a property member, so a vault with
-    // none pays no metadata walk for opening a context menu.
+    // Asked only when an ACTIVE space holds a property member, so a vault
+    // with none pays no metadata walk for opening a context menu. Filtered
+    // like `spaces` above, and for a sharper reason: the menu can only offer
+    // an active space, so an index built for an archived one is work whose
+    // result nothing reads. `main.ts` installs a fresh lazy snapshot on every
+    // metadata `changed` event, so an unfiltered ask made the first
+    // right-click after any note save pay a whole-vault `getFileCache` walk
+    // for a space that appears nowhere.
     properties: (): PropertyIndex | null =>
-      ctx.defs.get().spaces.some(holdsPropertyMember) ? ctx.controller.drawnPropertyIndex() : null,
+      activeSpaces(ctx.defs.get().spaces).some(holdsPropertyMember)
+        ? ctx.controller.drawnPropertyIndex()
+        : null,
     // Compiled at most once per menu. NOT "only if a space is offered": this
     // is an argument to `spaceAddTargets`, so it is evaluated before the
     // empty-targets guard can return, and an earlier version of this comment

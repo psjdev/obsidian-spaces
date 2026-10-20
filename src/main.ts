@@ -739,7 +739,11 @@ export default class SpacesPlugin extends Plugin {
     // `tests/propertyWorkBudget.test.ts` still holds: a vault with no property
     // space arms nothing and pays nothing. `arm()` is a no-op while already
     // sampling, so doing this as well as the listener costs nothing twice.
-    if (this.defs.get().spaces.some(holdsPropertyMember)) this.parseStall.arm();
+    // ACTIVE spaces only. `reportParseStall` gates on
+    // `controller.activeSpace()`, which is null for an archived space, so an
+    // unfiltered ask armed a 5-second sampler that was guaranteed to have
+    // nothing to say for a vault whose only property space is archived.
+    if (activeSpaces(this.defs.get().spaces).some(holdsPropertyMember)) this.parseStall.arm();
     this.adapter.onHealthChange((healthy) => {
       if (healthy) {
         this.explorerHealthWarned = false;
@@ -793,6 +797,9 @@ export default class SpacesPlugin extends Plugin {
         onOutcome: (outcome) => {
           if (outcome.kind !== "skipped") this.bindExplorer();
           this.reportLayoutOutcome(outcome);
+        },
+        onSelectionDropped: (from) => {
+          void this.settleLayoutAfterDrop(from);
         },
       }
     );
@@ -1808,9 +1815,65 @@ export default class SpacesPlugin extends Plugin {
     // resolve both presses against the same index: the second one advanced
     // nowhere and ran a self-transition that pruned the target's saved layout.
     await this.controller.switchTo((current) => {
-      const i = order.findIndex((o) => sameSelection(o, current));
+      const at = order.findIndex((o) => sameSelection(o, current));
+      // -1 when the committed selection names a space that is not in this
+      // list: an archived one, in the window between the archive write
+      // landing in memory and the recompute that rewrites the selection
+      // (`mutate` notifies after `persist()`, so that window is a disk
+      // write long). Unresolved means "nowhere in the cycle", and the place
+      // in the cycle that means that is All, so both directions step from
+      // there: Next lands on the first space and Previous on the last.
+      // Left as -1 it gave All for Next and the second-to-last space for
+      // Previous, which is not an answer to anything.
+      const i = at < 0 ? 0 : at;
       return order[(i + delta + order.length) % order.length];
     });
+  }
+
+  /**
+   * The layout half of a selection that fell back to All on its own.
+   *
+   * `recompute` resets the selection synchronously, so the tabs of the space
+   * that went away are still on screen under a selection that now says All.
+   * This runs the transition a deliberate switch would have run: the
+   * workspace on screen is captured into the departed space's slot, and All's
+   * own saved workspace comes back. Without it the next switch captures those
+   * tabs into All's slot instead, and the workspace the user had saved for
+   * All is overwritten with no gesture of theirs.
+   *
+   * Right for all three ways the arm is reached:
+   *
+   *  - **Archived.** The space is still in the definitions, so the capture
+   *    lands where the README says it does: an archived space keeps the tabs
+   *    Spaces saved for it.
+   *  - **Deleted.** `transition` captures SYNCHRONOUSLY, before its first
+   *    await, and `deleteSpace` calls its `onDeleted` hook (and so
+   *    `dropLayoutFor`) after the mutate that brought us here, so the blob is
+   *    reaped a moment later. The check below covers the ordering anyway.
+   *  - **Gone from a sync.** Nothing will ever ask about that id again, so
+   *    the captured blob is dropped rather than left for `reconcileLayouts`
+   *    to find at the next load.
+   *
+   * Fire and forget, and deliberately NOT routed through `switchTo`: the
+   * selection is already All by the time this runs, so `switchTo` would see
+   * `from === to` and skip, and a failed transition would leave the fallback
+   * to be retried on every subsequent refresh.
+   */
+  private async settleLayoutAfterDrop(from: ActiveSelection): Promise<void> {
+    if (from.kind !== "space") return;
+    try {
+      const outcome = await this.runMaskedTransition(from, { kind: "all" });
+      if (outcome.kind !== "skipped") this.bindExplorer();
+      this.reportLayoutOutcome(outcome);
+    } catch (e) {
+      console.error("[spaces] layout transition after a dropped selection failed", e);
+    }
+    // The mask comes off, and the tree is re-applied against All, on this
+    // recompute: `host.apply` is what releases it.
+    this.controller.refresh();
+    if (!this.defs.get().spaces.some((s) => s.id === from.id)) {
+      this.runtime.dropLayoutFor(from.id);
+    }
   }
 
   /** Derived every time; the persisted preference is never rewritten. */
