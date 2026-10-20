@@ -543,3 +543,31 @@ describe("showPinnedFolder", () => {
     expect(settingsOf({ showPinnedFolder: "yes" }).showPinnedFolder).toBe(false);
   });
 });
+
+describe("archived", () => {
+  const withArchived = (archived: unknown) =>
+    validateDefinitions({
+      ...valid,
+      spaces: [{ ...valid.spaces[0], archived }],
+    });
+
+  it("loads archived: true", () => {
+    const r = withArchived(true);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.spaces[0].archived).toBe(true);
+  });
+
+  it("loads a non-boolean archived as not archived, keeping the space", () => {
+    for (const bad of ["true", 1, null, {}]) {
+      const r = withArchived(bad);
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      const sp = r.value.spaces[0];
+      expect(sp.archived).toBeUndefined();
+      expect(sp.name).toBe("Research");
+      expect(sp.icon).toBe("microscope");
+      expect(sp.color).toBe("#4ecdc4");
+      expect(sp.members).toEqual([{ path: "Papers", kind: "folder" }]);
+    }
+  });
+});

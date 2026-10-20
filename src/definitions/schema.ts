@@ -314,6 +314,12 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
     }
     if (kept.length > 0) exclude = kept;
   }
+  // Shape only, like `root` and `exclude` above: anything but the literal
+  // `true` ("true", 1, null, {}) is an unusable value, not an incoherent
+  // space, so it is dropped as this one field and the space stays active.
+  // Returning null here would cost the user the space's name, icon, color
+  // and members over a single bad flag.
+  const archived = r.archived === true ? true : undefined;
   const members = validateMembers(r.members);
   if (!members) return null;
   return {
@@ -323,6 +329,7 @@ function validateSpace(raw: unknown): SpaceDefinition | null {
     color: r.color,
     ...(root === undefined ? {} : { root }),
     ...(exclude === undefined ? {} : { exclude }),
+    ...(archived === undefined ? {} : { archived }),
     members,
   };
 }

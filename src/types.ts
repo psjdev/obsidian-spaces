@@ -79,6 +79,13 @@ export interface SpaceDefinition {
    * hand-edited `data.json` state only.
    */
   exclude?: string[];
+  /**
+   * A finished space, kept but set aside. `true` only, never `false`: absent
+   * means active, so a document written before this field existed round-trips
+   * unchanged, the way `exclude` does. Read it through `isArchived` in
+   * `definitions/archived.ts`, not directly.
+   */
+  archived?: true;
   members: MemberEntry[];
 }
 
