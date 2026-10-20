@@ -547,6 +547,13 @@ export default class SpacesPlugin extends Plugin {
     // Same reason: a live sampling timer that outlived `onunload` would hold
     // the plugin instance and go on reading a torn-down app.
     this.register(() => this.parseStall.cancel());
+    // A coalesced resample must not fire into a torn-down plugin. The optional
+    // chain in it would survive that, but a timer outliving its owner is the
+    // kind of thing this file does not leave lying around.
+    this.register(() => {
+      if (this.resampleHandle !== null) window.clearTimeout(this.resampleHandle);
+      this.resampleHandle = null;
+    });
     this.defs = new DefinitionStore(
       {
         read: () => this.loadData(),
@@ -899,16 +906,25 @@ export default class SpacesPlugin extends Plugin {
           // running only when it cannot rule a change out.
           const current = this.defs.get();
           if (!renameTouchesDefs(current, oldPath, file.path)) return;
-          if (sameDefs(current, repairOnRename(current, oldPath, file.path))) return;
-          try {
-            await this.defs.mutate((d) => repairRenameIn(d, oldPath, file.path));
-          } catch (e) {
-            // A failed write leaves members pointing at the old path, which the
-            // rest of the plugin tolerates. `mutate` raises nothing itself when
-            // the write fails, so without this the user sees nothing at all.
-            // Matches what `repairIfMoved` does for the external-move path.
-            console.error("Spaces: could not repair paths after a rename", e);
+          if (!sameDefs(current, repairOnRename(current, oldPath, file.path))) {
+            try {
+              await this.defs.mutate((d) => repairRenameIn(d, oldPath, file.path));
+            } catch (e) {
+              // A failed write leaves members pointing at the old path, which
+              // the rest of the plugin tolerates. `mutate` raises nothing
+              // itself when the write fails, so without this the user sees
+              // nothing at all. Matches what `repairIfMoved` does for the
+              // external-move path.
+              console.error("Spaces: could not repair paths after a rename", e);
+            }
           }
+          // OUTSIDE the `sameDefs` early-out above, and after the repair.
+          // Outside, because a rename can leave the document identical and
+          // still change what EXISTS: renaming a folder to the path a space
+          // is pinned to rewrites nothing and makes a missing root present.
+          // After, because the repair rewrites the stored root, and the row
+          // must show where the space now points, not where it used to.
+          this.resampleSettingsRows();
         });
       })
     );
@@ -927,7 +943,21 @@ export default class SpacesPlugin extends Plugin {
         // sequencing it before the repair bought nothing; being on the queue
         // does buy something, namely that a delete's repair cannot interleave
         // with a concurrent rename's.
-        void this.onVaultChange(() => this.repairIfMoved(file, "delete"));
+        void this.onVaultChange(async () => {
+          await this.repairIfMoved(file, "delete");
+          // The settings row's `(missing)` marker is a string built when the
+          // page was, and the only other refresh is gated on the SPACE LIST,
+          // which a delete does not move. Without this, deleting a folder a
+          // space is pinned to leaves its row reading as healthy until a
+          // restart. `(path, path)` asks `renameTouchesDefs` the question it
+          // already answers for one path: is this it, or under it. Broader
+          // than the row strictly needs, since it also counts exclusions and
+          // order keys; over-triggering costs a redraw nobody sees, and
+          // under-triggering is the bug.
+          if (renameTouchesDefs(this.defs.get(), file.path, file.path)) {
+            this.resampleSettingsRows();
+          }
+        });
       })
     );
     // A native create is attributed to a preceding explorer gesture, or
@@ -1100,16 +1130,40 @@ export default class SpacesPlugin extends Plugin {
     // command that is not in the list is not registered).
     for (const spec of this.commandSpecs()) this.addCommand(spec);
 
-    // LAST, and guarded like the defs-subscription refresh: the settings page
-    // sampled the vault inside `onload()`, before `onLayoutReady`, so every
-    // folder space's row could be claiming its folder is missing. See
-    // `SpacesSettingTab.resampleVault`. A throw here must not take the started
-    // plugin down with it; the page being briefly wrong is not worth that.
-    try {
-      this.settingTab?.resampleVault();
-    } catch (e) {
-      console.error("Spaces: settings resample after layout ready failed", e);
-    }
+    // LAST: the settings page sampled the vault inside `onload()`, before
+    // `onLayoutReady`, so every folder space's row could be claiming its
+    // folder is missing. See `SpacesSettingTab.resampleVault`.
+    this.resampleSettingsRows();
+  }
+
+  private resampleHandle: number | null = null;
+
+  /**
+   * Ask the settings page to look at the vault again, if it exists.
+   *
+   * COALESCED, because one user gesture is a BURST of vault events: a folder
+   * delete arrives as the folder plus every child, a rename likewise, and each
+   * one that names a space answers the gate. Measured in a real Obsidian on
+   * this build: deleting one pinned folder asked twice, renaming a folder a
+   * space holds notes in asked three more times. `resampleVault` rebuilds
+   * every row and `memberRows` is O(M^2) per space (issue #54), so letting a
+   * burst through would be a stack of quadratic redraws for one keystroke,
+   * which is the shape of hitch this plugin treats as a defect.
+   *
+   * Guarded like the defs-subscription refresh: a settings redraw must never
+   * take down a started plugin or a vault-event handler. The page being
+   * briefly wrong is not worth that.
+   */
+  private resampleSettingsRows(): void {
+    if (this.resampleHandle !== null) return;
+    this.resampleHandle = window.setTimeout(() => {
+      this.resampleHandle = null;
+      try {
+        this.settingTab?.resampleVault();
+      } catch (e) {
+        console.error("Spaces: settings resample failed", e);
+      }
+    }, 0);
   }
 
   /**
