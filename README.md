@@ -159,7 +159,7 @@ If a note or folder the space held has been moved, renamed or deleted, a window 
 
 If a note or folder moves while that window is open, the change you made for it is skipped and a notice names it. Open the space and set it again.
 
-If **Restore tabs when switching spaces** is on, an archived space keeps any tabs Spaces saved for it. Archiving does not save tabs for you.
+If **Restore tabs when switching spaces** is on, an archived space keeps any tabs Spaces saved for it. Archiving the space you are in saves its tabs first, the same as switching away from it.
 
 ## Sorting
 
