@@ -263,4 +263,19 @@ describe("archiving from the settings tab", () => {
 
     expect(update).toHaveBeenCalledTimes(1);
   });
+
+  it("says every space is archived, not that there are none, when nothing is active", () => {
+    const { tab } = tabOf([{ ...space("a", "Alpha"), archived: true as const }]);
+    const first = spacesPage(tab)[0] as { name: string; desc: string };
+    expect(first.name).toBe("Every space is archived");
+    expect(first.desc).toBe("Restore one below to put it back on the strip.");
+    expect(archivedSection(tab).items).toHaveLength(1);
+  });
+
+  it("still says there are no spaces when there are none at all", () => {
+    const { tab } = tabOf([]);
+    const first = spacesPage(tab)[0] as { name: string; desc: string };
+    expect(first.name).toBe("No spaces yet");
+    expect(first.desc).toBe("Use the + button at the bottom of the file explorer to make one.");
+  });
 });

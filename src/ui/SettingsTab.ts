@@ -694,10 +694,15 @@ export class SpacesSettingTab extends PluginSettingTab {
       ...(rowsFor.length > 0
         ? rowsFor
         : [
-            {
-              name: "No spaces yet",
-              desc: "Use the + button at the bottom of the file explorer to make one.",
-            },
+            all.length === 0
+              ? {
+                  name: "No spaces yet",
+                  desc: "Use the + button at the bottom of the file explorer to make one.",
+                }
+              : {
+                  name: "Every space is archived",
+                  desc: "Restore one below to put it back on the strip.",
+                },
           ]),
       {
         type: "list",
