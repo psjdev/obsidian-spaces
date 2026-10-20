@@ -467,6 +467,22 @@ describe("setSpaceRoot — the 'Change folder…' write path", () => {
     })();
   });
 
+  it("refuses a path validateSpace would drop, rather than losing the root and the exclusions", async () => {
+    // `validateSpace` keeps `root` only for "", "/" or a path passing
+    // `isSafeVaultPath`, so writing anything else here deleted the key and
+    // silently reclassified a folder space as an empty curated one, which is
+    // the exact outcome this setter's docblock refuses to perform. The
+    // exclusions are rewritten against that path first, so they went too.
+    const defs = await threeSpaces();
+    await setSpaceRoot(defs, "a", "../Secret");
+    const a = defs.get().spaces.find((s) => s.id === "a");
+    expect(a?.root).toBe("Projects/Gone");
+    expect(Object.prototype.hasOwnProperty.call(a, "root")).toBe(true);
+
+    await setSpaceRoot(defs, "a", "C:\\stuff");
+    expect(defs.get().spaces.find((s) => s.id === "a")?.root).toBe("Projects/Gone");
+  });
+
   it("is a no-op for an unknown space id", async () => {
     const defs = await threeSpaces();
     await setSpaceRoot(defs, "nope", "Projects/New Home");
