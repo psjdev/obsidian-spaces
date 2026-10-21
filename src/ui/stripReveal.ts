@@ -38,7 +38,11 @@ export class StripReveal {
   };
 
   private readonly onMove = (e: MouseEvent): void => {
-    if (this.held) return;
+    // The browser fires no `mousemove` during a native drag, only drag events.
+    // So one arriving while held proves the drag is over, however it ended and
+    // whether or not its end events reached us (an OS-originated drag has
+    // none). The hold heals itself rather than depending on a release.
+    this.held = false;
     if (e.clientX > this.deps.stripRight()) this.hide();
   };
 
@@ -70,6 +74,10 @@ export class StripReveal {
 
   release(): void {
     this.held = false;
+  }
+
+  isHeld(): boolean {
+    return this.held;
   }
 
   /** Removes every listener and the zone. Idempotent. */

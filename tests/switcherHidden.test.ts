@@ -82,54 +82,61 @@ const icon = (host: HTMLElement) => host.querySelector<HTMLElement>('[data-space
 const fire = (el: Element, type: string) =>
   el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
 
+const held = (view: SwitcherView) =>
+  (view as unknown as { reveal: { isHeld(): boolean } | null }).reveal?.isHeld();
+
 describe("hidden strip drags", () => {
   it("opens and holds when a drag enters the zone", async () => {
-    const { host } = await build(true);
+    const { view, host } = await build(true);
     zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
-    move(500);
-    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+    expect(held(view)).toBe(true);
   });
 
-  it("holds open for a reorder drag that starts inside the strip", async () => {
-    const { host } = await build(true);
-    enter(strip(host));
+  it("holds and opens for a reorder drag that starts inside the strip", async () => {
+    const { view, host } = await build(true);
     fire(icon(host), "dragstart");
-    move(500);
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+    expect(held(view)).toBe(true);
   });
 
   it("releases on dragend", async () => {
-    const { host } = await build(true);
-    enter(strip(host));
+    const { view, host } = await build(true);
     fire(icon(host), "dragstart");
     fire(rail(host), "dragend");
-    move(500);
-    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    expect(held(view)).toBe(false);
   });
 
-  it("releases on drop with no dragend after it", async () => {
-    const { host } = await build(true);
-    enter(strip(host));
+  it("releases on a reorder drop with no dragend after it", async () => {
+    const { view, host } = await build(true);
     fire(icon(host), "dragstart");
     fire(rail(host), "drop");
-    move(500);
-    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    expect(held(view)).toBe(false);
   });
 
   it("releases on a file drop that ends early", async () => {
-    const { host } = await build(true);
+    const { view, host } = await build(true);
     zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
     fire(rail(host), "drop");
-    move(500);
-    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    expect(held(view)).toBe(false);
   });
 
   it("releases when the explorer reports the drag done", async () => {
     const { view, host } = await build(true);
     zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
     view.clearDropTarget();
+    expect(held(view)).toBe(false);
+  });
+
+  it("recovers from an external drag that no release ever reaches", async () => {
+    // An OS-originated drag has no dragstart or dragend in the page and is
+    // dropped somewhere that is not the rail. Nothing releases; the first
+    // pointer move afterwards must still close the strip.
+    const { host } = await build(true);
+    zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
     move(500);
+    move(900);
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
   });
 
