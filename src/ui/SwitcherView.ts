@@ -26,12 +26,7 @@ import {
   type AlignBox,
 } from "./stripAlign";
 import { nearestPlacement, passedThreshold, type PaneRect, type Point } from "./stripDrag";
-import {
-  CLS_SPACE_DRAGGING,
-  CLS_SPACE_DROP_LINE,
-  CLS_STRIP_OPEN,
-  SEL,
-} from "../explorer/selectors";
+import { CLS_SPACE_DRAGGING, CLS_SPACE_DROP_LINE, SEL } from "../explorer/selectors";
 import { renameSpace, setSpaceIcon, setSpaceColor } from "../actions/spaceLifecycle";
 import { setStripPlacement } from "../actions/stripPlacement";
 import { iconColorFor } from "./spaceIconColor";
@@ -310,7 +305,16 @@ export class SwitcherView {
     this.host = null;
   }
 
-  /** Re-paints for a new placement. Cheap: one class swap, no re-render. */
+  /**
+   * Re-paints for a new placement: one class swap and no re-render.
+   *
+   * NOT cheap in the sense that line used to claim. `syncHidden()` runs below,
+   * and `main.ts` calls this on every definitions change, so for a left strip
+   * with hiding on this can build a reveal controller, create the zone element
+   * and bind six listeners. It does that once per controller -- the controller
+   * is kept while the placement stays left -- but the first call after hiding
+   * is switched on pays for all of it.
+   */
   applyPlacement(placement: StripPlacement): void {
     this.placement = placement;
     if (this.host) {
@@ -328,9 +332,14 @@ export class SwitcherView {
    * strip is unlocked: unlocking means rearranging, and a strip that slides
    * away under the grip drag fights that. The setting itself is untouched.
    *
-   * Runs wherever `applyDock` does, because `applyDock` clears the hidden and
-   * open classes every time and a rebuilt pane starts without them. No
-   * observer: those two call sites already fire on every event that matters.
+   * Runs wherever `applyDock` does, because a rebuilt pane starts with neither
+   * class and a pane docked anywhere but left has both taken off. No observer:
+   * those two call sites already fire on every event that matters.
+   *
+   * Writes the hidden class and NOT the open one. The open class belongs to
+   * the reveal controller, which is the only thing that adds it; all this does
+   * is keep a controller alive, so an open strip that is re-docked left to
+   * left keeps the class it already has.
    */
   private syncHidden(): void {
     const pane = this.host;
@@ -344,9 +353,6 @@ export class SwitcherView {
       applyHidden(pane, false);
       return;
     }
-    // A revealed strip stays revealed across a re-dock: `applyDock` just
-    // dropped the open class, so put back what the controller still believes.
-    const wasOpen = this.reveal?.isOpen() ?? false;
     applyHidden(pane, true);
     if (!this.reveal) {
       this.reveal = new StripReveal({
@@ -365,7 +371,6 @@ export class SwitcherView {
       });
       this.reveal.attach();
     }
-    if (wasOpen) pane.classList.add(CLS_STRIP_OPEN);
   }
 
   isUnlocked(): boolean {

@@ -17,19 +17,35 @@ export const DOCK_CLASSES: Record<StripPlacement, string | null> = {
 const PLACEMENTS = Object.values(DOCK_CLASSES).filter((c): c is string => c !== null);
 
 /**
- * Everything the dock puts on the pane. The hidden and open classes are part
- * of it: they only mean something next to `spaces-dock-left`, so a pane that
- * loses that class must not keep them (a stuck transform and a 6px pane).
+ * Everything the dock puts on the pane, which is what has to come off a pane
+ * the strip is leaving.
+ *
+ * The hidden and open classes are in the list because they are ours as well,
+ * not because either paints anything by itself: every rule that reads one is
+ * compounded with `spaces-dock-left` (all five of them in `styles.css`), so a
+ * pane that lost the dock class and kept them looks exactly the same. They
+ * come off because the strip has gone, and a pane Obsidian hands to something
+ * else must carry no state of ours.
  */
 const ALL = [...PLACEMENTS, CLS_STRIP_HIDDEN, CLS_STRIP_OPEN];
 
 /**
  * Applies one placement, having removed any other. At most one is ever set.
- * Any placement change also drops the hidden and open classes; the caller
- * re-applies `applyHidden` afterwards when the placement is `left`.
+ *
+ * Docking anywhere but left also drops the hidden and open classes, since only
+ * a left strip can hide.
+ *
+ * Docking LEFT leaves both exactly as it found them, and `syncHidden` is what
+ * decides them. Left to left is the common case -- every definitions change
+ * runs `applyPlacement` -- and removing the hidden class there only to have
+ * the caller put it straight back is a window with the strip laid out
+ * un-hidden. Nothing reads layout between the two calls today, so nothing
+ * paints it; a layout read added between them would slide the strip out and
+ * back on every keystroke in Settings. Not having the window beats relying on
+ * nobody adding the read.
  */
 export function applyDock(pane: HTMLElement, placement: StripPlacement): void {
-  pane.classList.remove(...ALL);
+  pane.classList.remove(...(placement === "left" ? PLACEMENTS : ALL));
   const cls = DOCK_CLASSES[placement];
   if (cls) pane.classList.add(cls);
 }

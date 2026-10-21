@@ -298,6 +298,23 @@ describe("hidden strip wiring", () => {
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
   });
 
+  it("never takes the hidden or open class off during a left-to-left re-dock", async () => {
+    // Not just "ends up with them": a re-dock that removed either and put it
+    // back would leave the strip laid out un-hidden in between, and any layout
+    // read landing in that window slides the strip out and back. `main.ts`
+    // re-docks on every definitions change, which includes every keystroke in
+    // Settings.
+    const { view, host } = await build(true);
+    enter(zones(host)[0]);
+    const remove = vi.spyOn(host.classList, "remove");
+    view.applyPlacement("left");
+    const swept = remove.mock.calls.flat();
+    expect(swept).not.toContain(CLS_STRIP_HIDDEN);
+    expect(swept).not.toContain(CLS_STRIP_OPEN);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+  });
+
   it("tears the controller down and unhides when the setting goes off", async () => {
     const { view, host, set } = await build(true);
     enter(zones(host)[0]);

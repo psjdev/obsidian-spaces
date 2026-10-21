@@ -72,6 +72,21 @@ describe("the hidden strip classes", () => {
     expect(p.className).toBe("workspace-leaf-content");
   });
 
+  it("re-docking left leaves the hidden and open classes exactly as they were", () => {
+    // Removing them here and having the caller put the hidden one straight back
+    // is a window with the strip laid out un-hidden. Nothing reads layout
+    // between the two calls, so nothing paints it; a read added between them
+    // would slide the strip out and back on every keystroke in Settings.
+    const p = pane();
+    applyDock(p, "left");
+    applyHidden(p, true);
+    p.classList.add("spaces-strip-open");
+    applyDock(p, "left");
+    expect(p.classList.contains("spaces-strip-hidden")).toBe(true);
+    expect(p.classList.contains("spaces-strip-open")).toBe(true);
+    expect(classes(p)).toEqual(["spaces-dock-left"]);
+  });
+
   it("applyDock to a non-left placement leaves no hidden class behind", () => {
     for (const placement of ["bottom", "top", "right"] as const) {
       const p = pane();

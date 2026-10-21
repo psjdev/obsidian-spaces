@@ -29,6 +29,17 @@ export interface StripRevealDeps {
  * Owns the open/closed state of a hidden left strip: the trigger zone, the
  * listeners and the open class.
  *
+ * It is the only thing that ADDS the open class. Three places in
+ * `stripDock.ts` remove it, and each of them is followed, in the same
+ * synchronous call, by this controller being destroyed: `applyHidden(pane,
+ * false)`, which `syncHidden` reaches only after destroying it; `applyDock` to
+ * any placement but left, which `syncHidden` follows; and `clearDock`, which
+ * `destroy()` in `SwitcherView` reaches after this one. So the class and the
+ * `open` field below never disagree across a call. They must not: a pane left
+ * without the class while its controller believed itself open would paint the
+ * strip closed and refuse to reveal it on hover, because `show()` returns
+ * early on that field.
+ *
  * Nothing listens to the pointer's MOVEMENT while the strip is closed. All
  * four open paths are boundary events, one per element entry or exit: a
  * `mouseenter` on the zone or on the strip (while closed, the lip is the part
