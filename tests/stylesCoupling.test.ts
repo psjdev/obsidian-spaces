@@ -24,9 +24,10 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as selectors from "../src/explorer/selectors";
 import { CLS, CLS_ELSEWHERE, SEL, UNSTYLED_CLASSES } from "../src/explorer/selectors";
+import { deviceHasHover } from "../src/ui/canHideStrip";
 import { LABEL_ROLES } from "../src/ui/compactLabel";
 import { applyCompactLabels } from "../src/explorer/ExplorerAdapter";
 import { buildChainIndex } from "../src/visibility/compactChains";
@@ -172,6 +173,29 @@ describe("styles.css — the hidden strip only hides where it can be revealed", 
     const hidden = selectorsFor("spaces-strip-hidden");
     expect(hidden.length).toBeGreaterThan(0);
     for (const r of hidden) expect(r.media.replace(/\s+/g, "")).toBe("(hover:hover)");
+  });
+
+  it("asks matchMedia the same question the stylesheet asks", () => {
+    // `deviceHasHover()` decides whether Settings OFFERS the setting; the media
+    // query decides whether hiding does anything at all. Both say in a comment
+    // that they must match, and those comments were the only thing holding
+    // them together: the JS query could be changed to `(pointer: fine)` with
+    // every test green. Disagreeing means the setting is offered where the CSS
+    // does nothing, or withheld where it applies.
+    const asked: string[] = [];
+    vi.stubGlobal("matchMedia", (query: string) => {
+      asked.push(query);
+      return { matches: true } as MediaQueryList;
+    });
+    try {
+      expect(deviceHasHover()).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const tight = (s: string) => s.replace(/\s+/g, "");
+    const conditions = [...new Set(selectorsFor("spaces-strip-hidden").map((r) => tight(r.media)))];
+    expect(conditions).toHaveLength(1);
+    expect(asked.map(tight)).toEqual(conditions);
   });
 
   it("narrows the pane and slides the strip, opaquely, in the hover block", () => {

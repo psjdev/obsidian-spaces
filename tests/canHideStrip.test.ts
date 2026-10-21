@@ -115,7 +115,12 @@ describe("the hide-strip row copy", () => {
     );
   });
   it("never uses an em dash, and never calls notes and folders items or files", () => {
-    const text = `${row()?.name} ${String(row()?.desc)}`;
+    // The guard matters more than the regexes: with no row at all this read
+    // `"undefined undefined"`, which contains no em dash and no "items", so
+    // both assertions passed and the test said nothing.
+    const found = row();
+    expect(found).toBeDefined();
+    const text = `${String(found?.name)} ${String(found?.desc)}`;
     expect(text).not.toContain(String.fromCharCode(0x2014));
     expect(text).not.toMatch(/\b(items?|files)\b/i);
   });
