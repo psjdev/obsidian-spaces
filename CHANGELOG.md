@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.1 — 2026-10-21
+
+Nothing changes in how you use the plugin. A hidden space strip still slides
+out when you tab into it, and still stays put when you click a space.
+
+Internally, the keyboard reveal no longer uses a CSS selector that Obsidian's
+plugin scan flags as a performance risk. It sets a class when focus enters the
+strip instead.
+
 ## 0.14.0 — 2026-10-21
 
 A space strip on the left can now hide itself. Turn on **Hide the space strip**
