@@ -16,6 +16,8 @@ Dragging a note toward the hidden strip brings it out and keeps it open until
 you drop, so you can still drop the note onto a space icon. Reordering spaces
 by dragging their icons works too. Moving keyboard focus into the strip brings it back.
 
+Unlocking the strip keeps it visible until you lock it again.
+
 ## 0.13.0 — 2026-10-20
 
 A space you are finished with can now be archived instead of deleted. In

@@ -205,7 +205,7 @@ There are three ways to change it, and all three go through the same setter, so 
 
 The strip stays locked most of the time. Locked is the default, and it is also always the state you find it in after a restart, whatever it was left at before. Locked shows no handle and no extra chrome at all.
 
-Run **Unlock the space strip** and a grab handle appears at the strip's leading edge, pushing **All** and the rest of the icons along to make room for it. Drag the handle toward an edge and the region the strip would occupy there lights up; release over it to drop the strip in place. Run **Lock the space strip** to end the mode and hide the handle again, or right-click the handle and choose **Lock the space strip** from there instead.
+Run **Unlock the space strip** and a grab handle appears at the strip's leading edge, pushing **All** and the rest of the icons along to make room for it. Drag the handle toward an edge and the region the strip would occupy there lights up; release over it to drop the strip in place. Run **Lock the space strip** to end the mode and hide the handle again, or right-click the handle and choose **Lock the space strip** from there instead. A strip that hides itself stays visible while it is unlocked, and hides again once you lock it.
 
 The palette only ever offers one half of that pair at a time: **Unlock the space strip** while it is locked, **Lock the space strip** while it is unlocked, never both.
 

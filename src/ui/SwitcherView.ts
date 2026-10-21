@@ -316,7 +316,9 @@ export class SwitcherView {
 
   /**
    * Makes the hidden state match the setting and the placement. Hiding is
-   * active only for a left strip with `hideStrip` on.
+   * active only for a left strip with `hideStrip` on, and never while the
+   * strip is unlocked: unlocking means rearranging, and a strip that slides
+   * away under the grip drag fights that. The setting itself is untouched.
    *
    * Runs wherever `applyDock` does, because `applyDock` clears the hidden and
    * open classes every time and a rebuilt pane starts without them. No
@@ -326,7 +328,8 @@ export class SwitcherView {
     const pane = this.host;
     const strip = this.el;
     if (!pane || !strip) return;
-    const active = this.placement === "left" && this.defs.get().settings.hideStrip;
+    const active =
+      this.placement === "left" && !this.unlocked && this.defs.get().settings.hideStrip;
     if (!active) {
       this.reveal?.destroy();
       this.reveal = null;
@@ -361,6 +364,8 @@ export class SwitcherView {
     if (this.unlocked === on) return;
     this.unlocked = on;
     this.render();
+    // Re-render alone neither builds nor tears down the reveal wiring.
+    this.syncHidden();
   }
 
   /** The pane the strip is mounted in, in viewport coordinates -- null only while unmounted. */

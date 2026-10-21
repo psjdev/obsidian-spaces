@@ -316,3 +316,68 @@ describe("hidden strip keyboard and screen reader access", () => {
     expect(document.activeElement).toBe(target);
   });
 });
+
+describe("hidden strip while unlocked", () => {
+  const winRemove = () => vi.spyOn(window, "removeEventListener");
+
+  it("restores a normal visible strip on unlock, and hides again on lock", async () => {
+    const { view, host, defs } = await build(true);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
+    expect(zones(host)).toHaveLength(1);
+    const remove = winRemove();
+    view.setUnlocked(true);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    expect(zones(host)).toHaveLength(0);
+    expect(remove.mock.calls.some((c) => c[0] === "mousemove")).toBe(true);
+    // The setting is untouched.
+    expect(defs.get().settings.hideStrip).toBe(true);
+    // No listeners left: a pointer move changes nothing.
+    move(9999);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    view.setUnlocked(false);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
+    expect(zones(host)).toHaveLength(1);
+    // And the rebuilt zone is live.
+    enter(zones(host)[0]);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+  });
+
+  it("leaves a revealed strip visible rather than stuck open on unlock", async () => {
+    const { view, host } = await build(true);
+    enter(zones(host)[0]);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+    view.setUnlocked(true);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    expect(zones(host)).toHaveLength(0);
+    view.setUnlocked(false);
+    // Locking starts from a clean hidden strip, not a leftover open one.
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+  });
+
+  it("stays visible through a re-dock while unlocked", async () => {
+    const { view, host } = await build(true);
+    view.setUnlocked(true);
+    view.applyPlacement("left");
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+    expect(zones(host)).toHaveLength(0);
+  });
+
+  it("does not hide on lock when the setting is off", async () => {
+    const { view, host } = await build(false);
+    view.setUnlocked(true);
+    view.setUnlocked(false);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+    expect(zones(host)).toHaveLength(0);
+  });
+
+  it("does not hide on lock when the placement is not left", async () => {
+    const { view, host } = await build(true, "top");
+    view.setUnlocked(true);
+    view.setUnlocked(false);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+    expect(zones(host)).toHaveLength(0);
+  });
+});
