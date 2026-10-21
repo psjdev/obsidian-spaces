@@ -15,6 +15,7 @@ import { deleteSpace, renameSpace, type SpaceLifecycleHooks } from "../actions/s
 import { archiveSpace, restoreSpace } from "../actions/archiveSpace";
 import { activeSpaces, archivedSpaces, isArchived } from "../definitions/archived";
 import { setStripPlacement } from "../actions/stripPlacement";
+import { canHideStrip, deviceHasHover } from "./canHideStrip";
 import { memberRows, missingCount, spaceRowSummary } from "./memberList";
 import {
   MAX_PATTERNS,
@@ -134,7 +135,9 @@ export class SpacesSettingTab extends PluginSettingTab {
     private cancelStripDrag?: () => void,
     // The property index the Contents dialog draws counts from, reached
     // rather than built. This tab never asks it anything itself.
-    private getPropertyIndex?: () => PropertyIndex | null
+    private getPropertyIndex?: () => PropertyIndex | null,
+    // Injected so a test can set it. Asked fresh each time the rows are built.
+    private hasHover: () => boolean = deviceHasHover
   ) {
     super(app, plugin);
   }
@@ -195,7 +198,11 @@ export class SpacesSettingTab extends PluginSettingTab {
       // disagree about where the strip is. Cancels a drag in flight before
       // writing, so choosing a placement from Settings mid-gesture ends the
       // gesture cleanly rather than racing it.
-      void setStripPlacement(this.defs, value as StripPlacement, () => this.cancelStripDrag?.());
+      // The hide setting is offered only for a left strip, so the rows are
+      // asked again once the placement has landed.
+      void setStripPlacement(this.defs, value as StripPlacement, () =>
+        this.cancelStripDrag?.()
+      ).then(() => this.update());
       return;
     }
     this.save(
@@ -376,6 +383,17 @@ export class SpacesSettingTab extends PluginSettingTab {
           },
         },
       },
+      ...(canHideStrip(this.defs.get().settings.stripPlacement, this.hasHover())
+        ? [
+            {
+              name: "Hide the space strip until you point at it",
+              desc:
+                "Tucks the strip against the left edge of the file explorer. Move " +
+                "the pointer to that edge to slide it out.",
+              control: { type: "toggle" as const, key: "hideStrip" },
+            },
+          ]
+        : []),
       {
         name: "Assign a color to new spaces",
         desc:
