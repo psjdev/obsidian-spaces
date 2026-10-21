@@ -71,6 +71,20 @@ const strip = (host: HTMLElement) => host.querySelector<HTMLElement>(".spaces-sw
 const enter = (el: Element) => el.dispatchEvent(new MouseEvent("mouseenter"));
 const move = (clientX: number) => window.dispatchEvent(new MouseEvent("mousemove", { clientX }));
 
+/**
+ * The geometry the close threshold is read from: the pane's left edge and the
+ * strip's layout width. jsdom reports 0 for both, so any test about the
+ * threshold has to supply them.
+ *
+ * A width rather than a rect, deliberately: `offsetWidth` is what the view
+ * hands the controller for the settled edge, because a `transform` does not
+ * change it. The width is read through a getter so a test can move it.
+ */
+function paneGeometry(host: HTMLElement, left: number, width: () => number): void {
+  Object.defineProperty(strip(host), "offsetWidth", { configurable: true, get: width });
+  vi.spyOn(host, "getBoundingClientRect").mockImplementation(() => ({ left }) as DOMRect);
+}
+
 afterEach(() => {
   views.splice(0).forEach((v) => v.destroy());
   hosts.splice(0).forEach((h) => h.remove());
@@ -231,19 +245,40 @@ describe("hidden strip wiring", () => {
 
     it("closes on a pointer move right of the strip, and stays for one on it", async () => {
       const { view, host } = await build(true);
-      vi.spyOn(strip(host), "getBoundingClientRect").mockImplementation(
-        () => ({ right: 300 }) as DOMRect
-      );
+      paneGeometry(host, 0, () => 300);
       enter(zones(host)[0]);
       view.mount(host);
-      vi.spyOn(strip(host), "getBoundingClientRect").mockImplementation(
-        () => ({ right: 300 }) as DOMRect
-      );
+      // The rebuild made a new strip element, so the geometry goes on again.
+      paneGeometry(host, 0, () => 300);
       move(100);
       expect(open(host)).toBe(true);
       move(500);
       expect(open(host)).toBe(false);
     });
+  });
+
+  it("keeps a revealed strip open under a pointer the slide has not reached", async () => {
+    // The defect this threshold had: `getBoundingClientRect().right` runs
+    // 50, 57, 63, 69, 74, 78, 81, 82 over the 120ms reveal (measured in the
+    // running app), so a pointer at 70 -- inside the strip's settled 44..82
+    // the whole time -- read as past the strip and closed it under the user.
+    const { host } = await build(true);
+    const painted = [50, 57, 63, 69, 74, 78, 81, 82];
+    let frame = 0;
+    paneGeometry(host, 44, () => 38);
+    vi.spyOn(strip(host), "getBoundingClientRect").mockImplementation(
+      () => ({ left: 44, right: painted[frame] }) as DOMRect
+    );
+    const revealed = () => host.classList.contains(CLS_STRIP_OPEN);
+    enter(zones(host)[0]);
+    expect(revealed()).toBe(true);
+    for (frame = 0; frame < painted.length; frame++) {
+      move(70);
+      expect(revealed(), `painted edge at ${painted[frame]}`).toBe(true);
+    }
+    // Past the settled edge it still closes, which is the documented rule.
+    move(83);
+    expect(revealed()).toBe(false);
   });
 
   it("is hidden straight after mount, before any applyPlacement", async () => {
@@ -304,17 +339,15 @@ describe("hidden strip wiring", () => {
     expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
   });
 
-  it("measures the strip live for the close decision", async () => {
+  it("re-measures the settled edge for every close decision", async () => {
     const { host } = await build(true);
-    let right = 38;
-    vi.spyOn(strip(host), "getBoundingClientRect").mockImplementation(
-      () => ({ right }) as DOMRect
-    );
+    let width = 38;
+    paneGeometry(host, 0, () => width);
     enter(zones(host)[0]);
     move(100);
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
     enter(zones(host)[0]);
-    right = 300;
+    width = 300; // a wider strip, from a zoom or a theme change
     move(100);
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
   });

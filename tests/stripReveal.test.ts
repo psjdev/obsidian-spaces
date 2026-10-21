@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StripReveal } from "../src/ui/stripReveal";
 import { CLS_STRIP_OPEN, CLS_STRIP_ZONE } from "../src/explorer/selectors";
 
+/**
+ * The strip's right edge: the lip's while it is closed, and the settled one
+ * when it is open. The two are the same number here so that every test that
+ * is not about the difference reads as it did before the suppliers were
+ * split; `the close threshold` below is the one that pulls them apart.
+ */
 const RIGHT = 38;
 
 let pane: HTMLElement;
@@ -25,7 +31,7 @@ beforeEach(() => {
   strip = document.createElement("div");
   pane.appendChild(strip);
   document.body.appendChild(pane);
-  reveal = new StripReveal({ pane, strip, stripRight: () => RIGHT });
+  reveal = new StripReveal({ pane, strip, lipRight: () => RIGHT, openRight: () => RIGHT });
 });
 
 afterEach(() => {
@@ -199,20 +205,50 @@ describe("StripReveal", () => {
     expect(docAdd.mock.calls.filter((c) => c[0] === "mouseleave")).toHaveLength(1);
   });
 
-  it("reads the strip's right edge on every event, not once", () => {
-    let edge = RIGHT;
+  it("reads both edges on every event, not once", () => {
+    let lip = RIGHT;
+    let settled = RIGHT;
     reveal.destroy();
-    reveal = new StripReveal({ pane, strip, stripRight: () => edge });
+    reveal = new StripReveal({ pane, strip, lipRight: () => lip, openRight: () => settled });
     reveal.attach();
     leaveDoc(100);
     expect(reveal.isOpen()).toBe(false);
-    edge = 200; // the strip slid out further
+    lip = 200; // a pane that has moved right, so the lip is further over
     leaveDoc(100);
     expect(reveal.isOpen()).toBe(true);
+    settled = 200;
     move(150);
     expect(reveal.isOpen()).toBe(true);
-    edge = 50; // and back
+    settled = 50; // and back
     move(150);
+    expect(reveal.isOpen()).toBe(false);
+  });
+
+  it("does not close under a pointer inside the strip while the reveal animates", () => {
+    // Measured in the running app: the painted right edge runs
+    // 50, 57, 63, 69, 74, 78, 81, 82 over about 111ms while the strip slides
+    // out. A pointer at x=70 is inside the settled bounds for every one of
+    // those samples, and comparing it against the painted edge closed the
+    // strip under the user for the first four.
+    const painted = [50, 57, 63, 69, 74, 78, 81, 82];
+    let frame = 0;
+    const SETTLED = 82;
+    reveal.destroy();
+    reveal = new StripReveal({
+      pane,
+      strip,
+      lipRight: () => painted[frame],
+      openRight: () => SETTLED,
+    });
+    reveal.attach();
+    enter(strip);
+    expect(reveal.isOpen()).toBe(true);
+    for (frame = 0; frame < painted.length; frame++) {
+      move(70);
+      expect(reveal.isOpen(), `painted edge at ${painted[frame]}`).toBe(true);
+    }
+    // The settled edge still closes it, which is the rule the README states.
+    move(SETTLED + 1);
     expect(reveal.isOpen()).toBe(false);
   });
 

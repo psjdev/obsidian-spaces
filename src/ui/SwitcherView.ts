@@ -352,7 +352,16 @@ export class SwitcherView {
       this.reveal = new StripReveal({
         pane,
         strip,
-        stripRight: () => strip.getBoundingClientRect().right,
+        lipRight: () => strip.getBoundingClientRect().right,
+        // `offsetWidth` is a layout width and a `transform` does not change
+        // it, so this answers with the settled edge however far through the
+        // slide the strip currently is. The strip is `left: 0` against the
+        // pane's padding box, so its settled left edge is the pane's left
+        // edge plus whatever border the pane carries, which is what
+        // `clientLeft` reads. Measured in the running app with no such
+        // border: pane left 44, strip width 38, settled right edge 82.
+        openRight: () =>
+          pane.getBoundingClientRect().left + pane.clientLeft + strip.offsetWidth,
       });
       this.reveal.attach();
     }

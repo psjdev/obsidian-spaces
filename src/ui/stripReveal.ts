@@ -3,8 +3,26 @@ import { CLS_STRIP_OPEN, CLS_STRIP_ZONE } from "../explorer/selectors";
 export interface StripRevealDeps {
   pane: HTMLElement;
   strip: HTMLElement;
-  /** Viewport x of the strip's right edge, read per call. */
-  stripRight: () => number;
+  /**
+   * Viewport x of the strip's right edge as it is painted right now, read per
+   * call.
+   *
+   * Asked by the two leave paths, which run while the strip is closed, and
+   * while it is closed the painted edge IS the lip's right edge. So the lip
+   * width comes from the layout rather than from a second copy of the 6px in
+   * `styles.css`.
+   */
+  lipRight: () => number;
+  /**
+   * Viewport x the strip's right edge settles at once it is fully open, read
+   * per call.
+   *
+   * Asked by `onMove`, which runs while the strip is open and so possibly
+   * mid-slide. A painted edge measured mid-slide is a number between the lip
+   * and the full width, and comparing the pointer against it closed the strip
+   * under a pointer that was well inside the strip's settled bounds.
+   */
+  openRight: () => number;
 }
 
 /**
@@ -34,7 +52,7 @@ export class StripReveal {
 
   /** Overshooting past the edge and out of the window still reveals. */
   private readonly onDocLeave = (e: MouseEvent): void => {
-    if (e.clientX <= this.deps.stripRight()) this.show();
+    if (e.clientX <= this.deps.lipRight()) this.show();
   };
 
   /**
@@ -43,11 +61,11 @@ export class StripReveal {
    * sweep can cross it without a `mousemove` landing inside, ending on the
    * ribbon. `mouseleave` is a boundary event (once per exit, no per-move
    * cost), so the ribbon becomes approach space. The test is the overshoot's:
-   * `stripRight()` is the lip's right edge while closed, so the lip width
+   * `lipRight()` is the lip's right edge while closed, so the lip width
    * is read from the layout rather than copied from `styles.css`.
    */
   private readonly onPaneLeave = (e: MouseEvent): void => {
-    if (e.clientX <= this.deps.stripRight()) this.show();
+    if (e.clientX <= this.deps.lipRight()) this.show();
   };
 
   private readonly onMove = (e: MouseEvent): void => {
@@ -56,7 +74,9 @@ export class StripReveal {
     // whether or not its end events reached us (an OS-originated drag has
     // none). The hold heals itself rather than depending on a release.
     this.held = false;
-    if (e.clientX > this.deps.stripRight()) this.hide();
+    // Against the SETTLED open edge, never the painted one: the reveal takes
+    // 120ms, and `getBoundingClientRect().right` interpolates for all of it.
+    if (e.clientX > this.deps.openRight()) this.hide();
   };
 
   constructor(private readonly deps: StripRevealDeps) {}
