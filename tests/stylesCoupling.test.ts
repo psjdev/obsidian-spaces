@@ -207,7 +207,9 @@ describe("styles.css — hiding the strip is purely visual", () => {
   });
 
   it("never keys a hidden-strip rule on aria-hidden, tabindex or inert", () => {
-    for (const r of selectorsFor("spaces-strip-hidden")) {
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) {
       expect(r.selector).not.toMatch(/aria-hidden|tabindex|inert/);
     }
   });
