@@ -273,3 +273,46 @@ describe("hidden strip wiring", () => {
     expect(align.mock.calls.length).toBe(before);
   });
 });
+
+describe("hidden strip keyboard and screen reader access", () => {
+  const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"]';
+  const focusables = (host: HTMLElement) => Array.from(strip(host).querySelectorAll<HTMLElement>(FOCUSABLE));
+  const tabindexes = (host: HTMLElement) => focusables(host).map((el) => el.getAttribute("tabindex"));
+
+  it("keeps every strip control in the tab order while hidden", async () => {
+    const { host } = await build(true);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
+    const controls = focusables(host);
+    expect(controls.length).toBeGreaterThan(0);
+    for (const el of controls) {
+      const tab = el.getAttribute("tabindex");
+      expect(tab === null || Number(tab) >= 0, `tabindex on ${el.className}`).toBe(true);
+      expect(el.hasAttribute("disabled")).toBe(false);
+      expect(el.hasAttribute("hidden")).toBe(false);
+    }
+    // Identical to the same strip un-hidden: hiding changed nothing here.
+    const shown = await build(false);
+    expect(tabindexes(host)).toEqual(tabindexes(shown.host));
+  });
+
+  it("leaves the strip and its ancestors in the accessibility tree while hidden", async () => {
+    const { host } = await build(true);
+    for (let el: HTMLElement | null = strip(host); el; el = el.parentElement) {
+      expect(el.hasAttribute("aria-hidden"), `aria-hidden on ${el.className}`).toBe(false);
+      expect(el.hasAttribute("inert")).toBe(false);
+      expect(el.hasAttribute("hidden")).toBe(false);
+      expect(el.style.display).not.toBe("none");
+      expect(el.style.visibility).toBe("");
+    }
+    for (const el of Array.from(strip(host).querySelectorAll("*"))) {
+      expect(el.getAttribute("aria-hidden")).not.toBe("true");
+    }
+  });
+
+  it("still accepts focus while hidden", async () => {
+    const { host } = await build(true);
+    const target = focusables(host).find((el) => el.getAttribute("tabindex") !== "-1")!;
+    target.focus();
+    expect(document.activeElement).toBe(target);
+  });
+});

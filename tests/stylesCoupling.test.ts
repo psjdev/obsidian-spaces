@@ -191,6 +191,42 @@ describe("styles.css — the hidden strip only hides where it can be revealed", 
   });
 });
 
+describe("styles.css — hiding the strip is purely visual", () => {
+  // The principle: hidden is one `transform`. A hidden strip stays in the tab
+  // order and the accessibility tree, and focusing into it reveals it.
+  const FORBIDDEN = ["display", "visibility", "opacity", "pointer-events", "content-visibility"];
+
+  it("never uses display, visibility or the like in a hidden-strip rule", () => {
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) {
+      for (const prop of FORBIDDEN) {
+        expect(r.style.getPropertyValue(prop), `${prop} in ${r.selector}`).toBe("");
+      }
+    }
+  });
+
+  it("never keys a hidden-strip rule on aria-hidden, tabindex or inert", () => {
+    for (const r of selectorsFor("spaces-strip-hidden")) {
+      expect(r.selector).not.toMatch(/aria-hidden|tabindex|inert/);
+    }
+  });
+
+  it("hides the strip with a transform", () => {
+    const strip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("-100%")
+    );
+    expect(strip).toBeDefined();
+  });
+
+  it("carries the focus-within reveal, undoing the hiding transform", () => {
+    const reveal = selectorsFor(":focus-within").find(
+      (r) => r.selector.includes("spaces-strip-hidden") && r.selector.includes(".spaces-switcher:focus-within")
+    );
+    expect(reveal?.style.getPropertyValue("transform")).toBe("translateX(0)");
+  });
+});
+
 describe("styles.css — custom-color removal is reachable without hover", () => {
   it("reveals the delete badge on a pointer that cannot hover", () => {
     // The badge is `display: none` until `:hover`/`:focus-visible`. A touch
