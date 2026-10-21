@@ -243,13 +243,14 @@ export class SwitcherView {
    * Builds the strip into `parent` and docks it at `placement`.
    *
    * The placement is a parameter and not `this.placement`, which is written
-   * only by `applyPlacement` -- and the sole caller runs that AFTER this. So
-   * everything here that derives from the placement (the dock class,
-   * `syncHidden`, and the axis `render()` draws for) ran against the placement
-   * the strip was last in. It was benign only because the caller always
-   * re-applied straight afterwards, and `main.ts` documents that exact
+   * only by `applyPlacement` -- and the sole caller used to run that AFTER
+   * mounting. So everything here that derives from the placement (the dock
+   * class, `syncHidden`, and the axis `render()` draws for) ran against the
+   * placement the strip was last in. It was benign only because that caller
+   * re-applied straight afterwards, and `main.ts` documents the very same
    * ordering rule for the definitions subscription while this broke it
-   * internally. Now the signature asks for what the body needs.
+   * internally. The signature now asks for what the body needs, and the
+   * caller no longer re-applies.
    */
   mount(parent: HTMLElement, placement: StripPlacement): void {
     this.placement = placement;
