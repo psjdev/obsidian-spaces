@@ -244,6 +244,11 @@ export class SwitcherView {
   }
 
   mount(parent: HTMLElement): void {
+    // `destroy()` takes the controller, and its open state, with it. A space
+    // switch rebuilds the pane under a pointer that has not moved, so no
+    // `mouseenter` comes to reopen it. Read here and nowhere else: `destroy()`
+    // itself (unload, teardown) must never restore.
+    const wasRevealed = this.reveal?.isOpen() ?? false;
     this.destroy();
     this.host = parent;
     const el = parent.ownerDocument.win.createDiv();
@@ -252,6 +257,9 @@ export class SwitcherView {
     this.el = el;
     applyDock(parent, this.placement);
     this.syncHidden();
+    // Null when the feature is off or the placement left `left`, so a strip
+    // that no longer hides cannot be left revealed.
+    if (wasRevealed) this.reveal?.reopen();
     this.render();
     // Zoom, a theme swap and a font change all move the pane's rows without
     // going anywhere near a render, so alignment needs a second trigger.

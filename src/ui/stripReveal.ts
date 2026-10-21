@@ -116,6 +116,11 @@ export class StripReveal {
     }
   }
 
+  /** Opens without a pointer event: a rebuilt pane under a resting pointer. */
+  reopen(): void {
+    this.show();
+  }
+
   isOpen(): boolean {
     return this.open;
   }
