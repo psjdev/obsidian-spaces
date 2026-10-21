@@ -15,6 +15,7 @@ import { deleteSpace, renameSpace, type SpaceLifecycleHooks } from "../actions/s
 import { archiveSpace, restoreSpace } from "../actions/archiveSpace";
 import { activeSpaces, archivedSpaces, isArchived } from "../definitions/archived";
 import { setStripPlacement } from "../actions/stripPlacement";
+import { canHideStrip, deviceHasHover } from "./canHideStrip";
 import { memberRows, missingCount, spaceRowSummary } from "./memberList";
 import {
   MAX_PATTERNS,
@@ -134,7 +135,9 @@ export class SpacesSettingTab extends PluginSettingTab {
     private cancelStripDrag?: () => void,
     // The property index the Contents dialog draws counts from, reached
     // rather than built. This tab never asks it anything itself.
-    private getPropertyIndex?: () => PropertyIndex | null
+    private getPropertyIndex?: () => PropertyIndex | null,
+    // Injected so a test can set it. Asked fresh each time the rows are built.
+    private hasHover: () => boolean = deviceHasHover
   ) {
     super(app, plugin);
   }
@@ -195,7 +198,13 @@ export class SpacesSettingTab extends PluginSettingTab {
       // disagree about where the strip is. Cancels a drag in flight before
       // writing, so choosing a placement from Settings mid-gesture ends the
       // gesture cleanly rather than racing it.
-      void setStripPlacement(this.defs, value as StripPlacement, () => this.cancelStripDrag?.());
+      // The hide setting is offered only for a left strip, so the rows are
+      // asked again once the placement has landed, through the same gate as
+      // every other route (`refreshIfSpacesChanged`), so this path is not
+      // special: it does not matter who changed the placement.
+      void setStripPlacement(this.defs, value as StripPlacement, () =>
+        this.cancelStripDrag?.()
+      ).then(() => this.refreshIfSpacesChanged());
       return;
     }
     this.save(
@@ -222,10 +231,19 @@ export class SpacesSettingTab extends PluginSettingTab {
     return this.defs
       .get()
       .spaces.map((s) => `${s.id}\u0000${s.name}\u0000${isArchived(s) ? 1 : 0}`)
-      .join("\u0001");
+      .join("\u0001") +
+      // Whether the hide-strip row is offered is derived from the placement,
+      // which any route can change (the dropdown, a command, a strip drag).
+      // The answer is part of the signature, not the placement itself: moving
+      // between two placements that both withhold the row redraws nothing.
+      `\u0002${this.offersHideStrip() ? 1 : 0}`;
   }
 
   private lastSignature: string | null = null;
+
+  private offersHideStrip(): boolean {
+    return canHideStrip(this.defs.get().settings.stripPlacement, this.hasHover());
+  }
 
   /**
    * Re-reads the definitions when, and only when, the space list has changed.
@@ -240,6 +258,10 @@ export class SpacesSettingTab extends PluginSettingTab {
    * Before this existed, a space created from the explorer's + button did not
    * appear in settings until Obsidian restarted and the tab was registered
    * again, because nothing here had any reason to look again.
+   *
+   * The signature also carries whether the hide-strip row is offered, so a
+   * placement changed by a command or a strip drag, not only the dropdown,
+   * adds or removes that row.
    *
    * Gated on the signature rather than refreshed on every definition change:
    * every toggle on the Preferences page writes to the same store, and
@@ -376,6 +398,17 @@ export class SpacesSettingTab extends PluginSettingTab {
           },
         },
       },
+      ...(this.offersHideStrip()
+        ? [
+            {
+              name: "Hide the space strip",
+              desc:
+                "Show it when you move the pointer to the left edge of the file " +
+                "tree. Available when the strip is on the left.",
+              control: { type: "toggle" as const, key: "hideStrip" },
+            },
+          ]
+        : []),
       {
         name: "Assign a color to new spaces",
         desc:

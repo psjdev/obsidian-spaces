@@ -205,11 +205,23 @@ There are three ways to change it, and all three go through the same setter, so 
 
 The strip stays locked most of the time. Locked is the default, and it is also always the state you find it in after a restart, whatever it was left at before. Locked shows no handle and no extra chrome at all.
 
-Run **Unlock the space strip** and a grab handle appears at the strip's leading edge, pushing **All** and the rest of the icons along to make room for it. Drag the handle toward an edge and the region the strip would occupy there lights up; release over it to drop the strip in place. Run **Lock the space strip** to end the mode and hide the handle again, or right-click the handle and choose **Lock the space strip** from there instead.
+Run **Unlock the space strip** and a grab handle appears at the strip's leading edge, pushing **All** and the rest of the icons along to make room for it. Drag the handle toward an edge and the region the strip would occupy there lights up; release over it to drop the strip in place. Run **Lock the space strip** to end the mode and hide the handle again, or right-click the handle and choose **Lock the space strip** from there instead. A strip that hides itself stays visible while it is unlocked, and hides again once you lock it.
 
 The palette only ever offers one half of that pair at a time: **Unlock the space strip** while it is locked, **Lock the space strip** while it is unlocked, never both.
 
 The lock is a mode, not a setting. It lives only for as long as Obsidian is open, is deliberately absent from Settings, and always starts locked again the next time Obsidian loads the plugin.
+
+### Hiding the strip
+
+When the strip is on the left, turn on **Hide the space strip** in Settings → Appearance to get the width back. It is off by default, and it is only offered when the strip is on the left and your device has a pointer that can hover.
+
+A narrow lip stays at the left edge of the file tree. The rest of the strip slides out of view and the file tree uses the space.
+
+Move the pointer to the left edge of the file tree and the strip slides back out over it. The file tree does not move. Move the pointer past the strip's right edge and it closes again at once.
+
+Dragging still works. Drag a note toward the hidden strip and it slides out and stays open until you drop, so you can drop the note onto a space icon. Reordering spaces by dragging their icons works the same way.
+
+Keyboard focus still works. The strip stays in the tab order, and tabbing into it brings it back until you tab out again.
 
 ## Commands
 

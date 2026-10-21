@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { applyDock, clearDock } from "../src/ui/stripDock";
+import { applyDock, applyHidden, clearDock } from "../src/ui/stripDock";
 
 const pane = () => document.createElement("div");
 const classes = (el: HTMLElement) => Array.from(el.classList).filter((c) => c.startsWith("spaces-dock-"));
@@ -42,5 +42,60 @@ describe("the pane's placement class", () => {
 
   it("tolerates a missing pane, because teardown can run after one is gone", () => {
     expect(() => clearDock(null)).not.toThrow();
+  });
+});
+
+describe("the hidden strip classes", () => {
+  it("adds the hidden class and removes it again", () => {
+    const p = pane();
+    applyHidden(p, true);
+    expect(p.classList.contains("spaces-strip-hidden")).toBe(true);
+    applyHidden(p, false);
+    expect(p.classList.contains("spaces-strip-hidden")).toBe(false);
+  });
+
+  it("drops the open class when un-hiding", () => {
+    const p = pane();
+    applyHidden(p, true);
+    p.classList.add("spaces-strip-open");
+    applyHidden(p, false);
+    expect(p.classList.contains("spaces-strip-open")).toBe(false);
+  });
+
+  it("clearDock removes the hidden and open classes too", () => {
+    const p = pane();
+    p.className = "workspace-leaf-content";
+    applyDock(p, "left");
+    applyHidden(p, true);
+    p.classList.add("spaces-strip-open");
+    clearDock(p);
+    expect(p.className).toBe("workspace-leaf-content");
+  });
+
+  it("re-docking left leaves the hidden and open classes exactly as they were", () => {
+    // Removing them here and having the caller put the hidden one straight back
+    // is a window with the strip laid out un-hidden. Nothing reads layout
+    // between the two calls, so nothing paints it; a read added between them
+    // would slide the strip out and back on every definitions change.
+    const p = pane();
+    applyDock(p, "left");
+    applyHidden(p, true);
+    p.classList.add("spaces-strip-open");
+    applyDock(p, "left");
+    expect(p.classList.contains("spaces-strip-hidden")).toBe(true);
+    expect(p.classList.contains("spaces-strip-open")).toBe(true);
+    expect(classes(p)).toEqual(["spaces-dock-left"]);
+  });
+
+  it("applyDock to a non-left placement leaves no hidden class behind", () => {
+    for (const placement of ["bottom", "top", "right"] as const) {
+      const p = pane();
+      applyDock(p, "left");
+      applyHidden(p, true);
+      p.classList.add("spaces-strip-open");
+      applyDock(p, placement);
+      expect(p.classList.contains("spaces-strip-hidden")).toBe(false);
+      expect(p.classList.contains("spaces-strip-open")).toBe(false);
+    }
   });
 });

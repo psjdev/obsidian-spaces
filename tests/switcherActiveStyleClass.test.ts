@@ -59,7 +59,7 @@ async function mount(style: ActiveSpaceStyle) {
   );
   const host = document.createElement("div");
   document.body.appendChild(host);
-  switcher.mount(host);
+  switcher.mount(host, defs.get().settings.stripPlacement);
   const root = host.querySelector<HTMLElement>(".spaces-switcher");
   if (!root) throw new Error("the strip did not mount");
   return { root, defs, switcher };

@@ -104,7 +104,7 @@ async function build(): Promise<Harness> {
   );
   const host = document.createElement("div");
   document.body.replaceChildren(host);
-  switcher.mount(host);
+  switcher.mount(host, defs.get().settings.stripPlacement);
   return Object.assign(h, { host, switcher });
 }
 

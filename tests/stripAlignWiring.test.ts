@@ -135,7 +135,7 @@ async function build(withHeader = true) {
   host.appendChild(tree);
   document.body.appendChild(host);
 
-  switcher.mount(host);
+  switcher.mount(host, defs.get().settings.stripPlacement);
   return { switcher, defs, host };
 }
 

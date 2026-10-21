@@ -24,9 +24,10 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as selectors from "../src/explorer/selectors";
 import { CLS, CLS_ELSEWHERE, SEL, UNSTYLED_CLASSES } from "../src/explorer/selectors";
+import { deviceHasHover } from "../src/ui/canHideStrip";
 import { LABEL_ROLES } from "../src/ui/compactLabel";
 import { applyCompactLabels } from "../src/explorer/ExplorerAdapter";
 import { buildChainIndex } from "../src/visibility/compactChains";
@@ -164,6 +165,183 @@ describe("styles.css — the switch mask is the FILE explorer's", () => {
     // unfiltered for ~43ms. Nothing about that says a bookmarks pane, or
     // another plugin's nav-shaped view, should blank at the same moment.
     expect(theirs.matches(mask[0]!.selector)).toBe(false);
+  });
+});
+
+describe("styles.css — the hidden strip only hides where it can be revealed", () => {
+  it("applies every hidden-strip rule inside a (hover: hover) block", () => {
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) expect(r.media.replace(/\s+/g, "")).toBe("(hover:hover)");
+  });
+
+  it("asks matchMedia the same question the stylesheet asks", () => {
+    // `deviceHasHover()` decides whether Settings OFFERS the setting; the media
+    // query decides whether hiding does anything at all. Both say in a comment
+    // that they must match, and those comments were the only thing holding
+    // them together: the JS query could be changed to `(pointer: fine)` with
+    // every test green. Disagreeing means the setting is offered where the CSS
+    // does nothing, or withheld where it applies.
+    const asked: string[] = [];
+    vi.stubGlobal("matchMedia", (query: string) => {
+      asked.push(query);
+      return { matches: true } as MediaQueryList;
+    });
+    try {
+      expect(deviceHasHover()).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const tight = (s: string) => s.replace(/\s+/g, "");
+    const conditions = [...new Set(selectorsFor("spaces-strip-hidden").map((r) => tight(r.media)))];
+    expect(conditions).toHaveLength(1);
+    expect(asked.map(tight)).toEqual(conditions);
+  });
+
+  it("narrows the pane and slides the strip, opaquely, in the hover block", () => {
+    const pane = selectorsFor(".spaces-strip-hidden").find((r) => r.style.getPropertyValue("padding-left") === "6px");
+    expect(pane).toBeDefined();
+    const strip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("translateX")
+    );
+    expect(strip?.style.getPropertyValue("transform")).toBe("translateX(calc(-100% + 6px))");
+    expect(strip?.style.getPropertyValue("background")).toBe("var(--background-secondary)");
+  });
+
+  it("reveals on the open class and on keyboard focus inside the strip", () => {
+    const open = selectorsFor("spaces-strip-open");
+    expect(open.some((r) => r.style.getPropertyValue("transform") === "translateX(0)")).toBe(true);
+    expect(
+      selectorsFor(":has(:focus-visible)").some((r) => r.selector.includes("spaces-strip-hidden"))
+    ).toBe(true);
+  });
+
+  it("keeps the values the design measured: 6px lip, 16px zone, 120ms out, 90ms back", () => {
+    // Every number here came out of a spike on a real Obsidian and is a
+    // decision in the design document, not a preference. Wrong, they are
+    // invisible in development and obvious in use, which is this file's whole
+    // reason for existing. The 6px lip is pinned by the test above.
+    const hiddenStrip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("-100%")
+    );
+    // D5: closing gets out of the way faster than opening arrives.
+    expect(hiddenStrip?.style.getPropertyValue("transition")).toBe("transform 90ms ease-in");
+    // D6: without it the first reveal of a session pays for layer creation
+    // and visibly hitches.
+    expect(hiddenStrip?.style.getPropertyValue("will-change")).toBe("transform");
+    // D7: the strip overlays the tree, so it needs to be opaque and to cast.
+    expect(hiddenStrip?.style.getPropertyValue("box-shadow")).toBe(
+      "2px 0 8px var(--background-modifier-box-shadow)"
+    );
+    const revealed = selectorsFor("spaces-strip-open").find(
+      (r) => r.style.getPropertyValue("transform") === "translateX(0)"
+    );
+    expect(revealed?.style.getPropertyValue("transition")).toBe("transform 120ms ease-out");
+    const zone = selectorsFor("spaces-strip-zone").find(
+      (r) => r.style.getPropertyValue("position") === "absolute"
+    );
+    // D2: the band the pointer crosses to open the strip.
+    expect(zone?.style.getPropertyValue("width")).toBe("16px");
+  });
+
+  it("paints the lip above the trigger zone, which the zone-plus-strip trigger needs", () => {
+    // D2 again, and `attach()`'s docblock rests on it: the lip sits ABOVE the
+    // zone, so a pointer slammed at the screen edge lands on the strip rather
+    // than on the zone. That is why both carry a `mouseenter`, and a zone that
+    // painted on top would make the strip's listener the dead one.
+    const hiddenStrip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("-100%")
+    );
+    const zone = selectorsFor("spaces-strip-zone").find(
+      (r) => r.style.getPropertyValue("position") === "absolute"
+    );
+    expect(hiddenStrip?.style.getPropertyValue("z-index")).toBe("2");
+    expect(zone?.style.getPropertyValue("z-index")).toBe("1");
+    expect(Number(hiddenStrip?.style.getPropertyValue("z-index"))).toBeGreaterThan(
+      Number(zone?.style.getPropertyValue("z-index"))
+    );
+  });
+});
+
+describe("styles.css — hiding the strip is purely visual", () => {
+  // The principle: hidden is one `transform`. A hidden strip stays in the tab
+  // order and the accessibility tree, and focusing into it reveals it.
+  const FORBIDDEN = ["display", "visibility", "opacity", "pointer-events", "content-visibility"];
+
+  it("never uses display, visibility or the like in a hidden-strip rule", () => {
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) {
+      for (const prop of FORBIDDEN) {
+        expect(r.style.getPropertyValue(prop), `${prop} in ${r.selector}`).toBe("");
+      }
+    }
+  });
+
+  it("never keys a hidden-strip rule on aria-hidden, tabindex or inert", () => {
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) {
+      expect(r.selector).not.toMatch(/aria-hidden|tabindex|inert/);
+    }
+  });
+
+  it("hides the strip with a transform", () => {
+    const strip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("-100%")
+    );
+    expect(strip).toBeDefined();
+  });
+
+  it("carries the keyboard-focus reveal, undoing the hiding transform", () => {
+    const reveal = selectorsFor(":has(:focus-visible)").find(
+      (r) =>
+        r.selector.includes("spaces-strip-hidden") &&
+        r.selector.includes(".spaces-switcher:has(:focus-visible)")
+    );
+    expect(reveal?.style.getPropertyValue("transform")).toBe("translateX(0)");
+  });
+
+  it("matches a strip whose own control holds focus, which is what :has() buys", () => {
+    // The reveal has to key on a focused DESCENDANT: the switcher element
+    // never takes focus itself, so a bare `:focus-visible` on it would match
+    // nothing and tabbing into a hidden strip would leave it off screen.
+    //
+    // What jsdom answers here is whether the rule matches an ancestor of the
+    // focused control. What it cannot answer is Chromium's keyboard-versus-
+    // mouse heuristic for `:focus-visible` — nwsapi matches any focused
+    // element — so this pins the shape of the selector, and the test below
+    // pins that it is `:focus-visible` and not `:focus-within`.
+    const reveal = selectorsFor(":has(:focus-visible)").find((r) =>
+      r.selector.includes("spaces-strip-hidden")
+    );
+    expect(reveal).toBeDefined();
+    const pane = document.createElement("div");
+    pane.className = "spaces-dock-left spaces-strip-hidden";
+    const switcher = document.createElement("div");
+    switcher.className = "spaces-switcher";
+    const control = document.createElement("button");
+    switcher.appendChild(control);
+    pane.appendChild(switcher);
+    document.body.appendChild(pane);
+    try {
+      expect(switcher.matches(reveal!.selector)).toBe(false);
+      control.focus();
+      expect(switcher.matches(reveal!.selector)).toBe(true);
+    } finally {
+      pane.remove();
+    }
+  });
+
+  it("never reveals on :focus-within, which a mouse click also satisfies", () => {
+    // The stuck-open defect: clicking the space you are already in does not
+    // rebuild the pane, `render()` restores focus to that icon, and under
+    // `:focus-within` the strip stayed painted out with no pointer gesture
+    // able to dismiss it. `:focus-visible` is the keyboard-only test, and it
+    // goes inside `:has()` because the switcher itself never takes focus.
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) expect(r.selector).not.toContain(":focus-within");
   });
 });
 

@@ -76,7 +76,7 @@ async function stripIcon(useThemeIconColor: boolean): Promise<HTMLElement> {
   );
   const host = document.createElement("div");
   document.body.appendChild(host);
-  switcher.mount(host);
+  switcher.mount(host, defs.get().settings.stripPlacement);
   const item = host.querySelector<HTMLElement>('[aria-label="Garden"]');
   if (!item) throw new Error("the strip drew no Garden");
   return item;
@@ -157,7 +157,7 @@ describe("forcing theme colors on every surface that draws a space icon", () => 
     );
     const host = document.createElement("div");
     document.body.appendChild(host);
-    switcher.mount(host);
+    switcher.mount(host, defs.get().settings.stripPlacement);
     expect(host.querySelector<HTMLElement>('[aria-label="Garden"]')?.style.color).toBe("");
 
     await defs.mutate((d) => {

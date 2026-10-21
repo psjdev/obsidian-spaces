@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.14.0 — 2026-10-21
+
+A space strip on the left can now hide itself. Turn on **Hide the space strip**
+in Settings → Appearance, next to **Space strip position**. It is off by
+default, and it only appears when the strip is on the left and your device has
+a pointer that can hover.
+
+With it on, only a narrow lip stays at the left edge of the file tree and the
+tree uses the rest of the space. Move the pointer to that edge and the strip
+slides back out over the tree. The tree does not move. Move the pointer past
+the strip's right edge and it closes again.
+
+Dragging a note toward the hidden strip brings it out and keeps it open until
+you drop, so you can still drop the note onto a space icon. Reordering spaces
+by dragging their icons works too. Moving keyboard focus into the strip brings
+it back.
+
+Unlocking the strip keeps it visible until you lock it again.
+
 ## 0.13.0 — 2026-10-20
 
 A space you are finished with can now be archived instead of deleted. In

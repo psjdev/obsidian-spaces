@@ -1592,6 +1592,57 @@ body.spaces-claims-drop .drag-ghost-action {
   right: 0;
   border-left: 1px solid var(--background-modifier-border);
 }
+
+/* A left strip that hides itself and slides out on hover. The WHOLE block,
+   padding included, sits inside `(hover: hover)`: a device that cannot hover
+   has no way to reveal the strip, so it never hides it, whatever is stored.
+   Only `transform` animates. Measured values: 6px lip, 16px zone, 120ms
+   ease-out open, 90ms ease-in close. The strip needs an opaque background
+   and a shadow because it now overlays the tree. */
+/* The query must match `deviceHasHover()` in src/ui/canHideStrip.ts, which
+   decides whether Settings offers the hide setting. Edit both together. */
+@media (hover: hover) {
+  .spaces-dock-left.spaces-strip-hidden {
+    padding-left: 6px;
+  }
+  .spaces-dock-left.spaces-strip-hidden > .spaces-switcher {
+    transform: translateX(calc(-100% + 6px));
+    transition: transform 90ms ease-in;
+    will-change: transform;
+    background: var(--background-secondary);
+    /* Obsidian's own shadow color, which its drag ghost and its popovers use
+       at this same 8px blur, so a theme that retints shadows retints ours
+       too. It also carries the light/dark difference a fixed rgba() could
+       not: 0.1 light, 0.3 dark. The geometry stays ours, and the offset is
+       sideways because the strip casts to the right, over the tree. */
+    box-shadow: 2px 0 8px var(--background-modifier-box-shadow);
+    z-index: 2;
+  }
+  /* `:has(:focus-visible)`, never `:focus-within`. Clicking the space you are
+     already in does not rebuild the pane, and `render()` restores focus to the
+     icon that was clicked, so `:focus-within` held the strip revealed after the
+     click: the close watcher removes the open class, but the focus rule was
+     still painting the strip out, and no pointer gesture could dismiss it.
+     `:focus-visible` matches keyboard focus and not mouse focus, which is the
+     distinction wanted. It has to sit on the focused DESCENDANT, because the
+     switcher element itself never takes focus, so the test is `:has()` on the
+     switcher rather than `:focus-visible` on it. Obsidian's own stylesheet uses
+     `:has()` (`.cm-line:has(.cm-hmd-frontmatter)`, among others), so the
+     Chromium it ships supports it. */
+  .spaces-dock-left.spaces-strip-hidden.spaces-strip-open > .spaces-switcher,
+  .spaces-dock-left.spaces-strip-hidden > .spaces-switcher:has(:focus-visible) {
+    transform: translateX(0);
+    transition: transform 120ms ease-out;
+  }
+  .spaces-dock-left.spaces-strip-hidden > .spaces-strip-zone {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    z-index: 1;
+  }
+}
 .spaces-dock-left > .spaces-switcher > .spaces-switcher-rail,
 .spaces-dock-right > .spaces-switcher > .spaces-switcher-rail {
   flex-direction: column;

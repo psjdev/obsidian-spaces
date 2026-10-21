@@ -16,7 +16,9 @@ import {
   type ItemBox,
 } from "./spaceReorder";
 import { axisFor, pointerAlong, spanOf, type Axis, type Span } from "./stripAxis";
-import { applyDock, applyUnlockState, clearDock } from "./stripDock";
+import { applyDock, applyHidden, applyUnlockState, clearDock } from "./stripDock";
+import { placementCanHideStrip } from "./canHideStrip";
+import { StripReveal } from "./stripReveal";
 import { BOLDED_CLASS, BOXED_CLASS, activeStyleClass } from "./activeStyle";
 import {
   DESIGN_PAD_TOP,
@@ -184,6 +186,12 @@ export class SwitcherView {
    * at teardown at all.
    */
   private popover: AnchoredPopover | null = null;
+  /**
+   * The reveal controller, present only while the strip is hidden. Owns a
+   * zone element and document listeners, so `syncHidden()` and `destroy()`
+   * are the only places that create or drop it.
+   */
+  private reveal: StripReveal | null = null;
 
   constructor(
     private defs: DefinitionStore,
@@ -231,14 +239,37 @@ export class SwitcherView {
     return axisFor(this.placement);
   }
 
-  mount(parent: HTMLElement): void {
+  /**
+   * Builds the strip into `parent` and docks it at `placement`.
+   *
+   * The placement is a parameter and not `this.placement`, which is written
+   * only by `applyPlacement` -- and the sole caller used to run that AFTER
+   * mounting. So everything here that derives from the placement (the dock
+   * class, `syncHidden`, and the axis `render()` draws for) ran against the
+   * placement the strip was last in. It was benign only because that caller
+   * re-applied straight afterwards, and `main.ts` documents the very same
+   * ordering rule for the definitions subscription while this broke it
+   * internally. The signature now asks for what the body needs, and the
+   * caller no longer re-applies.
+   */
+  mount(parent: HTMLElement, placement: StripPlacement): void {
+    this.placement = placement;
+    // `destroy()` takes the controller, and its open state, with it. A space
+    // switch rebuilds the pane under a pointer that has not moved, so no
+    // `mouseenter` comes to reopen it. Read here and nowhere else: `destroy()`
+    // itself (unload, teardown) must never restore.
+    const wasRevealed = this.reveal?.isOpen() ?? false;
     this.destroy();
     this.host = parent;
     const el = parent.ownerDocument.win.createDiv();
     el.className = "spaces-switcher";
     parent.appendChild(el);
     this.el = el;
-    applyDock(parent, this.placement);
+    applyDock(parent, placement);
+    this.syncHidden();
+    // Null when the feature is off or the placement left `left`, so a strip
+    // that no longer hides cannot be left revealed.
+    if (wasRevealed) this.reveal?.reopen();
     this.render();
     // Zoom, a theme swap and a font change all move the pane's rows without
     // going anywhere near a render, so alignment needs a second trigger.
@@ -276,6 +307,10 @@ export class SwitcherView {
     // Outlives the element it measures otherwise, and a remount makes a new one.
     this.paneResize?.disconnect();
     this.paneResize = null;
+    // Before the element and the dock go: it removes a zone from the pane and
+    // listeners from the document, none of which leave on their own.
+    this.reveal?.destroy();
+    this.reveal = null;
     this.el?.remove();
     this.el = null;
     // A remount can land in a different pane. `mount()` calls `destroy()`
@@ -285,13 +320,77 @@ export class SwitcherView {
     this.host = null;
   }
 
-  /** Re-paints for a new placement. Cheap: one class swap, no re-render. */
+  /**
+   * Re-paints for a new placement: one class swap and no re-render.
+   *
+   * NOT cheap in the sense that line used to claim. `syncHidden()` runs below,
+   * and `main.ts` calls this on every definitions change, so for a left strip
+   * with hiding on this can build a reveal controller, create the zone element
+   * and bind six listeners. It does that once per controller -- the controller
+   * is kept while the placement stays left -- but the first call after hiding
+   * is switched on pays for all of it.
+   */
   applyPlacement(placement: StripPlacement): void {
     this.placement = placement;
-    if (this.host) applyDock(this.host, placement);
+    if (this.host) {
+      applyDock(this.host, placement);
+      this.syncHidden();
+    }
     // After the dock class, never before: alignment measures the strip in
     // the placement it is arriving at, not the one it is leaving.
     this.alignToPane();
+  }
+
+  /**
+   * Makes the hidden state match the setting and the placement. Hiding is
+   * active only for a left strip with `hideStrip` on, and never while the
+   * strip is unlocked: unlocking means rearranging, and a strip that slides
+   * away under the grip drag fights that. The setting itself is untouched.
+   *
+   * Runs wherever `applyDock` does, because a rebuilt pane starts with neither
+   * class and a pane docked anywhere but left has both taken off. No observer:
+   * those two call sites already fire on every event that matters.
+   *
+   * Writes the hidden class and NOT the open one. The open class belongs to
+   * the reveal controller, which is the only thing that adds it; all this does
+   * is keep a controller alive, so an open strip that is re-docked left to
+   * left keeps the class it already has.
+   */
+  private syncHidden(): void {
+    const pane = this.host;
+    const strip = this.el;
+    if (!pane || !strip) return;
+    // The placement half comes from the shared predicate, so this gate and the
+    // one that offers the setting cannot drift. Not `canHideStrip`: its hover
+    // half must not gate activation -- see `placementCanHideStrip`.
+    const active =
+      placementCanHideStrip(this.placement) &&
+      !this.unlocked &&
+      this.defs.get().settings.hideStrip;
+    if (!active) {
+      this.reveal?.destroy();
+      this.reveal = null;
+      applyHidden(pane, false);
+      return;
+    }
+    applyHidden(pane, true);
+    if (!this.reveal) {
+      this.reveal = new StripReveal({
+        pane,
+        strip,
+        lipRight: () => strip.getBoundingClientRect().right,
+        // `offsetWidth` is a layout width and a `transform` does not change
+        // it, so this answers with the settled edge however far through the
+        // slide the strip currently is. The strip is `left: 0` against the
+        // pane's padding box, so its settled left edge is the pane's left
+        // edge plus whatever border the pane carries, which is what
+        // `clientLeft` reads. Measured in the running app with no such
+        // border: pane left 44, strip width 38, settled right edge 82.
+        openRight: () =>
+          pane.getBoundingClientRect().left + pane.clientLeft + strip.offsetWidth,
+      });
+      this.reveal.attach();
+    }
   }
 
   isUnlocked(): boolean {
@@ -307,6 +406,8 @@ export class SwitcherView {
     if (this.unlocked === on) return;
     this.unlocked = on;
     this.render();
+    // Re-render alone neither builds nor tears down the reveal wiring.
+    this.syncHidden();
   }
 
   /** The pane the strip is mounted in, in viewport coordinates -- null only while unmounted. */
@@ -1264,6 +1365,15 @@ export class SwitcherView {
         item.draggable = true;
       }
       item.addEventListener("dragstart", (e) => {
+        this.reveal?.reopen();
+        // The strip has to stay out for the length of the reorder, and nothing
+        // closes it while a native drag runs: the browser fires no `mousemove`
+        // until the drag is over. It is normally already open too, since a
+        // pointer cannot reach an icon without crossing the lip or the zone.
+        // The exception is a strip revealed by keyboard focus alone, which is
+        // painted out with this controller still closed, and whose reveal the
+        // mouse press that starts the drag ends by turning that focus into a
+        // mouse focus: `reopen()` takes the open state for real in that case.
         // The ID, not the position it currently has. See `dragFromId`.
         this.dragFromId = spaceId;
         this.dragPointerAlong = pointerAlong(e, this.axis);
