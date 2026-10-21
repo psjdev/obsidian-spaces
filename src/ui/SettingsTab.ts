@@ -199,10 +199,12 @@ export class SpacesSettingTab extends PluginSettingTab {
       // writing, so choosing a placement from Settings mid-gesture ends the
       // gesture cleanly rather than racing it.
       // The hide setting is offered only for a left strip, so the rows are
-      // asked again once the placement has landed.
+      // asked again once the placement has landed, through the same gate as
+      // every other route (`refreshIfSpacesChanged`), so this path is not
+      // special: it does not matter who changed the placement.
       void setStripPlacement(this.defs, value as StripPlacement, () =>
         this.cancelStripDrag?.()
-      ).then(() => this.update());
+      ).then(() => this.refreshIfSpacesChanged());
       return;
     }
     this.save(
@@ -229,10 +231,19 @@ export class SpacesSettingTab extends PluginSettingTab {
     return this.defs
       .get()
       .spaces.map((s) => `${s.id}\u0000${s.name}\u0000${isArchived(s) ? 1 : 0}`)
-      .join("\u0001");
+      .join("\u0001") +
+      // Whether the hide-strip row is offered is derived from the placement,
+      // which any route can change (the dropdown, a command, a strip drag).
+      // The answer is part of the signature, not the placement itself: moving
+      // between two placements that both withhold the row redraws nothing.
+      `\u0002${this.offersHideStrip() ? 1 : 0}`;
   }
 
   private lastSignature: string | null = null;
+
+  private offersHideStrip(): boolean {
+    return canHideStrip(this.defs.get().settings.stripPlacement, this.hasHover());
+  }
 
   /**
    * Re-reads the definitions when, and only when, the space list has changed.
@@ -247,6 +258,10 @@ export class SpacesSettingTab extends PluginSettingTab {
    * Before this existed, a space created from the explorer's + button did not
    * appear in settings until Obsidian restarted and the tab was registered
    * again, because nothing here had any reason to look again.
+   *
+   * The signature also carries whether the hide-strip row is offered, so a
+   * placement changed by a command or a strip drag, not only the dropdown,
+   * adds or removes that row.
    *
    * Gated on the signature rather than refreshed on every definition change:
    * every toggle on the Preferences page writes to the same store, and
@@ -383,13 +398,13 @@ export class SpacesSettingTab extends PluginSettingTab {
           },
         },
       },
-      ...(canHideStrip(this.defs.get().settings.stripPlacement, this.hasHover())
+      ...(this.offersHideStrip()
         ? [
             {
-              name: "Hide the space strip until you point at it",
+              name: "Hide the space strip",
               desc:
-                "Tucks the strip against the left edge of the file explorer. Move " +
-                "the pointer to that edge to slide it out.",
+                "Show it when you move the pointer to the left edge of the file " +
+                "tree. Available when the strip is on the left.",
               control: { type: "toggle" as const, key: "hideStrip" },
             },
           ]
