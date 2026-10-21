@@ -1610,7 +1610,12 @@ body.spaces-claims-drop .drag-ghost-action {
     transition: transform 90ms ease-in;
     will-change: transform;
     background: var(--background-secondary);
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+    /* Obsidian's own shadow color, which its drag ghost and its popovers use
+       at this same 8px blur, so a theme that retints shadows retints ours
+       too. It also carries the light/dark difference a fixed rgba() could
+       not: 0.1 light, 0.3 dark. The geometry stays ours, and the offset is
+       sideways because the strip casts to the right, over the tree. */
+    box-shadow: 2px 0 8px var(--background-modifier-box-shadow);
     z-index: 2;
   }
   /* `:has(:focus-visible)`, never `:focus-within`. Clicking the space you are

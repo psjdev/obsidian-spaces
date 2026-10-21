@@ -191,6 +191,52 @@ describe("styles.css — the hidden strip only hides where it can be revealed", 
       selectorsFor(":has(:focus-visible)").some((r) => r.selector.includes("spaces-strip-hidden"))
     ).toBe(true);
   });
+
+  it("keeps the values the design measured: 6px lip, 16px zone, 120ms out, 90ms back", () => {
+    // Every number here came out of a spike on a real Obsidian and is a
+    // decision in the design document, not a preference. Wrong, they are
+    // invisible in development and obvious in use, which is this file's whole
+    // reason for existing. The 6px lip is pinned by the test above.
+    const hiddenStrip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("-100%")
+    );
+    // D5: closing gets out of the way faster than opening arrives.
+    expect(hiddenStrip?.style.getPropertyValue("transition")).toBe("transform 90ms ease-in");
+    // D6: without it the first reveal of a session pays for layer creation
+    // and visibly hitches.
+    expect(hiddenStrip?.style.getPropertyValue("will-change")).toBe("transform");
+    // D7: the strip overlays the tree, so it needs to be opaque and to cast.
+    expect(hiddenStrip?.style.getPropertyValue("box-shadow")).toBe(
+      "2px 0 8px var(--background-modifier-box-shadow)"
+    );
+    const revealed = selectorsFor("spaces-strip-open").find(
+      (r) => r.style.getPropertyValue("transform") === "translateX(0)"
+    );
+    expect(revealed?.style.getPropertyValue("transition")).toBe("transform 120ms ease-out");
+    const zone = selectorsFor("spaces-strip-zone").find(
+      (r) => r.style.getPropertyValue("position") === "absolute"
+    );
+    // D2: the band the pointer crosses to open the strip.
+    expect(zone?.style.getPropertyValue("width")).toBe("16px");
+  });
+
+  it("paints the lip above the trigger zone, which the zone-plus-strip trigger needs", () => {
+    // D2 again, and `attach()`'s docblock rests on it: the lip sits ABOVE the
+    // zone, so a pointer slammed at the screen edge lands on the strip rather
+    // than on the zone. That is why both carry a `mouseenter`, and a zone that
+    // painted on top would make the strip's listener the dead one.
+    const hiddenStrip = selectorsFor("spaces-strip-hidden > .spaces-switcher").find((r) =>
+      r.style.getPropertyValue("transform").includes("-100%")
+    );
+    const zone = selectorsFor("spaces-strip-zone").find(
+      (r) => r.style.getPropertyValue("position") === "absolute"
+    );
+    expect(hiddenStrip?.style.getPropertyValue("z-index")).toBe("2");
+    expect(zone?.style.getPropertyValue("z-index")).toBe("1");
+    expect(Number(hiddenStrip?.style.getPropertyValue("z-index"))).toBeGreaterThan(
+      Number(zone?.style.getPropertyValue("z-index"))
+    );
+  });
 });
 
 describe("styles.css — hiding the strip is purely visual", () => {
