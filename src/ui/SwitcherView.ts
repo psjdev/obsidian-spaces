@@ -1032,6 +1032,9 @@ export class SwitcherView {
     });
 
     rail.addEventListener("drop", (e) => {
+      // Before the branches, which return early: a drop is not always followed
+      // by a `dragend`, and no path out of here may leave the strip held.
+      this.reveal?.release();
       if (this.dragFromId === null) {
         // Stopped here rather than left to end when `onDragDone` clears the
         // paths a frame later, so this does not depend on another
@@ -1195,6 +1198,9 @@ export class SwitcherView {
    * to a source row the tree had already replaced reached nothing at all.
    */
   clearDropTarget(): void {
+    // A file drag that ended off the rail never reaches `drop` or `dragend`
+    // here, so this is the release that covers it.
+    this.reveal?.release();
     this.markDropTarget(null);
     // The next drag gets its own explanations. Cleared here rather than at a
     // drag's start, because the strip has no start to hook: a file drag begins
@@ -1209,6 +1215,7 @@ export class SwitcherView {
   private stopDragScrolling: (() => void) | null = null;
 
   private endDrag(rail: HTMLElement, line: HTMLElement): void {
+    this.reveal?.release();
     this.dragFromId = null;
     this.markDropTarget(null);
     line.hidden = true;
@@ -1318,6 +1325,8 @@ export class SwitcherView {
         item.draggable = true;
       }
       item.addEventListener("dragstart", (e) => {
+        // Starts inside a strip that is already open; it must stay open.
+        this.reveal?.hold();
         // The ID, not the position it currently has. See `dragFromId`.
         this.dragFromId = spaceId;
         this.dragPointerAlong = pointerAlong(e, this.axis);

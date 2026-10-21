@@ -11,6 +11,7 @@ let reveal: StripReveal;
 
 const zone = () => pane.querySelector<HTMLElement>(`.${CLS_STRIP_ZONE}`);
 const enter = (el: Element) => el.dispatchEvent(new MouseEvent("mouseenter"));
+const dragEnter = (el: Element) => el.dispatchEvent(new Event("dragenter", { bubbles: true }));
 const move = (clientX: number) => window.dispatchEvent(new MouseEvent("mousemove", { clientX }));
 const leaveDoc = (clientX: number) =>
   document.dispatchEvent(new MouseEvent("mouseleave", { clientX }));
@@ -176,6 +177,39 @@ describe("StripReveal", () => {
     expect(reveal.isOpen()).toBe(true);
     edge = 50; // and back
     move(150);
+    expect(reveal.isOpen()).toBe(false);
+  });
+
+  it("opens when a drag enters the zone", () => {
+    reveal.attach();
+    dragEnter(zone()!);
+    expect(reveal.isOpen()).toBe(true);
+    expect(pane.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+  });
+
+  it("opens when a drag enters the strip", () => {
+    reveal.attach();
+    dragEnter(strip);
+    expect(reveal.isOpen()).toBe(true);
+  });
+
+  it("holds open for the whole drag and closes after release", () => {
+    reveal.attach();
+    dragEnter(zone()!);
+    move(500);
+    move(900);
+    expect(reveal.isOpen()).toBe(true);
+    reveal.release();
+    move(500);
+    expect(reveal.isOpen()).toBe(false);
+  });
+
+  it("destroy removes the dragenter handlers", () => {
+    reveal.attach();
+    const z = zone()!;
+    reveal.destroy();
+    dragEnter(z);
+    dragEnter(strip);
     expect(reveal.isOpen()).toBe(false);
   });
 

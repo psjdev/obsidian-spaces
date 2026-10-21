@@ -20,6 +20,7 @@ const views: SwitcherView[] = [];
 async function build(hideStrip: boolean, placement: StripPlacement = "left") {
   let stored: unknown = {
     ...DEFAULT_DEFINITIONS,
+    spaces: [{ id: "a", name: "A", icon: "box", color: "#000000", members: [] }],
     settings: { ...DEFAULT_DEFINITIONS.settings, hideStrip, stripPlacement: placement },
   };
   const defs = new DefinitionStore({
@@ -74,6 +75,72 @@ afterEach(() => {
   views.splice(0).forEach((v) => v.destroy());
   hosts.splice(0).forEach((h) => h.remove());
   vi.restoreAllMocks();
+});
+
+const rail = (host: HTMLElement) => host.querySelector<HTMLElement>(".spaces-switcher-rail")!;
+const icon = (host: HTMLElement) => host.querySelector<HTMLElement>('[data-space-id="a"]')!;
+const fire = (el: Element, type: string) =>
+  el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+
+describe("hidden strip drags", () => {
+  it("opens and holds when a drag enters the zone", async () => {
+    const { host } = await build(true);
+    zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+    move(500);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+  });
+
+  it("holds open for a reorder drag that starts inside the strip", async () => {
+    const { host } = await build(true);
+    enter(strip(host));
+    fire(icon(host), "dragstart");
+    move(500);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+  });
+
+  it("releases on dragend", async () => {
+    const { host } = await build(true);
+    enter(strip(host));
+    fire(icon(host), "dragstart");
+    fire(rail(host), "dragend");
+    move(500);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+  });
+
+  it("releases on drop with no dragend after it", async () => {
+    const { host } = await build(true);
+    enter(strip(host));
+    fire(icon(host), "dragstart");
+    fire(rail(host), "drop");
+    move(500);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+  });
+
+  it("releases on a file drop that ends early", async () => {
+    const { host } = await build(true);
+    zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
+    fire(rail(host), "drop");
+    move(500);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+  });
+
+  it("releases when the explorer reports the drag done", async () => {
+    const { view, host } = await build(true);
+    zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
+    view.clearDropTarget();
+    move(500);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+  });
+
+  it("tolerates a drag with hiding off", async () => {
+    const { host } = await build(false);
+    expect(() => {
+      fire(icon(host), "dragstart");
+      fire(rail(host), "drop");
+      fire(rail(host), "dragend");
+    }).not.toThrow();
+  });
 });
 
 describe("hidden strip wiring", () => {

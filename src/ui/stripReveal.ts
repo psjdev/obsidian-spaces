@@ -24,6 +24,14 @@ export class StripReveal {
 
   private readonly onEnter = (): void => this.show();
 
+  /**
+   * A drag entering the zone or the strip. `dragenter` fires once per element
+   * entry, so this is not per-pointer-move work. Holds, because a drag's
+   * pointer must not close the strip under it; the owner releases at the
+   * drag's end.
+   */
+  private readonly onDragEnter = (): void => this.hold();
+
   /** Overshooting past the edge and out of the window still reveals. */
   private readonly onDocLeave = (e: MouseEvent): void => {
     if (e.clientX <= this.deps.stripRight()) this.show();
@@ -49,6 +57,8 @@ export class StripReveal {
     // into the screen edge lands on the strip. Both must open it.
     zone.addEventListener("mouseenter", this.onEnter);
     strip.addEventListener("mouseenter", this.onEnter);
+    zone.addEventListener("dragenter", this.onDragEnter);
+    strip.addEventListener("dragenter", this.onDragEnter);
     doc.addEventListener("mouseleave", this.onDocLeave);
   }
 
@@ -67,10 +77,12 @@ export class StripReveal {
     this.unwatch();
     if (this.zone) {
       this.zone.removeEventListener("mouseenter", this.onEnter);
+      this.zone.removeEventListener("dragenter", this.onDragEnter);
       this.zone.remove();
       this.zone = null;
     }
     this.deps.strip.removeEventListener("mouseenter", this.onEnter);
+    this.deps.strip.removeEventListener("dragenter", this.onDragEnter);
     this.doc?.removeEventListener("mouseleave", this.onDocLeave);
     this.doc = null;
     this.win = null;
