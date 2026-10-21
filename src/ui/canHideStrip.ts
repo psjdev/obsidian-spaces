@@ -19,5 +19,8 @@ export function canHideStrip(placement: StripPlacement, hasHover: boolean): bool
 
 /** The live hover answer. Read through this so callers can substitute it. */
 export function deviceHasHover(): boolean {
+  // Must match the `@media (hover: hover)` block in styles.css that hides and
+  // reveals the strip. If the two disagree, the setting is offered where the
+  // CSS does nothing, or withheld where it applies.
   return typeof matchMedia === "function" && matchMedia("(hover: hover)").matches;
 }

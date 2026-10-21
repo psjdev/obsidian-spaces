@@ -1599,6 +1599,8 @@ body.spaces-claims-drop .drag-ghost-action {
    Only `transform` animates. Measured values: 6px lip, 16px zone, 120ms
    ease-out open, 90ms ease-in close. The strip needs an opaque background
    and a shadow because it now overlays the tree. */
+/* The query must match `deviceHasHover()` in src/ui/canHideStrip.ts, which
+   decides whether Settings offers the hide setting. Edit both together. */
 @media (hover: hover) {
   .spaces-dock-left.spaces-strip-hidden {
     padding-left: 6px;
