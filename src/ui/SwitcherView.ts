@@ -16,7 +16,8 @@ import {
   type ItemBox,
 } from "./spaceReorder";
 import { axisFor, pointerAlong, spanOf, type Axis, type Span } from "./stripAxis";
-import { applyDock, applyUnlockState, clearDock } from "./stripDock";
+import { applyDock, applyHidden, applyUnlockState, clearDock } from "./stripDock";
+import { StripReveal } from "./stripReveal";
 import { BOLDED_CLASS, BOXED_CLASS, activeStyleClass } from "./activeStyle";
 import {
   DESIGN_PAD_TOP,
@@ -25,7 +26,12 @@ import {
   type AlignBox,
 } from "./stripAlign";
 import { nearestPlacement, passedThreshold, type PaneRect, type Point } from "./stripDrag";
-import { CLS_SPACE_DRAGGING, CLS_SPACE_DROP_LINE, SEL } from "../explorer/selectors";
+import {
+  CLS_SPACE_DRAGGING,
+  CLS_SPACE_DROP_LINE,
+  CLS_STRIP_OPEN,
+  SEL,
+} from "../explorer/selectors";
 import { renameSpace, setSpaceIcon, setSpaceColor } from "../actions/spaceLifecycle";
 import { setStripPlacement } from "../actions/stripPlacement";
 import { iconColorFor } from "./spaceIconColor";
@@ -184,6 +190,12 @@ export class SwitcherView {
    * at teardown at all.
    */
   private popover: AnchoredPopover | null = null;
+  /**
+   * The reveal controller, present only while the strip is hidden. Owns a
+   * zone element and document listeners, so `syncHidden()` and `destroy()`
+   * are the only places that create or drop it.
+   */
+  private reveal: StripReveal | null = null;
 
   constructor(
     private defs: DefinitionStore,
@@ -239,6 +251,7 @@ export class SwitcherView {
     parent.appendChild(el);
     this.el = el;
     applyDock(parent, this.placement);
+    this.syncHidden();
     this.render();
     // Zoom, a theme swap and a font change all move the pane's rows without
     // going anywhere near a render, so alignment needs a second trigger.
@@ -276,6 +289,10 @@ export class SwitcherView {
     // Outlives the element it measures otherwise, and a remount makes a new one.
     this.paneResize?.disconnect();
     this.paneResize = null;
+    // Before the element and the dock go: it removes a zone from the pane and
+    // listeners from the document, none of which leave on their own.
+    this.reveal?.destroy();
+    this.reveal = null;
     this.el?.remove();
     this.el = null;
     // A remount can land in a different pane. `mount()` calls `destroy()`
@@ -288,10 +305,47 @@ export class SwitcherView {
   /** Re-paints for a new placement. Cheap: one class swap, no re-render. */
   applyPlacement(placement: StripPlacement): void {
     this.placement = placement;
-    if (this.host) applyDock(this.host, placement);
+    if (this.host) {
+      applyDock(this.host, placement);
+      this.syncHidden();
+    }
     // After the dock class, never before: alignment measures the strip in
     // the placement it is arriving at, not the one it is leaving.
     this.alignToPane();
+  }
+
+  /**
+   * Makes the hidden state match the setting and the placement. Hiding is
+   * active only for a left strip with `hideStrip` on.
+   *
+   * Runs wherever `applyDock` does, because `applyDock` clears the hidden and
+   * open classes every time and a rebuilt pane starts without them. No
+   * observer: those two call sites already fire on every event that matters.
+   */
+  private syncHidden(): void {
+    const pane = this.host;
+    const strip = this.el;
+    if (!pane || !strip) return;
+    const active = this.placement === "left" && this.defs.get().settings.hideStrip;
+    if (!active) {
+      this.reveal?.destroy();
+      this.reveal = null;
+      applyHidden(pane, false);
+      return;
+    }
+    // A revealed strip stays revealed across a re-dock: `applyDock` just
+    // dropped the open class, so put back what the controller still believes.
+    const wasOpen = this.reveal?.isOpen() ?? false;
+    applyHidden(pane, true);
+    if (!this.reveal) {
+      this.reveal = new StripReveal({
+        pane,
+        strip,
+        stripRight: () => strip.getBoundingClientRect().right,
+      });
+      this.reveal.attach();
+    }
+    if (wasOpen) pane.classList.add(CLS_STRIP_OPEN);
   }
 
   isUnlocked(): boolean {
