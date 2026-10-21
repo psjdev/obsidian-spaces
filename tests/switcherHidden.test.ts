@@ -184,6 +184,68 @@ describe("hidden strip wiring", () => {
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
   });
 
+  describe("a rebuild under a resting pointer", () => {
+    const open = (host: HTMLElement) => host.classList.contains(CLS_STRIP_OPEN);
+
+    it("keeps a revealed strip revealed", async () => {
+      const { view, host } = await build(true);
+      enter(zones(host)[0]);
+      view.mount(host);
+      expect(open(host)).toBe(true);
+      expect(zones(host)).toHaveLength(1);
+    });
+
+    it("keeps a closed strip closed", async () => {
+      const { view, host } = await build(true);
+      view.mount(host);
+      expect(open(host)).toBe(false);
+    });
+
+    it("does not carry a reveal across the setting being switched off", async () => {
+      const { view, host, set } = await build(true);
+      enter(zones(host)[0]);
+      await set({ hideStrip: false });
+      view.mount(host);
+      expect(open(host)).toBe(false);
+      expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+      expect(zones(host)).toHaveLength(0);
+    });
+
+    it("does not carry a reveal across the placement leaving left", async () => {
+      const { view, host } = await build(true);
+      enter(zones(host)[0]);
+      view.applyPlacement("top");
+      view.mount(host);
+      expect(open(host)).toBe(false);
+      expect(zones(host)).toHaveLength(0);
+    });
+
+    it("does not carry a reveal across a real teardown", async () => {
+      const { view, host } = await build(true);
+      enter(zones(host)[0]);
+      view.destroy();
+      expect(open(host)).toBe(false);
+      view.mount(host);
+      expect(open(host)).toBe(false);
+    });
+
+    it("closes on a pointer move right of the strip, and stays for one on it", async () => {
+      const { view, host } = await build(true);
+      vi.spyOn(strip(host), "getBoundingClientRect").mockImplementation(
+        () => ({ right: 300 }) as DOMRect
+      );
+      enter(zones(host)[0]);
+      view.mount(host);
+      vi.spyOn(strip(host), "getBoundingClientRect").mockImplementation(
+        () => ({ right: 300 }) as DOMRect
+      );
+      move(100);
+      expect(open(host)).toBe(true);
+      move(500);
+      expect(open(host)).toBe(false);
+    });
+  });
+
   it("is hidden straight after mount, before any applyPlacement", async () => {
     const { view, host } = await build(true);
     view.mount(host);
