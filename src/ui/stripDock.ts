@@ -1,5 +1,5 @@
 import type { StripPlacement } from "../types";
-import { CLS_STRIP_HIDDEN, CLS_STRIP_OPEN } from "../explorer/selectors";
+import { CLS_STRIP_FOCUS, CLS_STRIP_HIDDEN, CLS_STRIP_OPEN } from "../explorer/selectors";
 
 /**
  * The class each placement puts on the EXPLORER PANE, not on the strip.
@@ -20,14 +20,14 @@ const PLACEMENTS = Object.values(DOCK_CLASSES).filter((c): c is string => c !== 
  * Everything the dock puts on the pane, which is what has to come off a pane
  * the strip is leaving.
  *
- * The hidden and open classes are in the list because they are ours as well,
- * not because either paints anything by itself: every selector that reads one
- * is compounded with `spaces-dock-left` (all five of them in `styles.css`), so
- * a pane that lost the dock class and kept them looks exactly the same. They
- * come off because the strip has gone, and a pane the strip has left must
- * carry no state of ours.
+ * The hidden, open and focus classes are in the list because they are ours as
+ * well, not because any of them paints anything by itself: every selector that
+ * reads one is compounded with `spaces-dock-left` (all five of them in
+ * `styles.css`), so a pane that lost the dock class and kept them looks exactly
+ * the same. They come off because the strip has gone, and a pane the strip has
+ * left must carry no state of ours.
  */
-const ALL = [...PLACEMENTS, CLS_STRIP_HIDDEN, CLS_STRIP_OPEN];
+const ALL = [...PLACEMENTS, CLS_STRIP_HIDDEN, CLS_STRIP_OPEN, CLS_STRIP_FOCUS];
 
 /**
  * Applies one placement, having removed any other. At most one is ever set.
@@ -53,12 +53,12 @@ export function applyDock(pane: HTMLElement, placement: StripPlacement): void {
 
 /**
  * Hides or shows the strip (the pane carries the class, the CSS slides the
- * strip). Un-hiding also drops the open class so a revealed strip never stays
- * open with nothing left to close it.
+ * strip). Un-hiding also drops the open and focus classes so a revealed strip
+ * never stays open with nothing left to close it.
  */
 export function applyHidden(pane: HTMLElement, hidden: boolean): void {
   pane.classList.toggle(CLS_STRIP_HIDDEN, hidden);
-  if (!hidden) pane.classList.remove(CLS_STRIP_OPEN);
+  if (!hidden) pane.classList.remove(CLS_STRIP_OPEN, CLS_STRIP_FOCUS);
 }
 
 /**

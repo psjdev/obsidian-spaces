@@ -62,12 +62,23 @@ describe("the hidden strip classes", () => {
     expect(p.classList.contains("spaces-strip-open")).toBe(false);
   });
 
+  it("drops the keyboard-focus class when un-hiding", () => {
+    // A strip that no longer hides must not stay slid out because something
+    // inside it had focus when the setting was turned off.
+    const p = pane();
+    applyHidden(p, true);
+    p.classList.add("spaces-strip-focus");
+    applyHidden(p, false);
+    expect(p.classList.contains("spaces-strip-focus")).toBe(false);
+  });
+
   it("clearDock removes the hidden and open classes too", () => {
     const p = pane();
     p.className = "workspace-leaf-content";
     applyDock(p, "left");
     applyHidden(p, true);
     p.classList.add("spaces-strip-open");
+    p.classList.add("spaces-strip-focus");
     clearDock(p);
     expect(p.className).toBe("workspace-leaf-content");
   });

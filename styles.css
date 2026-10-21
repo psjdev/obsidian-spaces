@@ -1618,19 +1618,20 @@ body.spaces-claims-drop .drag-ghost-action {
     box-shadow: 2px 0 8px var(--background-modifier-box-shadow);
     z-index: 2;
   }
-  /* `:has(:focus-visible)`, never `:focus-within`. Clicking the space you are
-     already in does not rebuild the pane, and `render()` restores focus to the
-     icon that was clicked, so `:focus-within` held the strip revealed after the
-     click: the close watcher removes the open class, but the focus rule was
-     still painting the strip out, and no pointer gesture could dismiss it.
-     `:focus-visible` matches keyboard focus and not mouse focus, which is the
-     distinction wanted. It has to sit on the focused DESCENDANT, because the
-     switcher element itself never takes focus, so the test is `:has()` on the
-     switcher rather than `:focus-visible` on it. Obsidian's own stylesheet uses
-     `:has()` (`.cm-line:has(.cm-hmd-frontmatter)`, among others), so the
-     Chromium it ships supports it. */
+  /* Two ways out: the pointer (the open class) and keyboard focus (the focus
+     class). Both are plain classes on the pane, set from JS.
+
+     The focus one was a structural `has` selector on the switcher in 0.14.0,
+     which the plugin scan flags: that selector ties an element's style to its
+     descendants, so the browser re-checks matching ancestors on any change
+     inside them. Written without the literal here, so a scan that reads
+     comments does not flag this explanation of why it is gone. `stripReveal.ts` asks `matches(":focus-visible")` on
+     `focusin` instead, which keeps the same keyboard/mouse distinction at no
+     per-keystroke cost. It must stay a keyboard-only test: clicking a space
+     focuses its icon, and revealing on that left the strip stuck out with no
+     pointer gesture able to dismiss it. */
   .spaces-dock-left.spaces-strip-hidden.spaces-strip-open > .spaces-switcher,
-  .spaces-dock-left.spaces-strip-hidden > .spaces-switcher:has(:focus-visible) {
+  .spaces-dock-left.spaces-strip-hidden.spaces-strip-focus > .spaces-switcher {
     transform: translateX(0);
     transition: transform 120ms ease-out;
   }

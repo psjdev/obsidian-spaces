@@ -1,4 +1,4 @@
-import { CLS_STRIP_OPEN, CLS_STRIP_ZONE } from "../explorer/selectors";
+import { CLS_STRIP_FOCUS, CLS_STRIP_OPEN, CLS_STRIP_ZONE } from "../explorer/selectors";
 
 export interface StripRevealDeps {
   pane: HTMLElement;
@@ -47,9 +47,14 @@ export interface StripRevealDeps {
  * `mouseleave` of the document or of the pane with the pointer at or left of
  * the lip. The `mousemove` watcher that decides when to close is added in
  * `show()` and removed in `hide()`, so it runs only while this controller is
- * holding the strip open. A strip revealed by keyboard focus instead is
- * painted out by `styles.css` with no watcher attached, and blur is what
- * closes that one.
+ * holding the strip open.
+ *
+ * Keyboard focus reveals the strip too, by a separate class and with no
+ * watcher attached: blur is what closes that one, not the pointer. The two
+ * are deliberately separate, because a strip held out by focus must not be
+ * closed by a pointer crossing it, and a strip held out by the pointer must
+ * not survive the pointer leaving just because something inside it is
+ * focused.
  */
 export class StripReveal {
   private zone: HTMLElement | null = null;
@@ -91,6 +96,32 @@ export class StripReveal {
     if (e.clientX <= this.deps.lipRight()) this.show();
   };
 
+  /**
+   * A control inside the strip took focus. Reveals only for KEYBOARD focus:
+   * clicking a space focuses its icon too, and revealing on that left the
+   * strip out after the click with no pointer gesture able to dismiss it.
+   *
+   * `:focus-visible` is the browser's own keyboard/mouse answer, asked here
+   * with `matches()` instead of in a CSS `:has()`, which the plugin scan
+   * flags for the invalidation it forces on every ancestor.
+   */
+  private readonly onFocusIn = (e: FocusEvent): void => {
+    const el = e.target;
+    const keyboard = el instanceof Element && el.matches(":focus-visible");
+    this.deps.pane.classList.toggle(CLS_STRIP_FOCUS, keyboard);
+  };
+
+  /**
+   * Focus left the strip entirely. `focusout`'s `relatedTarget` is where focus
+   * is going, so a move from one space icon to the next keeps the reveal and
+   * does not flicker it off and on.
+   */
+  private readonly onFocusOut = (e: FocusEvent): void => {
+    const to = e.relatedTarget;
+    if (to instanceof Node && this.deps.strip.contains(to)) return;
+    this.deps.pane.classList.remove(CLS_STRIP_FOCUS);
+  };
+
   private readonly onMove = (e: MouseEvent): void => {
     // Against the SETTLED open edge, never the painted one: the reveal takes
     // 120ms, and `getBoundingClientRect().right` interpolates for all of it.
@@ -116,6 +147,9 @@ export class StripReveal {
     strip.addEventListener("dragenter", this.onDragEnter);
     doc.addEventListener("mouseleave", this.onDocLeave);
     pane.addEventListener("mouseleave", this.onPaneLeave);
+    // Boundary events, one per focus change, so no per-keystroke work.
+    strip.addEventListener("focusin", this.onFocusIn);
+    strip.addEventListener("focusout", this.onFocusOut);
   }
 
   /** Removes every listener and the zone. Idempotent. */
@@ -129,8 +163,13 @@ export class StripReveal {
     }
     this.deps.strip.removeEventListener("mouseenter", this.onEnter);
     this.deps.strip.removeEventListener("dragenter", this.onDragEnter);
+    this.deps.strip.removeEventListener("focusin", this.onFocusIn);
+    this.deps.strip.removeEventListener("focusout", this.onFocusOut);
     this.doc?.removeEventListener("mouseleave", this.onDocLeave);
     this.deps.pane.removeEventListener("mouseleave", this.onPaneLeave);
+    // The pane outlives this controller, so the focus reveal must not be left
+    // painted on a strip that no longer has a controller to clear it.
+    this.deps.pane.classList.remove(CLS_STRIP_FOCUS);
     this.doc = null;
     this.win = null;
     if (this.open) {
