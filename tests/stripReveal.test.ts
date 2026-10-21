@@ -15,6 +15,8 @@ const dragEnter = (el: Element) => el.dispatchEvent(new Event("dragenter", { bub
 const move = (clientX: number) => window.dispatchEvent(new MouseEvent("mousemove", { clientX }));
 const leaveDoc = (clientX: number) =>
   document.dispatchEvent(new MouseEvent("mouseleave", { clientX }));
+const leavePane = (clientX: number) =>
+  pane.dispatchEvent(new MouseEvent("mouseleave", { clientX }));
 const moveCalls = (spy: { mock: { calls: unknown[][] } }) =>
   spy.mock.calls.filter((c) => c[0] === "mousemove");
 
@@ -68,6 +70,31 @@ describe("StripReveal", () => {
   it("does not open when the pointer leaves the document right of the strip", () => {
     reveal.attach();
     leaveDoc(RIGHT + 200);
+    expect(reveal.isOpen()).toBe(false);
+  });
+
+  it("opens when the pointer leaves the pane left of the lip", () => {
+    reveal.attach();
+    leavePane(10);
+    expect(reveal.isOpen()).toBe(true);
+    expect(pane.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+  });
+
+  it("does not open when the pointer leaves the pane to the right of the lip", () => {
+    reveal.attach();
+    leavePane(RIGHT + 1);
+    expect(reveal.isOpen()).toBe(false);
+  });
+
+  it("destroy removes the pane mouseleave handler", () => {
+    const add = vi.spyOn(pane, "addEventListener");
+    const remove = vi.spyOn(pane, "removeEventListener");
+    reveal.attach();
+    const added = add.mock.calls.filter((c) => c[0] === "mouseleave").map((c) => c[1]);
+    expect(added).toHaveLength(1);
+    reveal.destroy();
+    expect(remove.mock.calls.filter((c) => c[0] === "mouseleave").map((c) => c[1])).toEqual(added);
+    leavePane(0);
     expect(reveal.isOpen()).toBe(false);
   });
 

@@ -37,6 +37,19 @@ export class StripReveal {
     if (e.clientX <= this.deps.stripRight()) this.show();
   };
 
+  /**
+   * Leaving the pane leftward reveals. With the ribbon visible the pane sits
+   * right of the screen edge, so the trigger band is mid-screen and a fast
+   * sweep can cross it without a `mousemove` landing inside, ending on the
+   * ribbon. `mouseleave` is a boundary event (once per exit, no per-move
+   * cost), so the ribbon becomes approach space. The test is the overshoot's:
+   * `stripRight()` is the lip's right edge while closed, so the lip width
+   * is read from the layout rather than copied from `styles.css`.
+   */
+  private readonly onPaneLeave = (e: MouseEvent): void => {
+    if (e.clientX <= this.deps.stripRight()) this.show();
+  };
+
   private readonly onMove = (e: MouseEvent): void => {
     // The browser fires no `mousemove` during a native drag, only drag events.
     // So one arriving while held proves the drag is over, however it ended and
@@ -64,6 +77,7 @@ export class StripReveal {
     zone.addEventListener("dragenter", this.onDragEnter);
     strip.addEventListener("dragenter", this.onDragEnter);
     doc.addEventListener("mouseleave", this.onDocLeave);
+    pane.addEventListener("mouseleave", this.onPaneLeave);
   }
 
   /** Opens and holds open until `release()`, for drags. */
@@ -92,6 +106,7 @@ export class StripReveal {
     this.deps.strip.removeEventListener("mouseenter", this.onEnter);
     this.deps.strip.removeEventListener("dragenter", this.onDragEnter);
     this.doc?.removeEventListener("mouseleave", this.onDocLeave);
+    this.deps.pane.removeEventListener("mouseleave", this.onPaneLeave);
     this.doc = null;
     this.win = null;
     this.held = false;
