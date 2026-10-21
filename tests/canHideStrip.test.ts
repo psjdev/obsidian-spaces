@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { canHideStrip } from "../src/ui/canHideStrip";
+import { canHideStrip, placementCanHideStrip } from "../src/ui/canHideStrip";
 import { SpacesSettingTab } from "../src/ui/SettingsTab";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { DEFAULT_DEFINITIONS } from "../src/types";
@@ -16,6 +16,18 @@ describe("canHideStrip", () => {
     expect(canHideStrip("top", true)).toBe(false);
     expect(canHideStrip("right", true)).toBe(false);
     expect(canHideStrip("right", false)).toBe(false);
+  });
+
+  it("is the shared placement predicate and the hover answer, and nothing else", () => {
+    // `syncHidden` gates activation on `placementCanHideStrip` alone, because
+    // the hover half must not gate it. The two therefore have to agree about
+    // the placement, or the setting is offered where hiding never happens, or
+    // withheld where it does.
+    for (const placement of ["left", "right", "top", "bottom"] as const) {
+      expect(canHideStrip(placement, true), placement).toBe(placementCanHideStrip(placement));
+      expect(canHideStrip(placement, false), placement).toBe(false);
+    }
+    expect(placementCanHideStrip("left")).toBe(true);
   });
 });
 

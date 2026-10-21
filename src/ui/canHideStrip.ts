@@ -1,6 +1,25 @@
 import type { StripPlacement } from "../types";
 
 /**
+ * The placement half of the rule on its own: hiding is a LEFT-strip feature.
+ *
+ * Exported because two decisions rest on it and they must not drift apart:
+ * `canHideStrip` below, which decides whether Settings offers the setting at
+ * all, and `syncHidden` in `SwitcherView`, which decides whether hiding is
+ * active right now.
+ *
+ * `syncHidden` deliberately does NOT call `canHideStrip` itself. The hover
+ * half must not gate activation: nothing re-runs `syncHidden` when a device's
+ * hover capability changes, so gating on a JS snapshot is the one change that
+ * could leave a strip hidden by CSS with no wiring left to reveal it. The
+ * media query in `styles.css` is the live source of truth for hover; the JS
+ * hover answer only decides whether the setting is offered.
+ */
+export function placementCanHideStrip(placement: StripPlacement): boolean {
+  return placement === "left";
+}
+
+/**
  * Whether the "hide the strip" setting makes sense here at all.
  *
  * True only for a left strip on a device that can hover. A hover-reveal needs
@@ -14,7 +33,7 @@ import type { StripPlacement } from "../types";
  * Pure. The hover answer is passed in so a test can set it.
  */
 export function canHideStrip(placement: StripPlacement, hasHover: boolean): boolean {
-  return placement === "left" && hasHover;
+  return placementCanHideStrip(placement) && hasHover;
 }
 
 /** The live hover answer. Read through this so callers can substitute it. */

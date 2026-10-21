@@ -17,6 +17,7 @@ import {
 } from "./spaceReorder";
 import { axisFor, pointerAlong, spanOf, type Axis, type Span } from "./stripAxis";
 import { applyDock, applyHidden, applyUnlockState, clearDock } from "./stripDock";
+import { placementCanHideStrip } from "./canHideStrip";
 import { StripReveal } from "./stripReveal";
 import { BOLDED_CLASS, BOXED_CLASS, activeStyleClass } from "./activeStyle";
 import {
@@ -358,8 +359,13 @@ export class SwitcherView {
     const pane = this.host;
     const strip = this.el;
     if (!pane || !strip) return;
+    // The placement half comes from the shared predicate, so this gate and the
+    // one that offers the setting cannot drift. Not `canHideStrip`: its hover
+    // half must not gate activation -- see `placementCanHideStrip`.
     const active =
-      this.placement === "left" && !this.unlocked && this.defs.get().settings.hideStrip;
+      placementCanHideStrip(this.placement) &&
+      !this.unlocked &&
+      this.defs.get().settings.hideStrip;
     if (!active) {
       this.reveal?.destroy();
       this.reveal = null;
