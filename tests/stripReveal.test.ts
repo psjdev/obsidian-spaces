@@ -133,6 +133,52 @@ describe("StripReveal", () => {
     expect(pane.classList.contains(CLS_STRIP_OPEN)).toBe(false);
   });
 
+  it("destroy removes the very handlers attach registered, on the strip and the document", () => {
+    // Assert the teardown itself: the `show()` guard would hide a missing
+    // removal if we only checked what the controller does afterwards.
+    const handlers = (spy: { mock: { calls: unknown[][] } }, type: string) =>
+      spy.mock.calls.filter((c) => c[0] === type).map((c) => c[1]);
+    const stripAdd = vi.spyOn(strip, "addEventListener");
+    const stripRemove = vi.spyOn(strip, "removeEventListener");
+    const docAdd = vi.spyOn(document, "addEventListener");
+    const docRemove = vi.spyOn(document, "removeEventListener");
+    reveal.attach();
+    const stripAdded = handlers(stripAdd, "mouseenter");
+    const docAdded = handlers(docAdd, "mouseleave");
+    expect(stripAdded).toHaveLength(1);
+    expect(docAdded).toHaveLength(1);
+    reveal.destroy();
+    expect(handlers(stripRemove, "mouseenter")).toEqual(stripAdded);
+    expect(handlers(docRemove, "mouseleave")).toEqual(docAdded);
+  });
+
+  it("attaching twice leaves one zone and one set of listeners", () => {
+    const stripAdd = vi.spyOn(strip, "addEventListener");
+    const docAdd = vi.spyOn(document, "addEventListener");
+    reveal.attach();
+    reveal.attach();
+    expect(pane.querySelectorAll(`.${CLS_STRIP_ZONE}`)).toHaveLength(1);
+    expect(stripAdd.mock.calls.filter((c) => c[0] === "mouseenter")).toHaveLength(1);
+    expect(docAdd.mock.calls.filter((c) => c[0] === "mouseleave")).toHaveLength(1);
+  });
+
+  it("reads the strip's right edge on every event, not once", () => {
+    let edge = RIGHT;
+    reveal.destroy();
+    reveal = new StripReveal({ pane, strip, stripRight: () => edge });
+    reveal.attach();
+    leaveDoc(100);
+    expect(reveal.isOpen()).toBe(false);
+    edge = 200; // the strip slid out further
+    leaveDoc(100);
+    expect(reveal.isOpen()).toBe(true);
+    move(150);
+    expect(reveal.isOpen()).toBe(true);
+    edge = 50; // and back
+    move(150);
+    expect(reveal.isOpen()).toBe(false);
+  });
+
   it("destroy is idempotent", () => {
     reveal.attach();
     reveal.destroy();
