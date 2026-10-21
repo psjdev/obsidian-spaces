@@ -219,7 +219,7 @@ A narrow lip stays at the left edge of the file tree. The rest of the strip slid
 
 Move the pointer to the left edge of the file tree and the strip slides back out over it. The file tree does not move. Move the pointer past the strip's right edge and it closes again at once.
 
-Dragging still works. Drag a note toward the hidden strip and it slides out and stays open until you drop, so you can drop the note onto a space icon. Reordering spaces by their grip works the same way.
+Dragging still works. Drag a note toward the hidden strip and it slides out and stays open until you drop, so you can drop the note onto a space icon. Reordering spaces by dragging their icons works the same way.
 
 Keyboard focus still works. The strip stays in the tab order, and moving focus into it brings it back.
 

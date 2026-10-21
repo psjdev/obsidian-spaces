@@ -14,7 +14,7 @@ the strip's right edge and it closes again.
 
 Dragging a note toward the hidden strip brings it out and keeps it open until
 you drop, so you can still drop the note onto a space icon. Reordering spaces
-by their grip works too. Moving keyboard focus into the strip brings it back.
+by dragging their icons works too. Moving keyboard focus into the strip brings it back.
 
 ## 0.13.0 — 2026-10-20
 
