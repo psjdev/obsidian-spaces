@@ -221,7 +221,7 @@ Move the pointer to the left edge of the file tree and the strip slides back out
 
 Dragging still works. Drag a note toward the hidden strip and it slides out and stays open until you drop, so you can drop the note onto a space icon. Reordering spaces by dragging their icons works the same way.
 
-Keyboard focus still works. The strip stays in the tab order, and moving focus into it brings it back.
+Keyboard focus still works. The strip stays in the tab order, and tabbing into it brings it back until you tab out again.
 
 ## Commands
 
