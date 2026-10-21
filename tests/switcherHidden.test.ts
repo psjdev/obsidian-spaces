@@ -57,8 +57,7 @@ async function build(hideStrip: boolean, placement: StripPlacement = "left") {
   document.body.appendChild(host);
   hosts.push(host);
   views.push(view);
-  view.mount(host);
-  view.applyPlacement(placement);
+  view.mount(host, placement);
   const set = (patch: Record<string, unknown>) =>
     defs.mutate((d) => {
       Object.assign(d.settings, patch);
@@ -185,7 +184,7 @@ describe("hidden strip wiring", () => {
   it("re-establishes the hidden state after the pane is rebuilt", async () => {
     const { view, host } = await build(true);
     // What a space switch does: tear the pane down and mount again.
-    view.mount(host);
+    view.mount(host, "left");
     view.applyPlacement("left");
     expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
     expect(zones(host)).toHaveLength(1);
@@ -200,14 +199,14 @@ describe("hidden strip wiring", () => {
     it("keeps a revealed strip revealed", async () => {
       const { view, host } = await build(true);
       enter(zones(host)[0]);
-      view.mount(host);
+      view.mount(host, "left");
       expect(open(host)).toBe(true);
       expect(zones(host)).toHaveLength(1);
     });
 
     it("keeps a closed strip closed", async () => {
       const { view, host } = await build(true);
-      view.mount(host);
+      view.mount(host, "left");
       expect(open(host)).toBe(false);
     });
 
@@ -215,7 +214,7 @@ describe("hidden strip wiring", () => {
       const { view, host, set } = await build(true);
       enter(zones(host)[0]);
       await set({ hideStrip: false });
-      view.mount(host);
+      view.mount(host, "left");
       expect(open(host)).toBe(false);
       expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
       expect(zones(host)).toHaveLength(0);
@@ -225,7 +224,7 @@ describe("hidden strip wiring", () => {
       const { view, host } = await build(true);
       enter(zones(host)[0]);
       view.applyPlacement("top");
-      view.mount(host);
+      view.mount(host, "top");
       expect(open(host)).toBe(false);
       expect(zones(host)).toHaveLength(0);
     });
@@ -235,7 +234,7 @@ describe("hidden strip wiring", () => {
       enter(zones(host)[0]);
       view.destroy();
       expect(open(host)).toBe(false);
-      view.mount(host);
+      view.mount(host, "left");
       expect(open(host)).toBe(false);
     });
 
@@ -243,7 +242,7 @@ describe("hidden strip wiring", () => {
       const { view, host } = await build(true);
       paneGeometry(host, 0, () => 300);
       enter(zones(host)[0]);
-      view.mount(host);
+      view.mount(host, "left");
       // The rebuild made a new strip element, so the geometry goes on again.
       paneGeometry(host, 0, () => 300);
       move(100);
@@ -277,11 +276,25 @@ describe("hidden strip wiring", () => {
     expect(revealed()).toBe(false);
   });
 
-  it("is hidden straight after mount, before any applyPlacement", async () => {
+  it("is hidden straight after mount, with no applyPlacement at all", async () => {
     const { view, host } = await build(true);
-    view.mount(host);
+    view.mount(host, "left");
     expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
     expect(zones(host)).toHaveLength(1);
+  });
+
+  it("docks for the placement mount is handed, not the one it was last in", async () => {
+    // `mount()` used to dock, sync and render from `this.placement`, a field
+    // only `applyPlacement` writes -- and the sole caller ran that AFTER
+    // mounting. Every test reproduced the caller's order, so none of them
+    // could see it.
+    const { view, host } = await build(true, "left");
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
+    view.mount(host, "top");
+    expect(host.classList.contains("spaces-dock-top")).toBe(true);
+    expect(host.classList.contains("spaces-dock-left")).toBe(false);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+    expect(zones(host)).toHaveLength(0);
   });
 
   it("keeps one controller per pane across repeated placement applies", async () => {
@@ -496,7 +509,7 @@ describe("hidden strip while unlocked", () => {
     // Revealed first, so a rebuild has something it could wrongly carry over.
     enter(zones(host)[0]);
     view.setUnlocked(true);
-    view.mount(host);
+    view.mount(host, "left");
     expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
     expect(zones(host)).toHaveLength(0);
@@ -506,7 +519,7 @@ describe("hidden strip while unlocked", () => {
   it("hides again on lock after a rebuild while unlocked", async () => {
     const { view, host } = await build(true);
     view.setUnlocked(true);
-    view.mount(host);
+    view.mount(host, "left");
     view.setUnlocked(false);
     expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);

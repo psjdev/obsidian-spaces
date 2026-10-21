@@ -238,7 +238,20 @@ export class SwitcherView {
     return axisFor(this.placement);
   }
 
-  mount(parent: HTMLElement): void {
+  /**
+   * Builds the strip into `parent` and docks it at `placement`.
+   *
+   * The placement is a parameter and not `this.placement`, which is written
+   * only by `applyPlacement` -- and the sole caller runs that AFTER this. So
+   * everything here that derives from the placement (the dock class,
+   * `syncHidden`, and the axis `render()` draws for) ran against the placement
+   * the strip was last in. It was benign only because the caller always
+   * re-applied straight afterwards, and `main.ts` documents that exact
+   * ordering rule for the definitions subscription while this broke it
+   * internally. Now the signature asks for what the body needs.
+   */
+  mount(parent: HTMLElement, placement: StripPlacement): void {
+    this.placement = placement;
     // `destroy()` takes the controller, and its open state, with it. A space
     // switch rebuilds the pane under a pointer that has not moved, so no
     // `mouseenter` comes to reopen it. Read here and nowhere else: `destroy()`
@@ -250,7 +263,7 @@ export class SwitcherView {
     el.className = "spaces-switcher";
     parent.appendChild(el);
     this.el = el;
-    applyDock(parent, this.placement);
+    applyDock(parent, placement);
     this.syncHidden();
     // Null when the feature is off or the placement left `left`, so a strip
     // that no longer hides cannot be left revealed.

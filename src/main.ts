@@ -2165,8 +2165,11 @@ export default class SpacesPlugin extends Plugin {
             onRefused: (reason, spaceName) => this.reportRefusedDrop(reason, spaceName),
           }
         );
-        this.switcher.mount(leafRoot);
-        this.switcher.applyPlacement(this.defs.get().settings.stripPlacement);
+        // The placement goes IN rather than being applied after the fact:
+        // `mount()` docks, syncs the hidden state and renders for the
+        // placement it is handed, so the `applyPlacement` that used to follow
+        // this line would only do all three again with the same value.
+        this.switcher.mount(leafRoot, this.defs.get().settings.stripPlacement);
       } catch (e) {
         console.error("Spaces: bindExplorer step 3 (switcher.mount) failed", e);
       }

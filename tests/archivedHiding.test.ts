@@ -99,7 +99,7 @@ function mountStrip(b: Awaited<ReturnType<typeof build>>) {
   );
   const host = document.createElement("div");
   document.body.appendChild(host);
-  switcher.mount(host);
+  switcher.mount(host, b.defs.get().settings.stripPlacement);
   return { switcher, host };
 }
 

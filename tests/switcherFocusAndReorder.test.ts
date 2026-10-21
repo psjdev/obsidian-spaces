@@ -68,7 +68,7 @@ async function build(spaces: SpaceDefinition[]) {
   );
   const host = document.createElement("div");
   document.body.replaceChildren(host);
-  switcher.mount(host);
+  switcher.mount(host, defs.get().settings.stripPlacement);
   return { switcher, defs, host };
 }
 

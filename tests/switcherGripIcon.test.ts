@@ -83,7 +83,7 @@ async function build() {
   );
   const host = document.createElement("div");
   document.body.appendChild(host);
-  switcher.mount(host);
+  switcher.mount(host, defs.get().settings.stripPlacement);
   return { switcher, defs, host };
 }
 
