@@ -29,26 +29,38 @@ export interface StripRevealDeps {
  * Owns the open/closed state of a hidden left strip: the trigger zone, the
  * listeners and the open class.
  *
- * Nothing listens to the pointer's movement while the strip is closed. The
- * reveal comes from `mouseenter`; the `mousemove` watcher that decides when
- * to close exists only while the strip is open.
+ * Nothing listens to the pointer's MOVEMENT while the strip is closed. All
+ * four open paths are boundary events, one per element entry or exit: a
+ * `mouseenter` on the zone or on the strip (while closed, the lip is the part
+ * of the strip on screen), a `dragenter` on either of those two, and a
+ * `mouseleave` of the document or of the pane with the pointer at or left of
+ * the lip. The `mousemove` watcher that decides when to close is added in
+ * `show()` and removed in `hide()`, so it runs only while this controller is
+ * holding the strip open. A strip revealed by keyboard focus instead is
+ * painted out by `styles.css` with no watcher attached, and blur is what
+ * closes that one.
  */
 export class StripReveal {
   private zone: HTMLElement | null = null;
   private doc: Document | null = null;
   private win: Window | null = null;
   private open = false;
-  private held = false;
 
   private readonly onEnter = (): void => this.show();
 
   /**
-   * A drag entering the zone or the strip. `dragenter` fires once per element
-   * entry, so this is not per-pointer-move work. Holds, because a drag's
-   * pointer must not close the strip under it; the owner releases at the
-   * drag's end.
+   * A drag entering the zone or the strip opens it. `dragenter` fires once per
+   * element entry, so this is not per-pointer-move work.
+   *
+   * Nothing holds it open afterwards, and nothing has to: the browser fires no
+   * `mousemove` during a native drag, only drag events, so the watcher that
+   * would close the strip hears nothing until the drag is over. Counted in a
+   * running Obsidian over one drag across the strip: 12 `dragover`, 0
+   * `mousemove`. The grip is the one pointer drag that does fire `mousemove`,
+   * and it never meets a hidden strip, because hiding is suspended for as long
+   * as the strip is unlocked and the grip exists only while it is unlocked.
    */
-  private readonly onDragEnter = (): void => this.hold();
+  private readonly onDragEnter = (): void => this.show();
 
   /** Overshooting past the edge and out of the window still reveals. */
   private readonly onDocLeave = (e: MouseEvent): void => {
@@ -69,11 +81,6 @@ export class StripReveal {
   };
 
   private readonly onMove = (e: MouseEvent): void => {
-    // The browser fires no `mousemove` during a native drag, only drag events.
-    // So one arriving while held proves the drag is over, however it ended and
-    // whether or not its end events reached us (an OS-originated drag has
-    // none). The hold heals itself rather than depending on a release.
-    this.held = false;
     // Against the SETTLED open edge, never the painted one: the reveal takes
     // 120ms, and `getBoundingClientRect().right` interpolates for all of it.
     if (e.clientX > this.deps.openRight()) this.hide();
@@ -100,20 +107,6 @@ export class StripReveal {
     pane.addEventListener("mouseleave", this.onPaneLeave);
   }
 
-  /** Opens and holds open until `release()`, for drags. */
-  hold(): void {
-    this.held = true;
-    this.show();
-  }
-
-  release(): void {
-    this.held = false;
-  }
-
-  isHeld(): boolean {
-    return this.held;
-  }
-
   /** Removes every listener and the zone. Idempotent. */
   destroy(): void {
     this.unwatch();
@@ -129,7 +122,6 @@ export class StripReveal {
     this.deps.pane.removeEventListener("mouseleave", this.onPaneLeave);
     this.doc = null;
     this.win = null;
-    this.held = false;
     if (this.open) {
       this.open = false;
       this.deps.pane.classList.remove(CLS_STRIP_OPEN);

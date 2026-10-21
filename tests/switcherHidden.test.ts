@@ -96,62 +96,58 @@ const icon = (host: HTMLElement) => host.querySelector<HTMLElement>('[data-space
 const fire = (el: Element, type: string) =>
   el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
 
-const held = (view: SwitcherView) =>
-  (view as unknown as { reveal: { isHeld(): boolean } | null }).reveal?.isHeld();
-
 describe("hidden strip drags", () => {
-  it("opens and holds when a drag enters the zone", async () => {
-    const { view, host } = await build(true);
+  it("opens when a drag enters the zone", async () => {
+    const { host } = await build(true);
     zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
-    expect(held(view)).toBe(true);
   });
 
-  it("holds and opens for a reorder drag that starts inside the strip", async () => {
-    const { view, host } = await build(true);
+  it("opens for a reorder drag that starts inside the strip", async () => {
+    // A pointer normally crosses the lip or the zone on its way to an icon, so
+    // the strip is already open by the time a drag can start on one. The
+    // exception is a strip revealed by keyboard focus, which is painted out
+    // with the controller still closed and whose reveal the mouse press ends.
+    const { host } = await build(true);
     fire(icon(host), "dragstart");
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
-    expect(held(view)).toBe(true);
   });
 
-  it("releases on dragend", async () => {
-    const { view, host } = await build(true);
-    fire(icon(host), "dragstart");
-    fire(rail(host), "dragend");
-    expect(held(view)).toBe(false);
+  it("leaves a reorder drag's strip open and still closable at the end of it", async () => {
+    // Every end a reorder has: a drop on the rail, and a `dragend` for a drag
+    // that was cancelled. Neither may close the strip (the pointer is still
+    // inside it) and neither may leave it stuck open: the close watcher has to
+    // survive, so the first move past the strip still dismisses it.
+    const { host } = await build(true);
+    paneGeometry(host, 0, () => 38);
+    for (const ending of ["drop", "dragend"] as const) {
+      fire(icon(host), "dragstart");
+      fire(rail(host), ending);
+      expect(host.classList.contains(CLS_STRIP_OPEN), ending).toBe(true);
+      move(500);
+      expect(host.classList.contains(CLS_STRIP_OPEN), ending).toBe(false);
+      enter(zones(host)[0]);
+    }
   });
 
-  it("releases on a reorder drop with no dragend after it", async () => {
-    const { view, host } = await build(true);
-    fire(icon(host), "dragstart");
-    fire(rail(host), "drop");
-    expect(held(view)).toBe(false);
-  });
-
-  it("releases on a file drop that ends early", async () => {
-    const { view, host } = await build(true);
-    zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
-    fire(rail(host), "drop");
-    expect(held(view)).toBe(false);
-  });
-
-  it("releases when the explorer reports the drag done", async () => {
-    const { view, host } = await build(true);
-    zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
-    view.clearDropTarget();
-    expect(held(view)).toBe(false);
-  });
-
-  it("recovers from an external drag that no release ever reaches", async () => {
+  it("closes after an external drag that no end event ever reaches", async () => {
     // An OS-originated drag has no dragstart or dragend in the page and is
-    // dropped somewhere that is not the rail. Nothing releases; the first
-    // pointer move afterwards must still close the strip.
+    // dropped somewhere that is not the rail. Nothing tells the strip it ended;
+    // the first pointer move afterwards must still close it, which is sound
+    // because a native drag fires no `mousemove` of its own.
     const { host } = await build(true);
     zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
     move(500);
     move(900);
     expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+  });
+
+  it("tolerates the explorer reporting a drag done with no drag of ours", async () => {
+    const { view, host } = await build(true);
+    zones(host)[0].dispatchEvent(new Event("dragenter", { bubbles: true }));
+    expect(() => view.clearDropTarget()).not.toThrow();
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
   });
 
   it("tolerates a drag with hiding off", async () => {

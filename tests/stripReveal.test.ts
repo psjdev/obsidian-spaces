@@ -139,24 +139,16 @@ describe("StripReveal", () => {
     expect(moveCalls(add)).toHaveLength(1);
   });
 
-  it("held open stays open with no pointer movement, and release clears the hold", () => {
-    reveal.attach();
-    reveal.hold();
-    expect(reveal.isOpen()).toBe(true);
-    expect(reveal.isHeld()).toBe(true);
-    reveal.release();
-    expect(reveal.isHeld()).toBe(false);
-    move(RIGHT + 100);
-    expect(reveal.isOpen()).toBe(false);
-  });
-
-  it("a pointer move while held means the drag is over: the hold heals and the strip closes", () => {
+  it("a drag reveal closes on the first pointer move past the edge", () => {
+    // Nothing holds the strip open for the drag's duration, and nothing has
+    // to: a native drag fires no `mousemove`, so the first one to arrive is
+    // already after the drag, however it ended and whether or not its end
+    // events reached us. An OS-originated drag sends none.
     reveal.attach();
     dragEnter(zone()!);
-    expect(reveal.isHeld()).toBe(true);
+    expect(reveal.isOpen()).toBe(true);
     move(RIGHT + 100);
     expect(reveal.isOpen()).toBe(false);
-    expect(reveal.isHeld()).toBe(false);
   });
 
   it("destroy removes the zone and every listener", () => {
@@ -263,15 +255,6 @@ describe("StripReveal", () => {
     reveal.attach();
     dragEnter(strip);
     expect(reveal.isOpen()).toBe(true);
-  });
-
-  it("holds open until released when no pointer moves arrive", () => {
-    reveal.attach();
-    dragEnter(zone()!);
-    expect(reveal.isOpen()).toBe(true);
-    expect(reveal.isHeld()).toBe(true);
-    reveal.release();
-    expect(reveal.isHeld()).toBe(false);
   });
 
   it("destroy removes the dragenter handlers", () => {
