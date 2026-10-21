@@ -315,8 +315,8 @@ describe("hidden strip wiring", () => {
     // Not just "ends up with them": a re-dock that removed either and put it
     // back would leave the strip laid out un-hidden in between, and any layout
     // read landing in that window slides the strip out and back. `main.ts`
-    // re-docks on every definitions change, which includes every keystroke in
-    // Settings.
+    // re-docks on every definitions change: a toggle flipped in Settings, a
+    // space renamed, a color picked.
     const { view, host } = await build(true);
     enter(zones(host)[0]);
     const remove = vi.spyOn(host.classList, "remove");

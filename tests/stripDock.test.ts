@@ -76,7 +76,7 @@ describe("the hidden strip classes", () => {
     // Removing them here and having the caller put the hidden one straight back
     // is a window with the strip laid out un-hidden. Nothing reads layout
     // between the two calls, so nothing paints it; a read added between them
-    // would slide the strip out and back on every keystroke in Settings.
+    // would slide the strip out and back on every definitions change.
     const p = pane();
     applyDock(p, "left");
     applyHidden(p, true);
