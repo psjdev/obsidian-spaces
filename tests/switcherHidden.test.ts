@@ -442,4 +442,31 @@ describe("hidden strip while unlocked", () => {
     expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
     expect(zones(host)).toHaveLength(0);
   });
+
+  const reveal = (view: SwitcherView) => (view as unknown as { reveal: unknown }).reveal;
+
+  it("stays fully visible through a pane rebuild while unlocked", async () => {
+    const { view, host } = await build(true);
+    // Revealed first, so a rebuild has something it could wrongly carry over.
+    enter(zones(host)[0]);
+    view.setUnlocked(true);
+    view.mount(host);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(false);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    expect(zones(host)).toHaveLength(0);
+    expect(reveal(view)).toBeNull();
+  });
+
+  it("hides again on lock after a rebuild while unlocked", async () => {
+    const { view, host } = await build(true);
+    view.setUnlocked(true);
+    view.mount(host);
+    view.setUnlocked(false);
+    expect(host.classList.contains(CLS_STRIP_HIDDEN)).toBe(true);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(false);
+    expect(zones(host)).toHaveLength(1);
+    expect(reveal(view)).not.toBeNull();
+    enter(zones(host)[0]);
+    expect(host.classList.contains(CLS_STRIP_OPEN)).toBe(true);
+  });
 });
