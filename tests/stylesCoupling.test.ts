@@ -184,10 +184,12 @@ describe("styles.css — the hidden strip only hides where it can be revealed", 
     expect(strip?.style.getPropertyValue("background")).toBe("var(--background-secondary)");
   });
 
-  it("reveals on the open class and on focus within", () => {
+  it("reveals on the open class and on keyboard focus inside the strip", () => {
     const open = selectorsFor("spaces-strip-open");
     expect(open.some((r) => r.style.getPropertyValue("transform") === "translateX(0)")).toBe(true);
-    expect(selectorsFor(":focus-within").some((r) => r.selector.includes("spaces-strip-hidden"))).toBe(true);
+    expect(
+      selectorsFor(":has(:focus-visible)").some((r) => r.selector.includes("spaces-strip-hidden"))
+    ).toBe(true);
   });
 });
 
@@ -221,11 +223,55 @@ describe("styles.css — hiding the strip is purely visual", () => {
     expect(strip).toBeDefined();
   });
 
-  it("carries the focus-within reveal, undoing the hiding transform", () => {
-    const reveal = selectorsFor(":focus-within").find(
-      (r) => r.selector.includes("spaces-strip-hidden") && r.selector.includes(".spaces-switcher:focus-within")
+  it("carries the keyboard-focus reveal, undoing the hiding transform", () => {
+    const reveal = selectorsFor(":has(:focus-visible)").find(
+      (r) =>
+        r.selector.includes("spaces-strip-hidden") &&
+        r.selector.includes(".spaces-switcher:has(:focus-visible)")
     );
     expect(reveal?.style.getPropertyValue("transform")).toBe("translateX(0)");
+  });
+
+  it("matches a strip whose own control holds focus, which is what :has() buys", () => {
+    // The reveal has to key on a focused DESCENDANT: the switcher element
+    // never takes focus itself, so a bare `:focus-visible` on it would match
+    // nothing and tabbing into a hidden strip would leave it off screen.
+    //
+    // What jsdom answers here is whether the rule matches an ancestor of the
+    // focused control. What it cannot answer is Chromium's keyboard-versus-
+    // mouse heuristic for `:focus-visible` — nwsapi matches any focused
+    // element — so this pins the shape of the selector, and the test below
+    // pins that it is `:focus-visible` and not `:focus-within`.
+    const reveal = selectorsFor(":has(:focus-visible)").find((r) =>
+      r.selector.includes("spaces-strip-hidden")
+    );
+    expect(reveal).toBeDefined();
+    const pane = document.createElement("div");
+    pane.className = "spaces-dock-left spaces-strip-hidden";
+    const switcher = document.createElement("div");
+    switcher.className = "spaces-switcher";
+    const control = document.createElement("button");
+    switcher.appendChild(control);
+    pane.appendChild(switcher);
+    document.body.appendChild(pane);
+    try {
+      expect(switcher.matches(reveal!.selector)).toBe(false);
+      control.focus();
+      expect(switcher.matches(reveal!.selector)).toBe(true);
+    } finally {
+      pane.remove();
+    }
+  });
+
+  it("never reveals on :focus-within, which a mouse click also satisfies", () => {
+    // The stuck-open defect: clicking the space you are already in does not
+    // rebuild the pane, `render()` restores focus to that icon, and under
+    // `:focus-within` the strip stayed painted out with no pointer gesture
+    // able to dismiss it. `:focus-visible` is the keyboard-only test, and it
+    // goes inside `:has()` because the switcher itself never takes focus.
+    const hidden = selectorsFor("spaces-strip-hidden");
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const r of hidden) expect(r.selector).not.toContain(":focus-within");
   });
 });
 

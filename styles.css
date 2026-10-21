@@ -1613,8 +1613,19 @@ body.spaces-claims-drop .drag-ghost-action {
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
     z-index: 2;
   }
+  /* `:has(:focus-visible)`, never `:focus-within`. Clicking the space you are
+     already in does not rebuild the pane, and `render()` restores focus to the
+     icon that was clicked, so `:focus-within` held the strip revealed after the
+     click: the close watcher removes the open class, but the focus rule was
+     still painting the strip out, and no pointer gesture could dismiss it.
+     `:focus-visible` matches keyboard focus and not mouse focus, which is the
+     distinction wanted. It has to sit on the focused DESCENDANT, because the
+     switcher element itself never takes focus, so the test is `:has()` on the
+     switcher rather than `:focus-visible` on it. Obsidian's own stylesheet uses
+     `:has()` (`.cm-line:has(.cm-hmd-frontmatter)`, among others), so the
+     Chromium it ships supports it. */
   .spaces-dock-left.spaces-strip-hidden.spaces-strip-open > .spaces-switcher,
-  .spaces-dock-left.spaces-strip-hidden > .spaces-switcher:focus-within {
+  .spaces-dock-left.spaces-strip-hidden > .spaces-switcher:has(:focus-visible) {
     transform: translateX(0);
     transition: transform 120ms ease-out;
   }
