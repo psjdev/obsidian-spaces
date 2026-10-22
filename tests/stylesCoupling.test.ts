@@ -212,7 +212,9 @@ describe("styles.css — the hidden strip only hides where it can be revealed", 
     const open = selectorsFor("spaces-strip-open");
     expect(open.some((r) => r.style.getPropertyValue("transform") === "translateX(0)")).toBe(true);
     expect(
-      selectorsFor(":has(:focus-visible)").some((r) => r.selector.includes("spaces-strip-hidden"))
+      selectorsFor("spaces-strip-focus").some(
+        (r) => r.style.getPropertyValue("transform") === "translateX(0)"
+      )
     ).toBe(true);
   });
 
@@ -294,25 +296,21 @@ describe("styles.css — hiding the strip is purely visual", () => {
   });
 
   it("carries the keyboard-focus reveal, undoing the hiding transform", () => {
-    const reveal = selectorsFor(":has(:focus-visible)").find(
+    const reveal = selectorsFor("spaces-strip-focus").find(
       (r) =>
         r.selector.includes("spaces-strip-hidden") &&
-        r.selector.includes(".spaces-switcher:has(:focus-visible)")
+        r.selector.includes(".spaces-strip-focus > .spaces-switcher")
     );
     expect(reveal?.style.getPropertyValue("transform")).toBe("translateX(0)");
   });
 
-  it("matches a strip whose own control holds focus, which is what :has() buys", () => {
-    // The reveal has to key on a focused DESCENDANT: the switcher element
-    // never takes focus itself, so a bare `:focus-visible` on it would match
-    // nothing and tabbing into a hidden strip would leave it off screen.
-    //
-    // What jsdom answers here is whether the rule matches an ancestor of the
-    // focused control. What it cannot answer is Chromium's keyboard-versus-
-    // mouse heuristic for `:focus-visible` — nwsapi matches any focused
-    // element — so this pins the shape of the selector, and the test below
-    // pins that it is `:focus-visible` and not `:focus-within`.
-    const reveal = selectorsFor(":has(:focus-visible)").find((r) =>
+  it("reveals the strip once the pane carries the focus class", () => {
+    // The reveal has to react to a focused DESCENDANT, because the switcher
+    // element never takes focus itself. That was `:has(:focus-visible)` in
+    // 0.14.0; `stripReveal.ts` now does the descendant test in JS and puts a
+    // plain class on the pane, so what the stylesheet needs is only that the
+    // class undoes the transform.
+    const reveal = selectorsFor("spaces-strip-focus").find((r) =>
       r.selector.includes("spaces-strip-hidden")
     );
     expect(reveal).toBeDefined();
@@ -320,28 +318,38 @@ describe("styles.css — hiding the strip is purely visual", () => {
     pane.className = "spaces-dock-left spaces-strip-hidden";
     const switcher = document.createElement("div");
     switcher.className = "spaces-switcher";
-    const control = document.createElement("button");
-    switcher.appendChild(control);
     pane.appendChild(switcher);
     document.body.appendChild(pane);
     try {
       expect(switcher.matches(reveal!.selector)).toBe(false);
-      control.focus();
+      pane.classList.add("spaces-strip-focus");
       expect(switcher.matches(reveal!.selector)).toBe(true);
     } finally {
       pane.remove();
     }
   });
 
+  it("uses no :has() anywhere, which the plugin scan rejects", () => {
+    // "Avoid :has — it can cause significant performance issues due to broad
+    // selector invalidation." It reached a release once, in this very rule,
+    // so this guards the whole stylesheet rather than the one selector.
+    const offenders = rules.filter((r) => r.selector.includes(":has("));
+    expect(offenders.map((r) => r.selector)).toEqual([]);
+  });
+
   it("never reveals on :focus-within, which a mouse click also satisfies", () => {
     // The stuck-open defect: clicking the space you are already in does not
     // rebuild the pane, `render()` restores focus to that icon, and under
     // `:focus-within` the strip stayed painted out with no pointer gesture
-    // able to dismiss it. `:focus-visible` is the keyboard-only test, and it
-    // goes inside `:has()` because the switcher itself never takes focus.
+    // able to dismiss it. The keyboard-only test now lives in JS, as
+    // `matches(":focus-visible")` on the focused control, and the stylesheet
+    // must not reintroduce a focus test of its own.
     const hidden = selectorsFor("spaces-strip-hidden");
     expect(hidden.length).toBeGreaterThan(0);
-    for (const r of hidden) expect(r.selector).not.toContain(":focus-within");
+    for (const r of hidden) {
+      expect(r.selector).not.toContain(":focus-within");
+      expect(r.selector).not.toContain(":focus-visible");
+    }
   });
 });
 

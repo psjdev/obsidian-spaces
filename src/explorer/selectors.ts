@@ -289,6 +289,21 @@ export const CLS_STRIP_HIDDEN = "spaces-strip-hidden";
 /** On the pane while a hidden strip is revealed. Always accompanies the hidden class. */
 export const CLS_STRIP_OPEN = "spaces-strip-open";
 
+/**
+ * On the pane while a control inside a hidden strip holds KEYBOARD focus.
+ * Always accompanies the hidden class, and reveals the strip exactly as the
+ * open class does.
+ *
+ * Set from `focusin`/`focusout` rather than matched in CSS. The rule this
+ * replaces was `.spaces-switcher:has(:focus-visible)`, which the Obsidian
+ * plugin scan flags: `:has()` makes an element's style depend on its
+ * descendants, so the browser re-checks matching ancestors whenever anything
+ * inside them changes. The switcher itself never takes focus, only its
+ * controls do, so a descendant had to be tested somehow; doing it in JS on a
+ * boundary event costs nothing per keystroke and leaves the CSS a plain class.
+ */
+export const CLS_STRIP_FOCUS = "spaces-strip-focus";
+
 /** The invisible hover target along the pane's left edge that reveals a hidden strip. */
 export const CLS_STRIP_ZONE = "spaces-strip-zone";
 

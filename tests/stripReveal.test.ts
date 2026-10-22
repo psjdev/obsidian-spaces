@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StripReveal } from "../src/ui/stripReveal";
-import { CLS_STRIP_OPEN, CLS_STRIP_ZONE } from "../src/explorer/selectors";
+import { CLS_STRIP_FOCUS, CLS_STRIP_OPEN, CLS_STRIP_ZONE } from "../src/explorer/selectors";
 import { installObsidianDom } from "./helpers/obsidianDom";
 
 /**
@@ -26,6 +26,17 @@ const leavePane = (clientX: number) =>
   pane.dispatchEvent(new MouseEvent("mouseleave", { clientX }));
 const moveCalls = (spy: { mock: { calls: unknown[][] } }) =>
   spy.mock.calls.filter((c) => c[0] === "mousemove");
+const focused = () => pane.classList.contains(CLS_STRIP_FOCUS);
+/**
+ * jsdom's `:focus-visible` matches any focused element, because nwsapi has no
+ * keyboard-versus-mouse heuristic. So these dispatch `focusin` at a control
+ * and vary only whether it is focused, which is the part jsdom can answer.
+ * The keyboard/mouse half is Chromium's and was confirmed by hand.
+ */
+const focusIn = (el: Element) =>
+  el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+const focusOut = (el: Element, relatedTarget: Element | null) =>
+  el.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget }));
 
 beforeEach(() => {
   pane = document.createElement("div");
@@ -39,6 +50,90 @@ afterEach(() => {
   reveal.destroy();
   pane.remove();
   vi.restoreAllMocks();
+});
+
+describe("StripReveal keyboard focus", () => {
+  let control: HTMLButtonElement;
+  let other: HTMLButtonElement;
+
+  beforeEach(() => {
+    control = document.createElement("button");
+    other = document.createElement("button");
+    strip.appendChild(control);
+    strip.appendChild(other);
+    reveal.attach();
+  });
+
+  it("reveals when a control inside the strip takes keyboard focus", () => {
+    control.focus();
+    focusIn(control);
+    expect(focused()).toBe(true);
+  });
+
+  it("reveals by a class, never by a :has() selector in the stylesheet", () => {
+    // The whole point of the change: `:has()` forces the browser to re-check
+    // every matching ancestor whenever anything inside it changes, which the
+    // Obsidian plugin scan flags. The class costs one `focusin`.
+    control.focus();
+    focusIn(control);
+    expect(pane.className).toContain(CLS_STRIP_FOCUS);
+  });
+
+  it("does not reveal when the focused element is not :focus-visible", () => {
+    // Nothing focused, so `matches(":focus-visible")` is false even in jsdom.
+    // This is the mouse-click case in Chromium: clicking a space focuses its
+    // icon without making it focus-visible, and revealing on that was the
+    // stuck-open defect.
+    focusIn(control);
+    expect(focused()).toBe(false);
+  });
+
+  it("keeps the reveal while focus moves between controls inside the strip", () => {
+    control.focus();
+    focusIn(control);
+    focusOut(control, other);
+    expect(focused()).toBe(true);
+  });
+
+  it("drops the reveal when focus leaves the strip entirely", () => {
+    control.focus();
+    focusIn(control);
+    focusOut(control, null);
+    expect(focused()).toBe(false);
+  });
+
+  it("drops the reveal when focus moves to something outside the strip", () => {
+    const outside = document.createElement("button");
+    pane.appendChild(outside);
+    control.focus();
+    focusIn(control);
+    focusOut(control, outside);
+    expect(focused()).toBe(false);
+  });
+
+  it("attaches no pointer-move listener for a keyboard reveal", () => {
+    // A strip held out by focus must not be closable by a pointer crossing
+    // it; only blur closes that one.
+    const add = vi.spyOn(window, "addEventListener");
+    control.focus();
+    focusIn(control);
+    expect(moveCalls(add)).toHaveLength(0);
+    expect(reveal.isOpen()).toBe(false);
+  });
+
+  it("clears the focus class on destroy, because the pane outlives it", () => {
+    control.focus();
+    focusIn(control);
+    reveal.destroy();
+    expect(focused()).toBe(false);
+  });
+
+  it("stops answering focus events after destroy", () => {
+    reveal.destroy();
+    control.focus();
+    focusIn(control);
+    expect(focused()).toBe(false);
+  });
 });
 
 describe("StripReveal", () => {
