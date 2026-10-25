@@ -7,8 +7,13 @@ import type { MemberEntry, OrderMap, SpaceDefinition } from "../types";
  * root beside mirrored vault paths: a vault holding `space.json` at its root
  * would collide with an obvious name. `buildExportPlan` treats a vault path
  * that collides with this one as a conflict rather than overwriting it.
+ *
+ * Deliberately NOT prefixed `spaces-`: `stylesCoupling.test.ts` scans `src`
+ * for that prefix and treats every hit as a CSS class the stylesheet must
+ * style. This is a filename, not a class, and allowlisting it as one would
+ * put a false entry in `UNSTYLED_CLASSES`.
  */
-export const MANIFEST_FILENAME = ".spaces-export.json";
+export const MANIFEST_FILENAME = ".space-export.json";
 
 /**
  * What the space WAS, recorded so an export is an archive rather than a pile

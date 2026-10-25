@@ -55,8 +55,10 @@ describe("buildSpaceManifest", () => {
     // Required by the design. Orders live at
     // `SpacesDefinitions.orders.bySpaceId`, outside `SpaceDefinition`, so
     // they have to be passed in; an earlier draft could not reach them.
-    const m = buildSpaceManifest({ ...base, order: { "Reading/book.md": "m" } });
-    expect(m.space.order).toEqual({ "Reading/book.md": "m" });
+    // OrderMap is Record<folderPath, childPaths[]>, keyed by the FOLDER.
+    const order = { Reading: ["Reading/book.md"] };
+    const m = buildSpaceManifest({ ...base, order });
+    expect(m.space.order).toEqual(order);
   });
 
   it("omits the order when the space has none", () => {
@@ -89,8 +91,10 @@ describe("buildSpaceManifest", () => {
 
   it("is named so it cannot be mistaken for a note", () => {
     // It sits at the export root beside mirrored vault paths. A vault with
-    // `space.json` at its root would collide with an obvious name.
-    expect(MANIFEST_FILENAME).toBe(".spaces-export.json");
+    // `space.json` at its root would collide with an obvious name. The
+    // `spaces-` prefix is avoided on purpose: stylesCoupling scans src for
+    // it and would read this filename as an unstyled CSS class.
+    expect(MANIFEST_FILENAME).toBe(".space-export.json");
   });
 
   it("serializes to JSON without undefined holes", () => {

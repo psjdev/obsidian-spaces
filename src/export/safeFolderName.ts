@@ -8,7 +8,14 @@
  * somewhere the user never picked.
  */
 
-/** Separators, the characters Windows forbids, and control characters. */
+/**
+ * Separators, the characters Windows forbids, and control characters.
+ *
+ * The control range is deliberate, not the accident `no-control-regex`
+ * exists to catch: a vault synced from Linux can hold a name containing one,
+ * and Windows refuses to create the file.
+ */
+// eslint-disable-next-line no-control-regex -- deliberate: a vault synced from Linux can hold a name containing a control character, and Windows refuses to create that file
 const FORBIDDEN = /[/\\:*?"<>|\u0000-\u001f]/g;
 
 /**
@@ -29,7 +36,7 @@ export function safeFolderName(name: string): string {
     // Both ends, and dashes among them: "///" becomes "-" after the
     // replacement above, and returning "-" as a folder name would be absurd.
     // Windows additionally cannot store a name ending in a dot or a space.
-    .replace(/^[\s.\-]+|[\s.\-]+$/g, "");
+    .replace(/^[\s.-]+|[\s.-]+$/g, "");
 
   if (cleaned === "") return FALLBACK;
   // Suffixed rather than replaced, so the folder still says which space it
