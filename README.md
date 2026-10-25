@@ -236,6 +236,7 @@ All available from the command palette, and bindable to hotkeys.
 | New note in active space | Creates a note, in the pinned folder if the space has one |
 | New folder in active space | Creates a folder, in the pinned folder if the space has one |
 | Add active file to space | Adds the file you are editing to a space you choose |
+| Export space to a folder | Copies the active space to a folder you pick, outside your vault |
 | Pause or resume space filtering | Releases the explorer entirely, showing Obsidian's own unfiltered tree |
 | Restore saved ordering | Returns to your own row order after switching to one of Obsidian's sort modes (see [Sorting](#sorting)) |
 | Move the space strip to the top / bottom / left / right | Repositions the space strip, the same as the Space strip position setting below |
@@ -275,6 +276,14 @@ A row whose path is wider than the file explorer drops its leading folders, one 
 Spaces never creates, renames, moves or deletes notes as part of managing a space. The two creation commands above make files because you asked them to; everything else only changes what the explorer shows.
 
 Spaces, settings and saved row orders live in `data.json` inside the plugin's own folder. Tab layouts and the selected space are kept in Obsidian's local storage for the vault.
+
+### Writing outside your vault
+
+One command writes outside the vault: **Export space to a folder**. It needs to, because the point of it is handing a space to someone or keeping a copy somewhere else.
+
+It writes only when you run it, and only inside the folder you pick in the dialog, in a subfolder named after the space. It reads the notes and folders the space holds, plus the images and notes those notes link to, and writes a small `.space-export.json` recording what the space was.
+
+It refuses to export into your vault, refuses a folder it cannot tell is outside your vault, and refuses to overwrite a folder that does not already hold an export of that space. Replacing an export you made earlier asks first and names the full path. Nothing else is read, written or sent anywhere.
 
 The plugin makes no network requests. A test (`tests/noNetwork.test.ts`) scans the source for `fetch`, `requestUrl` and socket calls and asserts there are none, and that the plugin ships no runtime dependencies.
 

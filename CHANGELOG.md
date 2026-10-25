@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.0
+
+A space can now be exported to a folder. Run **Export space to a folder** from the command palette while you are in the space, then pick where to put it.
+
+The export mirrors your vault's folder structure inside a folder named after the space, so two notes with the same name in different folders stay apart. It includes the notes and folders the space holds, and the images and notes they link to, so the exported notes still read correctly.
+
+A small file records the space's name, icon, color and order, so the folder is an archive rather than a pile of notes.
+
+The export writes only where you point it. It will not export into your vault, and it will not replace a folder unless that folder already holds an export of the same space, in which case it asks first and names the full path.
+
 ## 0.14.1 — 2026-10-21
 
 Nothing changes in how you use the plugin. A hidden space strip still slides

@@ -1,4 +1,5 @@
 import {
+  FileSystemAdapter,
   FileView,
   Menu,
   Notice,
@@ -10,6 +11,8 @@ import {
   type TAbstractFile,
   type WorkspaceLeaf,
 } from "obsidian";
+import { remote } from "electron";
+import { promises as nodeFs } from "fs";
 import { DefinitionStore } from "./definitions/DefinitionStore";
 import { RuntimeStateStore } from "./runtime/RuntimeStateStore";
 import { SpaceController } from "./controller/SpaceController";
@@ -74,6 +77,9 @@ import {
   watchesMetadata,
 } from "./definitions/membership";
 import { canonicalPath, compileIgnore } from "./visibility/glob";
+import { exportActiveSpace } from "./export/exportCommand";
+import { createNodeExportSink } from "./export/nodeExportSink";
+import { ConfirmModal } from "./ui/ConfirmModal";
 import { buildPreview } from "./ui/previewSeam";
 import { PublicApi } from "./api/PublicApi";
 import { MissingRootNotice } from "./ui/MissingRootNotice";
@@ -1173,6 +1179,55 @@ export default class SpacesPlugin extends Plugin {
    * and `controller`, and the controller does not exist until `start()` has
    * run.
    */
+  /**
+   * Builds the export's context out of the live app and runs it.
+   *
+   * Everything the export decides is in `exportCommand.ts`, which takes its
+   * collaborators as functions so the whole orchestration is testable
+   * without an Obsidian runtime. This method is the only place that knows
+   * about Electron, `fs`, and Obsidian's adapter.
+   */
+  private async exportSpace(): Promise<void> {
+    const space = this.controller.activeSpace();
+    const settings = this.defs.get().settings;
+    const ignore = compileIgnore(settings.globalIgnore);
+    const excluded = new Set((space?.exclude ?? []).map(canonicalPath));
+    const adapter = this.app.vault.adapter;
+
+    await exportActiveSpace({
+      space,
+      snapshot: this.controller.currentSnapshot(),
+      vault: this.controller.vaultIndex(),
+      order: space ? this.defs.get().orders?.bySpaceId?.[space.id] : undefined,
+      links: this.app.metadataCache.resolvedLinks,
+      isIgnored: (path) => ignore.matches(path),
+      // The engine stores exclusions already folded, so the lookup folds too.
+      isExcluded: (path) => excluded.has(canonicalPath(path)),
+      // Null for anything but a real folder on disk, which `checkExportDir`
+      // turns into a refusal rather than letting the guard fail open.
+      vaultBasePath: adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null,
+      parseProgress: () => nativeParseProgress(this.app),
+      // A declared root that no longer resolves. `hasRoot` and `rootOf`
+      // together are what tell that apart from having no root at all.
+      rootMissing: hasRoot(space) && rootOf(space) === null,
+      pickDir: async () => {
+        const picked = await remote.dialog.showOpenDialog({
+          title: "Export space to a folder",
+          properties: ["openDirectory", "createDirectory"],
+        });
+        return picked.canceled ? null : picked.filePaths[0];
+      },
+      realpath: (path) => nodeFs.realpath(path),
+      confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
+      makeSink: (rootDir) => createNodeExportSink(rootDir),
+      readBinary: async (path) => new Uint8Array(await adapter.readBinary(path)),
+      notify: (message) => {
+        new Notice(message);
+      },
+      now: () => new Date(),
+    });
+  }
+
   private commandSpecs(): Command[] {
     const creationCtx = { defs: this.defs, controller: this.controller };
     return [
@@ -1180,6 +1235,11 @@ export default class SpacesPlugin extends Plugin {
         id: "switch-to-all",
         name: "Switch to All",
         callback: () => void this.controller.switchTo({ kind: "all" }),
+      },
+      {
+        id: "export-space",
+        name: "Export space to a folder",
+        callback: () => void this.exportSpace(),
       },
       {
         id: "next-space",

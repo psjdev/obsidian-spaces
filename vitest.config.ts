@@ -13,6 +13,12 @@ export default defineConfig({
       // The stub models verified behaviour and throws for everything else —
       // read its docstring before widening it.
       obsidian: fileURLToPath(new URL("./tests/helpers/obsidian-stub.ts", import.meta.url)),
+      // Same reason, for the module Obsidian hands the renderer and the
+      // build externalises: without it, importing `main.ts` throws before
+      // a test can run. The stub models nothing and throws, because the
+      // one call behind it opens a modal picker that would hang a test
+      // rather than fail it.
+      electron: fileURLToPath(new URL("./tests/helpers/electron-stub.ts", import.meta.url)),
     },
   },
   test: {
