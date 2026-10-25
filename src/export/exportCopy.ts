@@ -16,7 +16,8 @@ export type BlockedReason =
   | "contains-vault"
   | "unknown-vault"
   | "collision"
-  | "not-our-folder";
+  | "not-our-folder"
+  | "another-space";
 
 export const BLOCKED_REASONS: readonly BlockedReason[] = [
   "no-space",
@@ -27,6 +28,7 @@ export const BLOCKED_REASONS: readonly BlockedReason[] = [
   "unknown-vault",
   "collision",
   "not-our-folder",
+  "another-space",
 ];
 
 /**
@@ -64,6 +66,8 @@ export function blockedMessage(reason: BlockedReason): string {
       return "Two notes in this space have names that differ only in capitalization, so one would overwrite the other. Rename one, then export again.";
     case "not-our-folder":
       return "That folder already holds something other than an export of this space. Pick an empty folder, or a different one.";
+    case "another-space":
+      return "That folder holds an export of a different space. Rename this space, or pick a different folder.";
   }
 }
 

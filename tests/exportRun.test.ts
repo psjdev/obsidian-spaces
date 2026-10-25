@@ -115,6 +115,15 @@ describe("runExport", () => {
     expect(sink.files.size).toBeGreaterThan(0);
   });
 
+  it("creates the export folder before anything else", async () => {
+    // Nothing else creates it: folders and parents are only made because
+    // something is going into them.
+    const sink = fakeExportSink();
+    const { reader } = countingReader();
+    await runExport({ plan, manifest, sink, readBinary: reader });
+    expect(sink.order[0]).toBe("dir:");
+  });
+
   it("reports an empty space honestly", async () => {
     const sink = fakeExportSink();
     const { reader } = countingReader();

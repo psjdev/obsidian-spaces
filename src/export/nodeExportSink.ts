@@ -3,13 +3,17 @@ import * as path from "path";
 import type { ExportSink } from "./ExportSink";
 
 /**
- * The only file in this feature that touches the filesystem.
+ * Where the export's filesystem work lives. One `fs` call sits outside
+ * it, `realpath` in `main.ts`, which the destination guard needs before a
+ * sink exists.
  *
  * `fs` and `path` are static imports: `@typescript-eslint/no-require-imports`
- * forbids `require`, and `noNetwork.test.ts` forbids the dynamic import form,
- * so the usual `Platform.isDesktop`-guarded import is not available here.
- * (Both bans are matched textually against this file, comments included,
- * which is why neither spelling appears above.)
+ * forbids `require` (an AST rule), and both `noNetwork.test.ts` and
+ * `moduleGraph.test.ts` forbid the dynamic import form, so the usual
+ * `Platform.isDesktop`-guarded import is not available here.
+ * `moduleGraph.test.ts` matches textually WITHOUT stripping comments, which
+ * is why that spelling does not appear above; `noNetwork.test.ts` strips
+ * them first.
  * Both are externalised in `esbuild.config.mjs` and provided by Obsidian's
  * desktop runtime; the manifest is `isDesktopOnly`.
  */
@@ -49,6 +53,13 @@ export function createNodeExportSink(rootDir: string): ExportSink {
     },
     writeText: async (rel, text) => {
       await fs.writeFile(at(rel), text, "utf8");
+    },
+    readText: async (rel) => {
+      try {
+        return await fs.readFile(at(rel), "utf8");
+      } catch {
+        return null;
+      }
     },
     exists: async (rel) => {
       try {

@@ -61,6 +61,24 @@ describe("buildSpaceManifest", () => {
     expect(m.space.order).toEqual(order);
   });
 
+  it("filters the order down to what the export actually holds", () => {
+    // The stored order is compacted against a folder's VAULT children, so
+    // it can still name notes the user excluded, or visitors. Dropping
+    // `exclude` for privacy and then leaking the same paths through
+    // `order` would be no privacy at all.
+    const m = buildSpaceManifest({
+      ...base,
+      order: { Reading: ["Reading/book.md", "Reading/excluded-secret.md"] },
+    });
+    expect(m.space.order).toEqual({ Reading: ["Reading/book.md"] });
+    expect(JSON.stringify(m)).not.toContain("excluded-secret");
+  });
+
+  it("omits a folder from the order when none of its notes are exported", () => {
+    const m = buildSpaceManifest({ ...base, order: { Elsewhere: ["Elsewhere/a.md"] } });
+    expect("order" in m.space).toBe(false);
+  });
+
   it("omits the order when the space has none", () => {
     expect("order" in buildSpaceManifest(base).space).toBe(false);
   });

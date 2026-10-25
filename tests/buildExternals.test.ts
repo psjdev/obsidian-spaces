@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
+/** The config with comments removed, so a commented-out line cannot pass. */
+async function config(): Promise<string> {
+  return (await readFile("esbuild.config.mjs", "utf8"))
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/.*$/gm, "$1");
+}
+
 /**
  * The bundle must leave Obsidian's runtime modules alone.
  *
@@ -14,15 +21,17 @@ import { describe, expect, it } from "vitest";
  */
 describe("the bundle's externals", () => {
   it("leaves every module Obsidian's desktop runtime already provides", async () => {
-    const src = await readFile("esbuild.config.mjs", "utf8");
-    const external = /external:\s*\[([^\]]*)\]/.exec(src)?.[1] ?? "";
+    // Comments are stripped first. Grepping the raw text kept this green
+    // when the whole `external:` line was commented out, while the build
+    // failed to resolve obsidian, electron and fs.
+    const external = /external:\s*\[([^\]]*)\]/.exec(await config())?.[1] ?? "";
     for (const m of ["obsidian", "electron", "fs", "fs/promises", "path"]) {
       expect(external).toContain(`"${m}"`);
     }
   });
 
   it("bundles everything else, because the plugin ships one file", async () => {
-    const src = await readFile("esbuild.config.mjs", "utf8");
+    const src = await config();
     expect(src).toContain("bundle: true");
     // `platform` stays unset. Externalising three builtins is narrower than
     // switching the whole bundle to node, which would change how every other

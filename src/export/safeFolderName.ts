@@ -19,9 +19,14 @@
 const FORBIDDEN = /[/\\:*?"<>|\u0000-\u001f]/g;
 
 /**
- * Names Windows refuses whatever the extension. Writing to one of these does
- * not create a file: the bytes go to the device and disappear, and an export
- * that did it would report success having written nothing.
+ * Windows device names.
+ *
+ * Measured on Windows 11 with Node 24: `nul.md` and `con.md` DO become real
+ * files through `fs.promises.writeFile`, because libuv uses extended
+ * (`\?\`) paths. So the old claim here, that the bytes vanish into the
+ * device, was wrong. They are still renamed: such a folder is awkward to
+ * open, copy or delete with ordinary tools, and other programs reading the
+ * export will not all use extended paths.
  */
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 

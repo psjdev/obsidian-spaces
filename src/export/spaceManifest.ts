@@ -68,6 +68,30 @@ export interface ManifestInput {
   now: Date;
 }
 
+/**
+ * The space id recorded in an existing export, or null when the text is
+ * absent, unparsable, or not one of ours.
+ *
+ * This is what makes "replace" safe. Space NAMES are not unique and
+ * `safeFolderName` is lossy, so two spaces can share a destination folder:
+ * `Work/2026` and `Work-2026` both sanitise to `Work-2026`. Without reading
+ * the id back, replacing the second would recursively delete the first's
+ * export behind a prompt claiming the folder was already this space's.
+ */
+export function spaceIdOfManifest(text: string | null): string | null {
+  if (text === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const space: unknown = (parsed as { space?: unknown }).space;
+    if (typeof space !== "object" || space === null) return null;
+    const id: unknown = (space as { id?: unknown }).id;
+    return typeof id === "string" && id !== "" ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 export function buildSpaceManifest(input: ManifestInput): SpaceManifest {
   const { space, order, entries, now } = input;
   const isFolderSpace = typeof space.root === "string" && space.root !== "";
@@ -81,7 +105,20 @@ export function buildSpaceManifest(input: ManifestInput): SpaceManifest {
   // Assigned rather than spread with `undefined`, so the JSON has no holes.
   if (isFolderSpace) space_.root = space.root;
   else space_.members = space.members;
-  if (order !== undefined) space_.order = order;
+  // Filtered to what the export holds. The stored order is compacted
+  // against a folder's VAULT children, so it can still name notes the user
+  // later excluded, or visitors, and this file is made to be handed to
+  // someone else. Dropping `exclude` for privacy and then leaking the same
+  // paths through `order` would be no privacy at all.
+  if (order !== undefined) {
+    const inExport = new Set(entries.map((e) => e.sourcePath));
+    const kept: OrderMap = {};
+    for (const [folder, children] of Object.entries(order)) {
+      const keep = children.filter((c) => inExport.has(c));
+      if (keep.length > 0) kept[folder] = keep;
+    }
+    if (Object.keys(kept).length > 0) space_.order = kept;
+  }
 
   // `exclude` and `archived` are deliberately absent. `exclude` lists paths
   // the user chose to hide, and this file is made to be handed to someone

@@ -1184,8 +1184,11 @@ export default class SpacesPlugin extends Plugin {
    *
    * Everything the export decides is in `exportCommand.ts`, which takes its
    * collaborators as functions so the whole orchestration is testable
-   * without an Obsidian runtime. This method is the only place that knows
-   * about Electron, `fs`, and Obsidian's adapter.
+   * without an Obsidian runtime. This method is where those functions are
+   * made out of the live app: it is the only place that reaches Electron,
+   * and the only place in the export that reaches the vault adapter.
+   * `nodeExportSink.ts` does the rest of the filesystem work, and
+   * `realpath` below is the one `fs` call outside it.
    */
   private async exportSpace(): Promise<void> {
     const space = this.controller.activeSpace();
@@ -1207,9 +1210,18 @@ export default class SpacesPlugin extends Plugin {
       // turns into a refusal rather than letting the guard fail open.
       vaultBasePath: adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null,
       parseProgress: () => nativeParseProgress(this.app),
-      // A declared root that no longer resolves. `hasRoot` and `rootOf`
-      // together are what tell that apart from having no root at all.
-      rootMissing: hasRoot(space) && rootOf(space) === null,
+      // The missing-root state the rest of the plugin means: a root is
+      // declared but is not a folder in the vault. `rootOf` alone is not
+      // enough, because it never consults the vault and answers null only
+      // for an empty or vault-root value, so a root that was deleted or
+      // renamed used to pass this guard, produce an empty plan, and export
+      // a folder holding nothing but a manifest.
+      rootMissing:
+        hasRoot(space) &&
+        (() => {
+          const root = rootOf(space);
+          return root === null || this.controller.vaultIndex().kindOf(root) !== "folder";
+        })(),
       pickDir: async () => {
         const picked = await remote.dialog.showOpenDialog({
           title: "Export space to a folder",

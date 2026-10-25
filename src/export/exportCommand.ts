@@ -4,7 +4,7 @@ import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
 import type { ConfirmPrompt } from "../ui/settingsEdits";
 import type { ExportSink } from "./ExportSink";
 import { buildExportPlan } from "./exportPlan";
-import { MANIFEST_FILENAME, buildSpaceManifest } from "./spaceManifest";
+import { MANIFEST_FILENAME, buildSpaceManifest, spaceIdOfManifest } from "./spaceManifest";
 import { checkExportDir, resolveExportDir } from "./destination";
 import { blockedMessage, outcomeMessage, replaceConfirmPrompt } from "./exportCopy";
 import { runExport } from "./runExport";
@@ -29,7 +29,12 @@ export interface ExportContext {
    * not shaped as expected.
    */
   parseProgress: () => number | null;
-  /** Whether a folder space's root resolves to a real folder. */
+  /**
+   * Whether this is a folder space whose root is declared but is not a
+   * folder in the vault. Not merely whether `rootOf` answers null: that is
+   * true only for an empty or vault-root value and never consults the
+   * vault at all.
+   */
   rootMissing: boolean;
   pickDir: () => Promise<string | null | undefined>;
   /** Resolves links and junctions, so the checks see a real path. */
@@ -63,6 +68,15 @@ export interface ExportContext {
  *    ask: a space called `Documents` must never be able to eat `~/Documents`
  *    behind a confirmation that reads as routine.
  */
+/** `realpath` where it resolves, the original where it does not yet exist. */
+async function resolveIfPresent(ctx: ExportContext, p: string): Promise<string> {
+  try {
+    return await ctx.realpath(p);
+  } catch {
+    return p;
+  }
+}
+
 export async function exportActiveSpace(ctx: ExportContext): Promise<void> {
   const { space, snapshot } = ctx;
   if (space === null) return ctx.notify(blockedMessage("no-space"));
@@ -71,14 +85,24 @@ export async function exportActiveSpace(ctx: ExportContext): Promise<void> {
   if (progress !== null && progress > 0) return ctx.notify(blockedMessage("indexing"));
   if (ctx.rootMissing) return ctx.notify(blockedMessage("missing-root"));
 
-  const chosen = await ctx.pickDir();
-  // `showOpenDialog` yields `undefined` for a cancelled dialog, not null.
-  if (chosen === null || chosen === undefined || chosen === "") return;
-
   try {
+    const chosen = await ctx.pickDir();
+    // `showOpenDialog` yields `undefined` for a cancelled dialog, not null.
+    if (chosen === null || chosen === undefined || chosen === "") return;
     const realChosen = await ctx.realpath(chosen);
     const exportDir = resolveExportDir(realChosen, space.name);
-    const problem = checkExportDir(exportDir, ctx.vaultBasePath);
+    // Both sides resolved, or the comparison is only as good as its
+    // spelling. The export folder is resolved SEPARATELY from the folder
+    // the user picked: a junction at `<chosen>/<SpaceName>` is a different
+    // link from the one on its parent, and resolving only the parent left
+    // it able to point into the vault. It may not exist yet on a first
+    // export, which is not an error, so an unresolvable path is used as
+    // given.
+    const realExportDir = await resolveIfPresent(ctx, exportDir);
+    const realVault = ctx.vaultBasePath === null
+      ? null
+      : await resolveIfPresent(ctx, ctx.vaultBasePath);
+    const problem = checkExportDir(realExportDir, realVault);
     if (problem !== null) return ctx.notify(blockedMessage(problem));
 
     const plan = buildExportPlan({
@@ -90,14 +114,18 @@ export async function exportActiveSpace(ctx: ExportContext): Promise<void> {
     });
     if (plan.collisions.length > 0) return ctx.notify(blockedMessage("collision"));
 
-    const sink = ctx.makeSink(exportDir);
+    const sink = ctx.makeSink(realExportDir);
     if ((await sink.exists("")) && !(await sink.isEmptyDir(""))) {
-      // Ours, or somebody's? The manifest is the only honest answer.
-      if (!(await sink.exists(MANIFEST_FILENAME))) {
-        return ctx.notify(blockedMessage("not-our-folder"));
-      }
+      // Ours, or somebody's? The manifest's space id is the only honest
+      // answer. Its mere presence is not: space names are not unique and
+      // `safeFolderName` is lossy, so `Work/2026` and `Work-2026` share a
+      // destination, and accepting any manifest would delete one space's
+      // export while telling the user it was replacing the other's.
+      const existingId = spaceIdOfManifest(await sink.readText(MANIFEST_FILENAME));
+      if (existingId === null) return ctx.notify(blockedMessage("not-our-folder"));
+      if (existingId !== space.id) return ctx.notify(blockedMessage("another-space"));
       // The path in the prompt is the path that gets removed, same string.
-      if (!(await ctx.confirm(replaceConfirmPrompt(exportDir, space.name)))) return;
+      if (!(await ctx.confirm(replaceConfirmPrompt(realExportDir, space.name)))) return;
       await sink.removeDir("");
     }
 
@@ -108,7 +136,7 @@ export async function exportActiveSpace(ctx: ExportContext): Promise<void> {
       now: ctx.now(),
     });
     const outcome = await runExport({ plan, manifest, sink, readBinary: ctx.readBinary });
-    ctx.notify(outcomeMessage(outcome, exportDir));
+    ctx.notify(outcomeMessage(outcome, realExportDir));
   } catch (e) {
     // A file where a folder was expected throws ENOTDIR, a locked file
     // throws mid-delete. Either would otherwise escape as an unhandled

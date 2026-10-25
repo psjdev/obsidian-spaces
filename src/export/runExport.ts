@@ -43,6 +43,13 @@ export async function runExport(args: RunExportArgs): Promise<ExportOutcome> {
   let copied = 0;
 
   try {
+    // The export folder itself, first and unconditionally. Everything else
+    // creates directories only as a side effect of having something to put
+    // in them, so an empty space used to reach the manifest write with no
+    // folder at all and fail with ENOENT. On the replace path the previous
+    // export has already been deleted by then, which left the user with
+    // nothing.
+    await sink.ensureDir("");
     for (const folder of plan.folders) await sink.ensureDir(folder);
 
     for (const entry of plan.entries) {

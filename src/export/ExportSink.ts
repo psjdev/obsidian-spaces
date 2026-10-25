@@ -2,9 +2,10 @@
  * Everything the export is allowed to do outside the vault.
  *
  * A port, in the manner of `VaultIndex`: deliberately narrow so the parts
- * that decide things stay pure and testable without a filesystem. The only
- * implementation that touches `fs` is `nodeExportSink.ts`, which is
- * therefore the only file in this feature the unit tests cannot reach.
+ * that decide things stay pure and testable without a filesystem. The
+ * implementation that touches `fs` is `nodeExportSink.ts`, which is tested
+ * against a real temp directory rather than through a fake, because a fake
+ * of a filesystem is exactly where this feature's worst bug hid.
  *
  * Every path is RELATIVE to the export root, and the implementation is
  * responsible for refusing one that climbs out of it.
@@ -14,6 +15,8 @@ export interface ExportSink {
   writeFile(rel: string, data: Uint8Array): Promise<void>;
   writeText(rel: string, text: string): Promise<void>;
   exists(rel: string): Promise<boolean>;
+  /** The file's text, or null when it is absent or unreadable. */
+  readText(rel: string): Promise<string | null>;
   /** Anything at all counts, including a lone dotfile. */
   isEmptyDir(rel: string): Promise<boolean>;
   /**

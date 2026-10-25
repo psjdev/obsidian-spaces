@@ -3,10 +3,11 @@ import { safeFolderName } from "./safeFolderName";
 /**
  * Where an export may and may not go.
  *
- * Pure, so it can be tested without a filesystem. Resolving symlinks and
- * junctions happens at the edge, before `checkExportDir` is called: a pure
- * string comparison cannot see through a link, so the caller hands in a real
- * path.
+ * Pure, so it can be tested without a filesystem. A string comparison
+ * cannot see through a link, so `exportCommand.ts` resolves BOTH sides
+ * before calling in: the export folder itself, not only the folder the user
+ * picked, and the vault path too. Resolving one side and not the other made
+ * the comparison asymmetric and let a junctioned vault past.
  */
 
 export type DestinationProblem = "inside-vault" | "contains-vault" | "unknown-vault";

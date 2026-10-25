@@ -15,6 +15,11 @@ const space: SpaceDefinition = {
   members: [{ path: "Reading/book.md", kind: "file" }],
 };
 
+/** A manifest recording THIS space, which is what makes a replace safe. */
+const OUR_MANIFEST = JSON.stringify({ space: { id: "kitchen" } });
+/** A manifest recording a DIFFERENT space that shares the folder name. */
+const OTHER_MANIFEST = JSON.stringify({ space: { id: "reading" } });
+
 const tree: Record<string, MemberKind> = { Reading: "folder", "Reading/book.md": "file" };
 
 const snapshot: VisibilitySnapshot = {
@@ -180,6 +185,100 @@ describe("exportActiveSpace: where it writes", () => {
     });
     await exportActiveSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("collision")]);
+    // Refusing AFTER the destination was replaced would delete a previous
+    // export and then decline to write a new one.
+    expect(h.sinkRoots).toEqual([]);
+  });
+});
+
+describe("exportActiveSpace: resolving the destination", () => {
+  it("resolves the EXPORT folder, not only the folder that was picked", async () => {
+    // A junction at <chosen>/<SpaceName> is a different link from one on
+    // its parent. Resolving only the parent left it able to point into the
+    // vault while the check looked at an unresolved last segment.
+    const h = harness({
+      realpath: async (p) =>
+        p === "C:/Users/x/Desktop/Kitchen" ? "C:/Notes/Vault/sneaky" : p,
+    });
+    await exportActiveSpace(h.ctx);
+    expect(h.notices).toEqual([blockedMessage("inside-vault")]);
+    expect(h.sinkRoots).toEqual([]);
+  });
+
+  it("resolves the vault path too, so the comparison is symmetric", async () => {
+    // The vault reached through a junction spells differently from the
+    // vault reached directly; comparing one resolved path against one raw
+    // one lets the export write inside it.
+    const h = harness({
+      vaultBasePath: "C:/VaultLink",
+      realpath: async (p) => (p === "C:/VaultLink" ? "C:/Users/x/Desktop" : p),
+    });
+    await exportActiveSpace(h.ctx);
+    expect(h.notices).toEqual([blockedMessage("inside-vault")]);
+  });
+
+  it("proceeds when the export folder does not exist yet", async () => {
+    // A first export has nothing to resolve, which is not an error.
+    const h = harness({
+      realpath: async (p) => {
+        if (p === "C:/Users/x/Desktop/Kitchen") throw new Error("ENOENT");
+        return p;
+      },
+    });
+    await exportActiveSpace(h.ctx);
+    expect(h.sinkRoots).toEqual(["C:/Users/x/Desktop/Kitchen"]);
+  });
+
+  it("roots the sink at the RESOLVED export folder", async () => {
+    const h = harness({
+      realpath: async (p) => (p === "C:/Users/x/Desktop/Kitchen" ? "D:/real/Kitchen" : p),
+    });
+    await exportActiveSpace(h.ctx);
+    expect(h.sinkRoots).toEqual(["D:/real/Kitchen"]);
+  });
+});
+
+describe("exportActiveSpace: what it hands the selector", () => {
+  it("passes isIgnored through, so an ignored embed stays out", async () => {
+    // Owner decision O7, wired. Replacing ctx.isIgnored with a constant
+    // used to leave every test green.
+    const h = harness({
+      vault: buildFakeVault({ ...tree, "Private/x.png": "file" }),
+      links: { "Reading/book.md": { "Private/x.png": 1 } },
+      isIgnored: (p) => p.startsWith("Private/"),
+    });
+    await exportActiveSpace(h.ctx);
+    expect([...(h.sinks[0]?.files.keys() ?? [])]).not.toContain("Private/x.png");
+  });
+
+  it("passes links through, so an embed comes along", async () => {
+    const h = harness({
+      vault: buildFakeVault({ ...tree, "Attachments/x.png": "file" }),
+      links: { "Reading/book.md": { "Attachments/x.png": 1 } },
+    });
+    await exportActiveSpace(h.ctx);
+    expect([...(h.sinks[0]?.files.keys() ?? [])]).toContain("Attachments/x.png");
+  });
+
+  it("passes isExcluded through", async () => {
+    const h = harness({
+      vault: buildFakeVault({ ...tree, "Attachments/x.png": "file" }),
+      links: { "Reading/book.md": { "Attachments/x.png": 1 } },
+      isExcluded: (p) => p === "Attachments/x.png",
+    });
+    await exportActiveSpace(h.ctx);
+    expect([...(h.sinks[0]?.files.keys() ?? [])]).not.toContain("Attachments/x.png");
+  });
+
+  it("passes the order and the clock into the manifest", async () => {
+    const h = harness({
+      order: { Reading: ["Reading/book.md"] },
+      now: () => new Date("2031-01-02T03:04:05Z"),
+    });
+    await exportActiveSpace(h.ctx);
+    const written = h.sinks[0]?.texts.get(MANIFEST_FILENAME) ?? "";
+    expect(JSON.parse(written).space.order).toEqual({ Reading: ["Reading/book.md"] });
+    expect(JSON.parse(written).exportedAt).toBe("2031-01-02T03:04:05.000Z");
   });
 });
 
@@ -195,6 +294,9 @@ describe("exportActiveSpace: replacing", () => {
     // A space called Documents must never eat the user's Documents folder.
     const h = harness({}, {
       seed: (s) => {
+        // A real destination folder exists before anything is written into
+        // it; the fake enforces that now, as the filesystem does.
+        void s.ensureDir("");
         void s.writeText("someone-elses-work.md", "mine");
       },
     });
@@ -207,7 +309,10 @@ describe("exportActiveSpace: replacing", () => {
   it("asks before replacing one of our own exports, and stops on cancel", async () => {
     const h = harness({ confirm: async () => false }, {
       seed: (s) => {
-        void s.writeText(MANIFEST_FILENAME, "{}");
+        // A real destination folder exists before anything is written into
+        // it; the fake enforces that now, as the filesystem does.
+        void s.ensureDir("");
+        void s.writeText(MANIFEST_FILENAME, OUR_MANIFEST);
       },
     });
     await exportActiveSpace(h.ctx);
@@ -218,7 +323,10 @@ describe("exportActiveSpace: replacing", () => {
   it("replaces one of our own exports once confirmed", async () => {
     const h = harness({}, {
       seed: (s) => {
-        void s.writeText(MANIFEST_FILENAME, "{}");
+        // A real destination folder exists before anything is written into
+        // it; the fake enforces that now, as the filesystem does.
+        void s.ensureDir("");
+        void s.writeText(MANIFEST_FILENAME, OUR_MANIFEST);
       },
     });
     await exportActiveSpace(h.ctx);
@@ -226,10 +334,46 @@ describe("exportActiveSpace: replacing", () => {
     expect(h.sinks[0]?.files.has("Reading/book.md")).toBe(true);
   });
 
+  it("refuses a folder holding another space's export", async () => {
+    // Space NAMES are not unique and safeFolderName is lossy: "Work/2026"
+    // and "Work-2026" both become "Work-2026". Accepting any manifest would
+    // delete one space's export while the prompt claimed it was replacing
+    // this space's.
+    const h = harness({}, {
+      seed: (s) => {
+        // A real destination folder exists before anything is written into
+        // it; the fake enforces that now, as the filesystem does.
+        void s.ensureDir("");
+        void s.writeText(MANIFEST_FILENAME, OTHER_MANIFEST);
+      },
+    });
+    await exportActiveSpace(h.ctx);
+    expect(h.notices).toEqual([blockedMessage("another-space")]);
+    expect(h.confirmedPaths).toEqual([]);
+    expect(h.sinks[0]?.removed).toEqual([]);
+  });
+
+  it("refuses a folder whose manifest is corrupt", async () => {
+    const h = harness({}, {
+      seed: (s) => {
+        // A real destination folder exists before anything is written into
+        // it; the fake enforces that now, as the filesystem does.
+        void s.ensureDir("");
+        void s.writeText(MANIFEST_FILENAME, "{ not json");
+      },
+    });
+    await exportActiveSpace(h.ctx);
+    expect(h.notices).toEqual([blockedMessage("not-our-folder")]);
+    expect(h.sinks[0]?.removed).toEqual([]);
+  });
+
   it("shows the path it is about to delete", async () => {
     const h = harness({}, {
       seed: (s) => {
-        void s.writeText(MANIFEST_FILENAME, "{}");
+        // A real destination folder exists before anything is written into
+        // it; the fake enforces that now, as the filesystem does.
+        void s.ensureDir("");
+        void s.writeText(MANIFEST_FILENAME, OUR_MANIFEST);
       },
     });
     await exportActiveSpace(h.ctx);

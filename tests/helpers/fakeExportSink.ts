@@ -24,7 +24,11 @@ const parentOf = (rel: string): string => {
 export function fakeExportSink(opts: { existing?: Set<string> } = {}): FakeExportSink {
   const files = new Map<string, Uint8Array>();
   const texts = new Map<string, string>();
-  const dirs = new Set<string>([""]);
+  // NOT seeded with the root. A real sink starts with nothing, and seeding
+  // it here hid a bug where `runExport` never created the export folder:
+  // an empty space failed with ENOENT against the real filesystem while
+  // every test here stayed green.
+  const dirs = new Set<string>();
   const removed: string[] = [];
   const order: string[] = [];
   for (const d of opts.existing ?? []) dirs.add(d);
@@ -43,9 +47,12 @@ export function fakeExportSink(opts: { existing?: Set<string> } = {}): FakeExpor
     removed,
     order,
     ensureDir: async (rel) => {
-      // Recursive, like mkdir -p.
+      // Recursive, like `mkdir -p`, and it creates the directory NAMED as
+      // well as its ancestors. `""` is the export root, which real `mkdir`
+      // creates and an earlier version of this fake silently did not.
       const parts = rel.split("/").filter(Boolean);
       let acc = "";
+      dirs.add("");
       for (const p of parts) {
         acc = acc === "" ? p : `${acc}/${p}`;
         dirs.add(acc);
@@ -62,8 +69,14 @@ export function fakeExportSink(opts: { existing?: Set<string> } = {}): FakeExpor
       texts.set(rel, text);
       order.push(`text:${rel}`);
     },
+    readText: async (rel) => texts.get(rel) ?? null,
     exists: async (rel) => dirs.has(rel) || files.has(rel) || texts.has(rel),
     isEmptyDir: async (rel) => {
+      // `fs.readdir` throws ENOENT on a directory that is not there, and
+      // the command relies on that: without this, dropping the `exists`
+      // check ahead of it would break every FIRST export and no test
+      // here would notice.
+      if (!dirs.has(rel)) throw new Error(`ENOENT: no such directory ${rel || "<root>"}`);
       const prefix = rel === "" ? "" : `${rel}/`;
       const held = [...files.keys(), ...texts.keys(), ...dirs].filter(
         (p) => p !== rel && p.startsWith(prefix) && p !== ""
