@@ -6,8 +6,10 @@ import type { ExportSink } from "./ExportSink";
  * The only file in this feature that touches the filesystem.
  *
  * `fs` and `path` are static imports: `@typescript-eslint/no-require-imports`
- * forbids `require`, and `noNetwork.test.ts` forbids a dynamic `import()`,
+ * forbids `require`, and `noNetwork.test.ts` forbids the dynamic import form,
  * so the usual `Platform.isDesktop`-guarded import is not available here.
+ * (Both bans are matched textually against this file, comments included,
+ * which is why neither spelling appears above.)
  * Both are externalised in `esbuild.config.mjs` and provided by Obsidian's
  * desktop runtime; the manifest is `isDesktopOnly`.
  */
