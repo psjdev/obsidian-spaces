@@ -7,6 +7,8 @@ import {
 } from "../src/export/exportCopy";
 
 const PATH = "C:/Users/x/Desktop/Kitchen";
+const ITEMS = new RegExp("\bitems\b");
+const FILES = new RegExp("\bfiles\b");
 const EXISTING = {
   spaceId: "kitchen",
   spaceName: "Kitchen",
@@ -67,7 +69,10 @@ describe("replaceConfirmPrompt", () => {
     // tells them to stop.
     const p = replaceConfirmPrompt(STRANGER);
     expect(p.body).toMatch(/is not an export/i);
-    expect(p.body).toContain("412 notes and folders");
+    // FILES, not notes. That folder is outside the vault and whatever is
+    // in it did not come from one.
+    expect(p.body).toContain("412 files and folders");
+    expect(p.body).not.toContain("notes");
     expect(p.confirmLabel).toBe("Delete it and export");
     expect(p.title).toMatch(/already there/i);
   });
@@ -89,7 +94,17 @@ describe("replaceConfirmPrompt", () => {
 
   it("counts in whole numbers, and says nothing for an empty folder", () => {
     expect(replaceConfirmPrompt({ ...STRANGER, entries: 0 }).body).toContain("holds nothing");
-    expect(replaceConfirmPrompt({ ...STRANGER, entries: 1 }).body).toContain("1 note or folder");
+    expect(replaceConfirmPrompt({ ...STRANGER, entries: 1 }).body).toContain("1 file or folder");
+    expect(replaceConfirmPrompt({ ...OURS, entries: 1 }).body).toContain("1 note or folder");
+  });
+
+  it("calls an export's contents notes, and a stranger folder's files", () => {
+    // The noun is a claim about where the contents came from. An export
+    // holds a copy of a vault; a folder that is not an export holds
+    // whatever happened to be on disk.
+    expect(replaceConfirmPrompt(OURS).body).toContain("notes and folders");
+    expect(replaceConfirmPrompt(THEIRS).body).toContain("notes and folders");
+    expect(replaceConfirmPrompt(STRANGER).body).toContain("files and folders");
   });
 
   it("says what replacing destroys, not just that it replaces", () => {
@@ -168,11 +183,20 @@ describe("the project's copy rules", () => {
     for (const s of everything) expect(s).not.toContain("\u2014");
   });
 
-  it("says notes and folders, never items or files", () => {
+  it("never says items", () => {
+    for (const s of everything) expect(s.toLowerCase()).not.toMatch(ITEMS);
+  });
+
+  it("says files only where the contents are not a vault's", () => {
+    // The project's noun for vault content is "notes and folders". The one
+    // place "files" is correct is a folder that is NOT an export, whose
+    // contents never came from a vault.
+    const allowed = replaceConfirmPrompt(STRANGER).body;
     for (const s of everything) {
-      expect(s.toLowerCase()).not.toMatch(/\bitems\b/);
-      expect(s.toLowerCase()).not.toMatch(/\bfiles\b/);
+      if (s === allowed) continue;
+      expect(s.toLowerCase(), s).not.toMatch(FILES);
     }
+    expect(allowed).toContain("files and folders");
   });
 
   it("uses American spelling", () => {

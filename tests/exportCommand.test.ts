@@ -323,7 +323,9 @@ describe("exportSpace: replacing", () => {
     await exportSpace(h.ctx);
     expect(h.confirmedPaths).toHaveLength(1);
     expect(h.confirmedPaths[0]).toMatch(/is not an export/i);
-    expect(h.confirmedPaths[0]).toMatch(/1 note or folder/);
+    // FILE, not note: that folder is outside the vault and its contents
+    // did not come from one.
+    expect(h.confirmedPaths[0]).toMatch(/1 file or folder/);
     expect(h.sinks[0]?.removed).toEqual([]);
   });
 

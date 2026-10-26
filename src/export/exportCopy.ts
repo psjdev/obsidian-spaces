@@ -62,8 +62,12 @@ export interface OccupiedDestination {
  * proof.
  */
 export function replaceConfirmPrompt(at: OccupiedDestination): ConfirmPrompt {
-  const held = `It holds ${countPhrase(at.entries)}.`;
   const lost = "Replacing it deletes that folder and everything in it, then writes this space again.";
+  // An export holds a copy of a vault, so "notes and folders" is right for
+  // it. A folder that is NOT an export is just a folder on disk and its
+  // contents are not notes, so calling them that would be wrong rather
+  // than merely loose.
+  const held = `It holds ${countPhrase(at.entries, at.existing !== null)}.`;
 
   if (at.existing !== null && at.isThisSpace) {
     const made = describeDate(at.existing.exportedAt);
@@ -95,10 +99,18 @@ export function replaceConfirmPrompt(at: OccupiedDestination): ConfirmPrompt {
   };
 }
 
-/** "nothing", "1 note or folder", "412 notes and folders". */
-function countPhrase(n: number): string {
+/**
+ * "nothing", "1 note or folder", "412 files and folders".
+ *
+ * `vaultContent` picks the noun. Inside an export the entries came out of a
+ * vault and are notes; anywhere else they are whatever happened to be on
+ * disk, and this feature writes outside the vault.
+ */
+function countPhrase(n: number, vaultContent: boolean): string {
   if (n <= 0) return "nothing";
-  return n === 1 ? "1 note or folder" : `${String(n)} notes and folders`;
+  const one = vaultContent ? "note" : "file";
+  const many = vaultContent ? "notes and folders" : "files and folders";
+  return n === 1 ? `1 ${one} or folder` : `${String(n)} ${many}`;
 }
 
 /** " made on 25 October 2026", or "" when the export did not say. */
