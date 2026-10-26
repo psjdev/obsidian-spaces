@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { safeFolderName } from "../src/export/safeFolderName";
+import { MAX_SPACE_NAME_LENGTH } from "../src/definitions/schema";
 
 /**
  * A space can be called anything. The name becomes a folder name on the
@@ -61,6 +62,17 @@ describe("safeFolderName", () => {
   it("leaves non-ASCII names alone", () => {
     expect(safeFolderName("Küche 厨房")).toBe("Küche 厨房");
     expect(safeFolderName("Ноутбук")).toBe("Ноутбук");
+  });
+
+  it("cannot outgrow what a filesystem will store", () => {
+    // Measured: a folder name of 255 characters is accepted and 300 fails
+    // with EINVAL. Space names are capped at MAX_SPACE_NAME_LENGTH by the
+    // schema, and this only ever ADDS the `-space` suffix, so the two
+    // constants have to stay compatible. Nothing else couples them.
+    const longest = safeFolderName("C".repeat(MAX_SPACE_NAME_LENGTH));
+    expect(longest.length).toBeLessThanOrEqual(255);
+    const worst = safeFolderName("CON".padEnd(MAX_SPACE_NAME_LENGTH, "1"));
+    expect(worst.length).toBeLessThanOrEqual(255);
   });
 
   it("is idempotent, so a sanitised name survives a second pass", () => {
