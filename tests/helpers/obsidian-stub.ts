@@ -129,6 +129,27 @@ export const noticeLog: Notice[] = [];
  * Obsidian's own timer-driven dismissal is not modelled — nothing in `src/`
  * depends on it, and inventing a schedule would put a sleep in the suite.
  */
+/**
+ * Obsidian's desktop vault adapter, present only so `instanceof` works.
+ *
+ * The space export narrows with `adapter instanceof FileSystemAdapter`
+ * before trusting `getBasePath()`, because a non-desktop adapter has no
+ * path on disk and the inside-vault guard must then refuse rather than
+ * fail open. With no class here that narrowing throws "Right-hand side of
+ * 'instanceof' is not an object" the moment a test reaches it.
+ *
+ * Nothing is modelled: a test that needs a base path supplies its own
+ * object and this class is only the brand.
+ */
+export class FileSystemAdapter {
+  getBasePath(): string {
+    notModelled(
+      "FileSystemAdapter.getBasePath()",
+      "The vault's location on disk is Obsidian's; supply it on a stub adapter instead."
+    );
+  }
+}
+
 export class Notice {
   readonly messageEl: HTMLElement;
   private readonly toastEl: HTMLElement;

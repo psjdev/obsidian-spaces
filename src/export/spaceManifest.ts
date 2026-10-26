@@ -78,7 +78,27 @@ export interface ManifestInput {
  * the id back, replacing the second would recursively delete the first's
  * export behind a prompt claiming the folder was already this space's.
  */
-export function spaceIdOfManifest(text: string | null): string | null {
+export interface ExistingExport {
+  spaceId: string;
+  /** What the space was CALLED when it was exported. May differ from now. */
+  spaceName: string | null;
+  /** ISO timestamp as written, or null when absent or not a string. */
+  exportedAt: string | null;
+}
+
+/**
+ * What an existing export says about itself, or null when the text is
+ * absent, unparsable, or not one of ours.
+ *
+ * The id alone cannot prove ownership, which is why the name and the date
+ * come back too. Space ids are slugs of the name (`spaceLifecycle.ts`) and
+ * `deleteSpace` frees them, so deleting a space and creating another with
+ * the same name RECYCLES the id: a stale export of the old space then
+ * matches the new one exactly. The id is still the right gate for refusing
+ * an obviously different space, but what the folder actually holds has to
+ * be put in front of the user rather than asserted away.
+ */
+export function readExistingExport(text: string | null): ExistingExport | null {
   if (text === null) return null;
   try {
     const parsed: unknown = JSON.parse(text);
@@ -86,7 +106,14 @@ export function spaceIdOfManifest(text: string | null): string | null {
     const space: unknown = (parsed as { space?: unknown }).space;
     if (typeof space !== "object" || space === null) return null;
     const id: unknown = (space as { id?: unknown }).id;
-    return typeof id === "string" && id !== "" ? id : null;
+    if (typeof id !== "string" || id === "") return null;
+    const name: unknown = (space as { name?: unknown }).name;
+    const at: unknown = (parsed as { exportedAt?: unknown }).exportedAt;
+    return {
+      spaceId: id,
+      spaceName: typeof name === "string" && name !== "" ? name : null,
+      exportedAt: typeof at === "string" && at !== "" ? at : null,
+    };
   } catch {
     return null;
   }

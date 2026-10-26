@@ -7,22 +7,50 @@ import {
 } from "../src/export/exportCopy";
 
 const PATH = "C:/Users/x/Desktop/Kitchen";
+const EXISTING = {
+  spaceId: "kitchen",
+  spaceName: "Kitchen",
+  exportedAt: "2026-10-25T10:00:00.000Z",
+};
 
 describe("replaceConfirmPrompt", () => {
   it("names the full path, because the folder is outside the vault", () => {
-    expect(replaceConfirmPrompt(PATH, "Kitchen").body).toContain(PATH);
+    expect(replaceConfirmPrompt(PATH, EXISTING).body).toContain(PATH);
   });
 
-  it("names the space in the title", () => {
-    expect(replaceConfirmPrompt(PATH, "Kitchen").title).toContain("Kitchen");
+  it("reports what the folder says it holds, rather than asserting it is ours", () => {
+    // Space ids are slugs of the name and are freed on delete, so an export
+    // of a DELETED space matches a new space of the same name exactly.
+    // Naming what is actually in the folder is what lets someone recognise
+    // an old project; "an export of this space" would sometimes be false.
+    const body = replaceConfirmPrompt(PATH, EXISTING).body;
+    expect(body).toContain('"Kitchen"');
+    expect(body).toMatch(/25 October 2026|October 25, 2026/);
+    expect(body).not.toMatch(/export of this space/i);
+  });
+
+  it("tells the user to check it is the one they mean", () => {
+    expect(replaceConfirmPrompt(PATH, EXISTING).body).toMatch(/check it is the one you mean/i);
+  });
+
+  it("copes with an export that recorded no name or date", () => {
+    const bare = replaceConfirmPrompt(PATH, { spaceId: "x", spaceName: null, exportedAt: null });
+    expect(bare.body).toContain(PATH);
+    expect(bare.body).not.toContain("null");
+    expect(bare.body).not.toContain("Invalid Date");
+  });
+
+  it("ignores a date it cannot read", () => {
+    const bad = replaceConfirmPrompt(PATH, { ...EXISTING, exportedAt: "not a date" });
+    expect(bad.body).not.toContain("Invalid Date");
   });
 
   it("says what replacing destroys, not just that it replaces", () => {
-    expect(replaceConfirmPrompt(PATH, "Kitchen").body).toMatch(/delet|lost/i);
+    expect(replaceConfirmPrompt(PATH, EXISTING).body).toMatch(/delet|lost/i);
   });
 
   it("labels the button with the action, not with yes", () => {
-    expect(replaceConfirmPrompt(PATH, "Kitchen").confirmLabel).toBe("Replace");
+    expect(replaceConfirmPrompt(PATH, EXISTING).confirmLabel).toBe("Replace");
   });
 });
 
@@ -82,9 +110,9 @@ describe("outcomeMessage", () => {
 
 describe("the project's copy rules", () => {
   const everything = [
-    replaceConfirmPrompt(PATH, "Kitchen").title,
-    replaceConfirmPrompt(PATH, "Kitchen").body,
-    replaceConfirmPrompt(PATH, "Kitchen").confirmLabel,
+    replaceConfirmPrompt(PATH, EXISTING).title,
+    replaceConfirmPrompt(PATH, EXISTING).body,
+    replaceConfirmPrompt(PATH, EXISTING).confirmLabel,
     ...BLOCKED_REASONS.map(blockedMessage),
     outcomeMessage({ copied: 3, failed: null }, PATH),
     outcomeMessage({ copied: 1, failed: null }, PATH),

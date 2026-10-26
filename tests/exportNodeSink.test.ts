@@ -78,6 +78,33 @@ describe("createNodeExportSink against a real filesystem", () => {
     expect((await stat(join(root, "a", "b", "c"))).isDirectory()).toBe(true);
   });
 
+  it("reads text back, and answers null rather than throwing when absent", async () => {
+    // The manifest read is the gate on the recursive delete, so a throw
+    // here would become "export could not finish" and a wrong null would
+    // turn a replace into a refusal.
+    const sink = createNodeExportSink(root);
+    expect(await sink.readText("nope.json")).toBe(null);
+    await sink.writeText("there.json", '{"a":1}');
+    expect(await sink.readText("there.json")).toBe('{"a":1}');
+  });
+
+  it("answers null for a directory rather than throwing", async () => {
+    const sink = createNodeExportSink(root);
+    await sink.ensureDir("adir");
+    expect(await sink.readText("adir")).toBe(null);
+  });
+
+  it("refuses to read outside the root", async () => {
+    const sink = createNodeExportSink(root);
+    await expect(sink.readText("../outside.json")).rejects.toThrow();
+  });
+
+  it("round-trips non-ASCII text", async () => {
+    const sink = createNodeExportSink(root);
+    await sink.writeText("u.json", '{"name":"計画"}');
+    expect(await sink.readText("u.json")).toContain("計画");
+  });
+
   it("answers exists without throwing on a missing path", async () => {
     const sink = createNodeExportSink(root);
     expect(await sink.exists("nope.md")).toBe(false);

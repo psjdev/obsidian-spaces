@@ -17,6 +17,7 @@ import { buildFakeVault } from "./helpers/fakeVault";
 import { createMapTagIndex } from "../src/visibility/TagIndex";
 import { tagIndexOf } from "./helpers/tagIndex";
 import { SCHEMA_VERSION, type SpaceDefinition } from "../src/types";
+import { createPropertyIndex } from "../src/visibility/PropertyIndex";
 
 const vault = buildFakeVault({
   Papers: "folder",
@@ -48,6 +49,45 @@ const tagged: SpaceDefinition = {
   color: "#95e1d3",
   members: [{ kind: "tag", tag: "keep" }],
 };
+
+const propSpace: SpaceDefinition = {
+  id: "props",
+  name: "Props",
+  icon: "list",
+  color: "#fdcb6e",
+  members: [{ kind: "property", key: "status", value: "active" }],
+};
+
+/** A controller whose property index answers for `Papers/A.md`. */
+async function buildWithProperties() {
+  const index = createPropertyIndex(
+    [{ path: "Papers/A.md", frontmatter: { status: "active" } }],
+    1
+  );
+  let stored: unknown = {
+    schemaVersion: SCHEMA_VERSION,
+    settings: { globalIgnore: [], restoreLayouts: false },
+    spaces: [propSpace],
+  };
+  const store = new DefinitionStore({
+    read: async () => stored,
+    write: async (d) => {
+      stored = d;
+    },
+  });
+  await store.load();
+  const runtime = new RuntimeStateStore({ get: () => null, set: () => undefined });
+  runtime.load();
+  const controller = new SpaceController(
+    store,
+    runtime,
+    vault,
+    { apply: vi.fn(), livePaths: () => new Set<string>(), metadataReady: () => true },
+    createMapTagIndex(new Map()),
+    () => ({ status: "ready", index })
+  );
+  return { controller };
+}
 
 async function build(opts: { metadataReady?: () => boolean; tags?: boolean } = {}) {
   let stored: unknown = {
@@ -136,6 +176,26 @@ describe("snapshotFor", () => {
   it("resolves a tag space once the cache is ready", async () => {
     const { controller } = await build({ metadataReady: () => true, tags: true });
     expect(visible(controller.snapshotFor(tagged))).toContain("Papers/A.md");
+  });
+
+  it("honours globalIgnore", async () => {
+    // Ablating this to an empty matcher was green, and it would copy every
+    // ignored note in a folder space out of the vault.
+    const { controller, store } = await build();
+    await store.mutate((d) => {
+      d.settings.globalIgnore = ["Papers/B.md"];
+    });
+    const s = controller.snapshotFor(papers);
+    expect(visible(s)).toContain("Papers/A.md");
+    expect(visible(s)).not.toContain("Papers/B.md");
+  });
+
+  it("resolves property members against the property index", async () => {
+    // Ablating the index away was green, and a property space would then
+    // export nothing at all.
+    const withProps = await buildWithProperties();
+    const s = withProps.controller.snapshotFor(propSpace);
+    expect(visible(s)).toContain("Papers/A.md");
   });
 
   it("honours the space's exclude list", async () => {

@@ -149,7 +149,7 @@ export class SpacesSettingTab extends PluginSettingTab {
      * whose notes have moved or gone; a button here would let someone skip
      * that and get a quietly partial export.
      */
-    private exportSpace?: (space: SpaceDefinition) => Promise<void>,
+    private exportSpace?: (spaceId: string) => Promise<void>,
     // Injected so a test can set it. Asked fresh each time the rows are built.
     private hasHover: () => boolean = deviceHasHover
   ) {
@@ -741,9 +741,20 @@ export class SpacesSettingTab extends PluginSettingTab {
                 .setButtonText("Export")
                 .setTooltip(`Copy ${space.name} to a folder outside your vault`)
                 .onClick(() => {
-                  // The export reports its own outcome, success or failure,
-                  // through a notice of its own, so nothing is said here.
-                  void this.exportSpace?.(space);
+                  // By id, not the captured definition. This tab is built
+                  // once and only redrawn when a space's id, name or
+                  // archived flag changes, so a `space` closed over here
+                  // goes stale the moment a member or an exclusion is
+                  // edited elsewhere: the export would then copy a note the
+                  // user had just excluded. Every other button on this row
+                  // passes the id for the same reason.
+                  //
+                  // The export reports its own outcome through a notice, so
+                  // nothing is said here; the catch is for a rejection that
+                  // never reached one.
+                  void this.exportSpace?.(space.id).catch((e: unknown) => {
+                    new Notice(`Spaces: could not export "${space.name}" (${String(e)})`);
+                  });
                 })
             );
           }

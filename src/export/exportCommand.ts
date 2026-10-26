@@ -4,7 +4,7 @@ import type { VisibilitySnapshot } from "../visibility/VisibilityEngine";
 import type { ConfirmPrompt } from "../ui/settingsEdits";
 import type { ExportSink } from "./ExportSink";
 import { buildExportPlan } from "./exportPlan";
-import { MANIFEST_FILENAME, buildSpaceManifest, spaceIdOfManifest } from "./spaceManifest";
+import { MANIFEST_FILENAME, buildSpaceManifest, readExistingExport } from "./spaceManifest";
 import { checkExportDir, resolveExportDir } from "./destination";
 import { blockedMessage, outcomeMessage, replaceConfirmPrompt } from "./exportCopy";
 import { runExport } from "./runExport";
@@ -126,11 +126,15 @@ export async function exportSpace(ctx: ExportContext): Promise<void> {
       // `safeFolderName` is lossy, so `Work/2026` and `Work-2026` share a
       // destination, and accepting any manifest would delete one space's
       // export while telling the user it was replacing the other's.
-      const existingId = spaceIdOfManifest(await sink.readText(MANIFEST_FILENAME));
-      if (existingId === null) return ctx.notify(blockedMessage("not-our-folder"));
-      if (existingId !== space.id) return ctx.notify(blockedMessage("another-space"));
+      const existing = readExistingExport(await sink.readText(MANIFEST_FILENAME));
+      if (existing === null) return ctx.notify(blockedMessage("not-our-folder"));
+      if (existing.spaceId !== space.id) return ctx.notify(blockedMessage("another-space"));
       // The path in the prompt is the path that gets removed, same string.
-      if (!(await ctx.confirm(replaceConfirmPrompt(realExportDir, space.name)))) return;
+      // The prompt reports what the folder SAYS it holds rather than
+      // asserting it is this space's: ids are recycled when a space is
+      // deleted and another is created with the same name, so a matching
+      // id is good evidence and not proof.
+      if (!(await ctx.confirm(replaceConfirmPrompt(realExportDir, existing)))) return;
       await sink.removeDir("");
     }
 

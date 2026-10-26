@@ -55,8 +55,13 @@ export function createNodeExportSink(rootDir: string): ExportSink {
       await fs.writeFile(at(rel), text, "utf8");
     },
     readText: async (rel) => {
+      // Resolved OUTSIDE the try. The catch is for "not there" and "not a
+      // file", which are ordinary answers; a path that leaves the export
+      // root is not, and swallowing it would turn the containment barrier
+      // into a silent null.
+      const full = at(rel);
       try {
-        return await fs.readFile(at(rel), "utf8");
+        return await fs.readFile(full, "utf8");
       } catch {
         return null;
       }

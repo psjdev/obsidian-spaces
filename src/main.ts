@@ -666,8 +666,11 @@ export default class SpacesPlugin extends Plugin {
       () => this.switcher?.cancelDrag(),
       () => this.controller.drawnPropertyIndex(),
       // Deferred for the same reason as everything above it: the
-      // controller the export needs does not exist in `onload()`.
-      (space) => this.exportSpace(space)
+      // controller the export needs does not exist in `onload()`. By id,
+      // so the space is re-read at click time rather than captured when
+      // the tab was built.
+      (id: string) =>
+        this.exportSpace(this.defs.get().spaces.find((s) => s.id === id) ?? null)
     );
     this.addSettingTab(this.settingTab);
 

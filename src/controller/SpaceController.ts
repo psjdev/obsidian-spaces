@@ -220,10 +220,36 @@ export class SpaceController {
    * every caller of this drops visitors anyway. One answer for every space
    * keeps this to one code path rather than two.
    *
-   * Nothing is stored: this does not touch `this.snapshot` and does not
-   * disturb what the pane is showing.
+   * Does not touch `this.snapshot` and does not disturb what the pane is
+   * showing. Not side-effect free, though: asking for a property index
+   * updates the last-ready one through `drawnPropertyIndex`, the same as
+   * any other read of it.
    */
   snapshotFor(space: SpaceDefinition): VisibilitySnapshot | null {
+    return this.snapshotOf(space, new Set<string>());
+  }
+
+  /**
+   * The one place a snapshot is built, for `recompute` and `snapshotFor`
+   * alike.
+   *
+   * Shared rather than duplicated on purpose. The two differ only in what
+   * they do with the answer: `recompute` stores it and tells the host, and
+   * `snapshotFor` hands it back. Every rule about WHAT a space contains —
+   * the readiness gate, the member resolution, the ignore matcher, the
+   * exclusion folding — has to be the same rule, and a copy of it in two
+   * places is a copy that drifts.
+   *
+   * Null means this space resolves its members against an index that is not
+   * ready, which is not the same as matching nothing.
+   */
+  private snapshotOf(
+    space: SpaceDefinition,
+    visitors: ReadonlySet<string>
+  ): VisibilitySnapshot | null {
+    // At most one read, and none at all when the gate can answer without
+    // it: the gate and the snapshot below must be handed the same answer,
+    // or they can disagree about what this space holds.
     let asked: PropertyIndex | null | undefined;
     const properties = (): PropertyIndex | null =>
       (asked = asked === undefined ? this.propertiesFor(space) : asked);
@@ -233,7 +259,7 @@ export class SpaceController {
     return buildVisibilitySnapshot(
       this.vault,
       { ...space, members: [...this.membersForSnapshot(space, properties(), ignore)] },
-      new Set<string>(),
+      new Set(visitors),
       ignore,
       new Set((space.exclude ?? []).map(canonicalPath))
     );
@@ -657,26 +683,17 @@ export class SpaceController {
     // At most one read per recompute, and none at all when the gate below can
     // answer without it: the gate and the snapshot further down must be handed
     // the same answer, or they can disagree about what this space holds.
-    let asked: PropertyIndex | null | undefined;
-    const properties = (): PropertyIndex | null =>
-      (asked = asked === undefined ? this.propertiesFor(space) : asked);
-    if (watchesMetadata(space) && this.stillReading(space, properties)) {
+    const settings = this.defs.get().settings;
+    const revealed = this.revealed.paths();
+    // Off means nothing is revealed, and nothing else changes.
+    const visitors = settings.revealVisitors ? revealed : new Set<string>();
+    const built = this.snapshotOf(space, visitors);
+    if (built === null) {
       this.snapshot = null;
       this.host.apply(null);
       return;
     }
-    const settings = this.defs.get().settings;
-    const ignore = compileIgnore(settings.globalIgnore);
-    const revealed = this.revealed.paths();
-    // Off means nothing is revealed, and nothing else changes.
-    const visitors = settings.revealVisitors ? revealed : new Set<string>();
-    this.snapshot = buildVisibilitySnapshot(
-      this.vault,
-      { ...space, members: [...this.membersForSnapshot(space, properties(), ignore)] },
-      visitors,
-      ignore,
-      new Set((space.exclude ?? []).map(canonicalPath))
-    );
+    this.snapshot = built;
     // The first exit condition: a path that has BECOME a member of the active
     // space leaves the revealed set. Nothing changes on screen — what changes
     // is that the bookkeeping stops outliving the membership: without this, a

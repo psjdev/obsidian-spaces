@@ -51,7 +51,7 @@ function storeOf(spaces: SpaceDefinition[]): DefinitionStore {
 
 function tabOf(
   spaces: SpaceDefinition[],
-  exportSpace?: (s: SpaceDefinition) => Promise<void>
+  exportSpace?: (spaceId: string) => Promise<void>
 ): SpacesSettingTab {
   const app = { vault: { getAbstractFileByPath: () => null } };
   return new SpacesSettingTab(
@@ -149,10 +149,24 @@ describe("the Export button in Settings", () => {
   it("exports the space whose row was clicked, not whichever is active", () => {
     // The whole reason the controller gained `snapshotFor`.
     const seen: string[] = [];
-    const tab = tabOf([space(), space({ id: "garden", name: "Garden" })], async (s) => {
-      seen.push(s.id);
+    const tab = tabOf([space(), space({ id: "garden", name: "Garden" })], async (id) => {
+      seen.push(id);
     });
     buttonsOf(tab, "Garden").find((b) => b.text === "Export")?.click();
     expect(seen).toEqual(["garden"]);
+  });
+
+  it("hands over the space id, not a definition captured when the tab was built", () => {
+    // The tab is redrawn only when a space's id, name or archived flag
+    // changes, so a captured definition goes stale as soon as a member or
+    // an exclusion is edited elsewhere, and the export would copy a note
+    // the user had just excluded.
+    const seen: unknown[] = [];
+    const tab = tabOf([space()], async (id) => {
+      seen.push(id);
+    });
+    buttonsOf(tab, "Kitchen").find((b) => b.text === "Export")?.click();
+    expect(seen).toEqual(["kitchen"]);
+    expect(typeof seen[0]).toBe("string");
   });
 });
