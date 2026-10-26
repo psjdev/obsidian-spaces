@@ -131,7 +131,6 @@ describe("the registered command list", () => {
     expect(plugin["commandSpecs"]().map((c) => c.id).sort()).toEqual([
       "add-active-file-to-space",
       "create-space",
-      "export-space",
       "lock-strip",
       "move-strip-bottom",
       "move-strip-left",

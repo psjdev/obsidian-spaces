@@ -51,8 +51,6 @@ function offersHideStrip(placement: StripPlacement, hover: boolean): boolean {
     undefined,
     undefined,
     undefined,
-    // exportSpace: absent, so the Export button is not drawn here.
-    undefined,
     () => hover
   );
   const flat = (items: Item[] | undefined): Item[] =>
@@ -94,8 +92,6 @@ function tabAt(placement: StripPlacement, hover = true) {
     undefined,
     undefined,
     undefined,
-    undefined,
-    // exportSpace: absent, so the Export button is not drawn here.
     undefined,
     () => hover
   );

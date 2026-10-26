@@ -1,18 +1,32 @@
 # Changelog
 
+## 0.15.1 — 2026-10-26
+
+Removes the space export added in 0.15.0.
+
+Exporting a space meant writing outside the vault, which needs Node's `fs`
+module. Obsidian's plugin review flags that as direct filesystem access, and
+the flag is fair: a plugin holding it can read and write any file on the
+system, whatever it actually does.
+
+The deeper reason is that it was the wrong job for this plugin. Spaces is for
+working inside Obsidian. Getting notes and folders out of a vault is what
+your file manager, your backup tool and your sync client already do, and
+they do it without a plugin holding that much reach.
+
+What would help instead is letting other tools see what a space holds, so
+they can do the copying. The plugin's API reports a space's stored member
+paths but cannot report what a space actually CONTAINS: notes reached by a
+tag or a property member are deliberately absent. Closing that gap is
+tracked in #64.
+
+If you exported a space with 0.15.0, the folder it wrote is untouched. This
+release only removes the ability to write another one.
+
 ## 0.15.0 — 2026-10-26
 
-A space can now be exported to a folder. Run **Export space to a folder** from the command palette while you are in the space, or click **Export** beside any space in Settings → Spaces, then pick where to put it.
+Added a space export, removed again in 0.15.1. See that entry for why.
 
-Archived spaces are not exported. Restore one first: restoring runs the repair window, which asks what to do about notes and folders that have moved or gone, and an export that skipped it would quietly leave them out.
-
-The export mirrors your vault's folder structure inside a folder named after the space, so two notes with the same name in different folders stay apart. It includes the notes and folders the space holds, and the images and notes they link to, so the exported notes still read correctly.
-
-A small file records the space's name, icon, color and order, so the folder is an archive rather than a pile of notes.
-
-The export writes only where you point it, and it will not export into your vault.
-
-If a folder of that name is already there, you are asked before anything is touched. The question names the full path, says what the folder appears to be, and says how many notes and folders it holds, because answering yes deletes it and everything in it.
 
 ## 0.14.1 — 2026-10-21
 
