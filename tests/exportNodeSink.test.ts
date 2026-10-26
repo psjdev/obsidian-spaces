@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -103,6 +103,25 @@ describe("createNodeExportSink against a real filesystem", () => {
     const sink = createNodeExportSink(root);
     await sink.writeText("u.json", '{"name":"計画"}');
     expect(await sink.readText("u.json")).toContain("計画");
+  });
+
+  it("counts what a folder holds, dotfiles included", async () => {
+    // This number goes into the confirmation in front of the recursive
+    // delete: "holds 412 notes and folders" is what tells someone they are
+    // about to replace their Documents folder.
+    const sink = createNodeExportSink(root);
+    expect(await sink.countEntries("")).toBe(0);
+    await sink.writeFile("a.md", new Uint8Array([1]));
+    await sink.ensureDir("sub");
+    await writeFile(join(root, ".DS_Store"), "x");
+    expect(await sink.countEntries("")).toBe(3);
+    // Top level only: what is inside `sub` is not counted twice.
+    await sink.writeFile("sub/b.md", new Uint8Array([1]));
+    expect(await sink.countEntries("")).toBe(3);
+  });
+
+  it("counts a missing folder as nothing rather than throwing", async () => {
+    expect(await createNodeExportSink(root).countEntries("gone")).toBe(0);
   });
 
   it("answers exists without throwing on a missing path", async () => {

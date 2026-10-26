@@ -40,7 +40,14 @@ interface Harness {
   sinks: FakeExportSink[];
 }
 
-function harness(over: Partial<ExportContext> = {}, sinkOpts: { seed?: (s: FakeExportSink) => void } = {}): Harness {
+function harness(
+  over: Partial<ExportContext> = {},
+  sinkOpts: { seed?: (s: FakeExportSink) => void; answer?: boolean } = {}
+): Harness {
+  // The answer, kept apart from the recorder: overriding `confirm` to say
+  // no would otherwise replace the recording and every assertion about
+  // what the user was ASKED would quietly see nothing.
+  const answer = sinkOpts.answer ?? true;
   const notices: string[] = [];
   const sinkRoots: string[] = [];
   const confirmedPaths: string[] = [];
@@ -60,7 +67,7 @@ function harness(over: Partial<ExportContext> = {}, sinkOpts: { seed?: (s: FakeE
     realpath: async (p) => p,
     confirm: async (prompt) => {
       confirmedPaths.push(prompt.body);
-      return true;
+      return answer;
     },
     makeSink: (rootDir) => {
       sinkRoots.push(rootDir);
@@ -290,39 +297,50 @@ describe("exportSpace: replacing", () => {
     expect(h.sinks[0]?.removed).toEqual([]);
   });
 
-  it("refuses an EMPTY folder that is already there", async () => {
-    // A folder the user made earlier is still a folder they made on
-    // purpose. The only destination written without a word is one that
-    // does not exist yet.
-    const h = harness({}, {
+  it("ASKS about an empty folder that is already there, rather than refusing", async () => {
+    // A folder the user made earlier is still one they made on purpose, so
+    // it is put to them. Refusing left a dead end inside the plugin.
+    const h = harness({}, { answer: false,
       seed: (s) => {
         void s.ensureDir("");
       },
     });
     await exportSpace(h.ctx);
-    expect(h.notices).toEqual([blockedMessage("not-our-folder")]);
-    expect(h.confirmedPaths).toEqual([]);
+    expect(h.confirmedPaths).toHaveLength(1);
+    expect(h.notices).toEqual([]);
     expect(h.sinks[0]?.files.size).toBe(0);
   });
 
-  it("refuses a non-empty folder that is not one of ours", async () => {
-    // A space called Documents must never eat the user's Documents folder.
-    const h = harness({}, {
+  it("asks before replacing a folder that is not an export, and says so", async () => {
+    // This is the path that can eat a user's Documents folder, so the
+    // prompt has to say what the folder is and how much is in it.
+    const h = harness({}, { answer: false,
       seed: (s) => {
-        // A real destination folder exists before anything is written into
-        // it; the fake enforces that now, as the filesystem does.
         void s.ensureDir("");
         void s.writeText("someone-elses-work.md", "mine");
       },
     });
     await exportSpace(h.ctx);
-    expect(h.notices).toEqual([blockedMessage("not-our-folder")]);
-    expect(h.confirmedPaths).toEqual([]);
+    expect(h.confirmedPaths).toHaveLength(1);
+    expect(h.confirmedPaths[0]).toMatch(/is not an export/i);
+    expect(h.confirmedPaths[0]).toMatch(/1 note or folder/);
     expect(h.sinks[0]?.removed).toEqual([]);
   });
 
+  it("deletes a folder that is not an export once confirmed", async () => {
+    const h = harness({}, {
+      seed: (s) => {
+        void s.ensureDir("");
+        void s.writeText("someone-elses-work.md", "mine");
+      },
+    });
+    await exportSpace(h.ctx);
+    expect(h.sinks[0]?.removed).toEqual([""]);
+    expect(h.sinks[0]?.files.has("Reading/book.md")).toBe(true);
+  });
+
   it("asks before replacing one of our own exports, and stops on cancel", async () => {
-    const h = harness({ confirm: async () => false }, {
+    const h = harness({}, { answer: false,
       seed: (s) => {
         // A real destination folder exists before anything is written into
         // it; the fake enforces that now, as the filesystem does.
@@ -349,36 +367,30 @@ describe("exportSpace: replacing", () => {
     expect(h.sinks[0]?.files.has("Reading/book.md")).toBe(true);
   });
 
-  it("refuses a folder holding another space's export", async () => {
-    // Space NAMES are not unique and safeFolderName is lossy: "Work/2026"
-    // and "Work-2026" both become "Work-2026". Accepting any manifest would
-    // delete one space's export while the prompt claimed it was replacing
-    // this space's.
-    const h = harness({}, {
+  it("says plainly when the folder holds ANOTHER space's export", async () => {
+    // "Work/2026" and "Work-2026" share a destination, so this is reachable
+    // without anyone doing anything odd.
+    const h = harness({}, { answer: false,
       seed: (s) => {
-        // A real destination folder exists before anything is written into
-        // it; the fake enforces that now, as the filesystem does.
         void s.ensureDir("");
         void s.writeText(MANIFEST_FILENAME, OTHER_MANIFEST);
       },
     });
     await exportSpace(h.ctx);
-    expect(h.notices).toEqual([blockedMessage("another-space")]);
-    expect(h.confirmedPaths).toEqual([]);
+    expect(h.confirmedPaths).toHaveLength(1);
+    expect(h.confirmedPaths[0]).toMatch(/not this one/i);
     expect(h.sinks[0]?.removed).toEqual([]);
   });
 
-  it("refuses a folder whose manifest is corrupt", async () => {
-    const h = harness({}, {
+  it("treats a corrupt manifest as not an export", async () => {
+    const h = harness({}, { answer: false,
       seed: (s) => {
-        // A real destination folder exists before anything is written into
-        // it; the fake enforces that now, as the filesystem does.
         void s.ensureDir("");
         void s.writeText(MANIFEST_FILENAME, "{ not json");
       },
     });
     await exportSpace(h.ctx);
-    expect(h.notices).toEqual([blockedMessage("not-our-folder")]);
+    expect(h.confirmedPaths[0]).toMatch(/is not an export/i);
     expect(h.sinks[0]?.removed).toEqual([]);
   });
 

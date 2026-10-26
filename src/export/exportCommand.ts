@@ -115,26 +115,27 @@ export async function exportSpace(ctx: ExportContext): Promise<void> {
     if (plan.collisions.length > 0) return ctx.notify(blockedMessage("collision"));
 
     const sink = ctx.makeSink(realExportDir);
-    // ANY folder that is already there is flagged, empty or not. A folder
-    // the user made earlier is still a folder they made on purpose, and the
-    // only case worth writing into without a word is one that does not
-    // exist yet. An existing folder is then either ours, which the replace
-    // confirmation handles, or theirs, which is refused.
+    // ANY folder already there is put to the user, empty or not, and ALWAYS
+    // as a question rather than a refusal: a refusal left them with a dead
+    // end inside the plugin and nothing to do about it. The only case
+    // written into without a word is a folder that does not exist yet.
+    //
+    // Which question depends on what the folder turns out to be, and the
+    // manifest's space id is the only honest evidence. Its mere presence is
+    // not enough: `Work/2026` and `Work-2026` share a destination, and an
+    // id is recycled when a space is deleted and another takes its name.
     if (await sink.exists("")) {
-      // Ours, or somebody's? The manifest's space id is the only honest
-      // answer. Its mere presence is not: space names are not unique and
-      // `safeFolderName` is lossy, so `Work/2026` and `Work-2026` share a
-      // destination, and accepting any manifest would delete one space's
-      // export while telling the user it was replacing the other's.
       const existing = readExistingExport(await sink.readText(MANIFEST_FILENAME));
-      if (existing === null) return ctx.notify(blockedMessage("not-our-folder"));
-      if (existing.spaceId !== space.id) return ctx.notify(blockedMessage("another-space"));
       // The path in the prompt is the path that gets removed, same string.
-      // The prompt reports what the folder SAYS it holds rather than
-      // asserting it is this space's: ids are recycled when a space is
-      // deleted and another is created with the same name, so a matching
-      // id is good evidence and not proof.
-      if (!(await ctx.confirm(replaceConfirmPrompt(realExportDir, existing)))) return;
+      const confirmed = await ctx.confirm(
+        replaceConfirmPrompt({
+          fullPath: realExportDir,
+          entries: await sink.countEntries(""),
+          existing,
+          isThisSpace: existing !== null && existing.spaceId === space.id,
+        })
+      );
+      if (!confirmed) return;
       await sink.removeDir("");
     }
 

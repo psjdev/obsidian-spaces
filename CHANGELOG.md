@@ -10,7 +10,9 @@ The export mirrors your vault's folder structure inside a folder named after the
 
 A small file records the space's name, icon, color and order, so the folder is an archive rather than a pile of notes.
 
-The export writes only where you point it. It will not export into your vault, and it will not replace a folder unless that folder already holds an export of the same space, which it confirms by reading that export's own record of which space it came from. When it does replace one, it asks first and names the full path.
+The export writes only where you point it, and it will not export into your vault.
+
+If a folder of that name is already there, you are asked before anything is touched. The question names the full path, says what the folder appears to be, and says how many notes and folders it holds, because answering yes deletes it and everything in it.
 
 ## 0.14.1 — 2026-10-21
 

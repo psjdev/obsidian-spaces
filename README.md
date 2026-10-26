@@ -283,7 +283,9 @@ One action writes outside the vault: **Export space to a folder**, from the comm
 
 It writes only when you run it, and only inside the folder you pick in the dialog, in a subfolder named after the space. It reads the notes and folders the space holds, plus the images and notes those notes link to, and writes a small `.space-export.json` recording what the space was.
 
-It refuses to export into your vault, and refuses a folder it cannot tell is outside your vault. It will only replace a folder that already holds an export of the same space, which it checks by reading the space's identity out of that file, and it asks first and names the full path before replacing anything. Nothing else is read, written or sent anywhere.
+It refuses to export into your vault, and refuses a folder it cannot tell is outside your vault.
+
+If anything is already at the destination, it asks before touching it. The question names the full path, says whether the folder is an export of this space, an export of a different one, or not an export at all, and says how many notes and folders it holds. Answering yes deletes that folder and everything in it. Nothing else is read, written or sent anywhere.
 
 The plugin makes no network requests. A test (`tests/noNetwork.test.ts`) scans the source for `fetch`, `requestUrl` and socket calls and asserts there are none, and that the plugin ships no runtime dependencies.
 

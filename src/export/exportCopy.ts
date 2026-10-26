@@ -16,9 +16,7 @@ export type BlockedReason =
   | "inside-vault"
   | "contains-vault"
   | "unknown-vault"
-  | "collision"
-  | "not-our-folder"
-  | "another-space";
+  | "collision";
 
 export const BLOCKED_REASONS: readonly BlockedReason[] = [
   "no-space",
@@ -28,38 +26,79 @@ export const BLOCKED_REASONS: readonly BlockedReason[] = [
   "contains-vault",
   "unknown-vault",
   "collision",
-  "not-our-folder",
-  "another-space",
 ];
+
+/** What the export found waiting at the destination. */
+export interface OccupiedDestination {
+  fullPath: string;
+  /** How many entries the folder holds, dotfiles included. */
+  entries: number;
+  /**
+   * What the folder's own manifest says, or null when there is none and the
+   * folder is therefore not an export at all.
+   */
+  existing: ExistingExport | null;
+  /** True when `existing` records the space being exported right now. */
+  isThisSpace: boolean;
+}
 
 /**
  * The gate in front of the one destructive thing this feature does.
  *
- * Names the full path, because the folder being replaced is outside the
- * vault and the space's name alone does not say where it is.
+ * Always a question, never a refusal. Whatever is in the way, the user is
+ * told what it is and asked; refusing outright left them with a dead end
+ * inside the plugin and nothing to do about it.
  *
- * It reports what the folder SAYS about itself rather than asserting it is
- * this space's export. A space id is a slug of its name and is freed when
- * the space is deleted, so deleting a space and creating another with the
- * same name recycles the id, and an export of the OLD space then matches
- * the new one exactly. Showing the name and the date it was made is what
- * lets someone recognise an old project; "an export of this space" would
- * tell them nothing and would sometimes be false.
+ * That makes this text the only thing between someone and a recursive
+ * delete of a folder that is not ours, so it says three things every time:
+ * the full path, what the folder appears to be, and how much is in it. A
+ * space called "Documents" pointed at a home directory produces "holds 412
+ * notes and folders", which is what tells someone to stop.
+ *
+ * It REPORTS rather than asserts ownership. A space id is a slug of its
+ * name and is freed when the space is deleted, so deleting a space and
+ * creating another with the same name recycles the id and an export of the
+ * OLD space matches the new one exactly. A matching id is evidence, not
+ * proof.
  */
-export function replaceConfirmPrompt(
-  fullPath: string,
-  existing: ExistingExport
-): ConfirmPrompt {
-  const made = describeDate(existing.exportedAt);
-  const what = existing.spaceName === null ? "An export" : `An export of "${existing.spaceName}"`;
+export function replaceConfirmPrompt(at: OccupiedDestination): ConfirmPrompt {
+  const held = `It holds ${countPhrase(at.entries)}.`;
+  const lost = "Replacing it deletes that folder and everything in it, then writes this space again.";
+
+  if (at.existing !== null && at.isThisSpace) {
+    const made = describeDate(at.existing.exportedAt);
+    const named = at.existing.spaceName === null ? "an export" : `an export of "${at.existing.spaceName}"`;
+    return {
+      title: "Replace the export already in that folder?",
+      body: `${at.fullPath} holds ${named}${made}. ${held} ${lost} Check it is the one you mean.`,
+      confirmLabel: "Replace",
+    };
+  }
+
+  if (at.existing !== null) {
+    const named = at.existing.spaceName === null ? "another space" : `the space "${at.existing.spaceName}"`;
+    return {
+      title: "That folder holds another space's export",
+      body:
+        `${at.fullPath} holds an export of ${named}, not this one. ${held} ${lost} ` +
+        "Pick a different folder unless you meant to replace it.",
+      confirmLabel: "Replace anyway",
+    };
+  }
+
   return {
-    title: "Replace the export already in that folder?",
+    title: "A folder of that name is already there",
     body:
-      `${fullPath} already holds an export. ${what}${made}. ` +
-      "Replacing it deletes that folder and writes this space again. " +
-      "Check it is the one you mean: anything else in there will be lost.",
-    confirmLabel: "Replace",
+      `${at.fullPath} already exists and is not an export. ${held} ${lost} ` +
+      "Make sure this is a folder you want to lose.",
+    confirmLabel: "Delete it and export",
   };
+}
+
+/** "nothing", "1 note or folder", "412 notes and folders". */
+function countPhrase(n: number): string {
+  if (n <= 0) return "nothing";
+  return n === 1 ? "1 note or folder" : `${String(n)} notes and folders`;
 }
 
 /** " made on 25 October 2026", or "" when the export did not say. */
@@ -90,14 +129,7 @@ export function blockedMessage(reason: BlockedReason): string {
       return "Spaces cannot tell where this vault is on disk, so it cannot check the folder you picked. Export is not available.";
     case "collision":
       return "Two notes in this space have names that differ only in capitalization, so one would overwrite the other. Rename one, then export again.";
-    case "not-our-folder":
-      return (
-        "A folder of that name is already there and is not an export of this space. " +
-        "Pick a different folder, or move that one out of the way. " +
-        "An export that failed part way leaves a folder like this, so delete it before trying again."
-      );
-    case "another-space":
-      return "That folder holds an export of a different space. Rename this space, or pick a different folder.";
+
   }
 }
 

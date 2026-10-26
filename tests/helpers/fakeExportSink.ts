@@ -70,6 +70,15 @@ export function fakeExportSink(opts: { existing?: Set<string> } = {}): FakeExpor
       order.push(`text:${rel}`);
     },
     readText: async (rel) => texts.get(rel) ?? null,
+    countEntries: async (rel) => {
+      const prefix = rel === "" ? "" : `${rel}/`;
+      const held = new Set<string>();
+      for (const p of [...files.keys(), ...texts.keys(), ...dirs]) {
+        if (p === rel || p === "" || !p.startsWith(prefix)) continue;
+        held.add(p.slice(prefix.length).split("/")[0]);
+      }
+      return held.size;
+    },
     exists: async (rel) => dirs.has(rel) || files.has(rel) || texts.has(rel),
     removeDir: async (rel) => {
       removed.push(rel);

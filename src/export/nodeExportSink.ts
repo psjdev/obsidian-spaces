@@ -66,6 +66,14 @@ export function createNodeExportSink(rootDir: string): ExportSink {
         return null;
       }
     },
+    countEntries: async (rel) => {
+      const full = at(rel);
+      try {
+        return (await fs.readdir(full)).length;
+      } catch {
+        return 0;
+      }
+    },
     exists: async (rel) => {
       try {
         await fs.stat(at(rel));
