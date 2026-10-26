@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.0
+## 0.15.0 — 2026-10-26
 
 A space can now be exported to a folder. Run **Export space to a folder** from the command palette while you are in the space, or click **Export** beside any space in Settings → Spaces, then pick where to put it.
 
