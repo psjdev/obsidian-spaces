@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0 — 2026-10-26
+
+A space can now be exported to a folder. Run **Export space to a folder** from the command palette while you are in the space, or click **Export** beside any space in Settings → Spaces, then pick where to put it.
+
+Archived spaces are not exported. Restore one first: restoring runs the repair window, which asks what to do about notes and folders that have moved or gone, and an export that skipped it would quietly leave them out.
+
+The export mirrors your vault's folder structure inside a folder named after the space, so two notes with the same name in different folders stay apart. It includes the notes and folders the space holds, and the images and notes they link to, so the exported notes still read correctly.
+
+A small file records the space's name, icon, color and order, so the folder is an archive rather than a pile of notes.
+
+The export writes only where you point it, and it will not export into your vault.
+
+If a folder of that name is already there, you are asked before anything is touched. The question names the full path, says what the folder appears to be, and says how many notes and folders it holds, because answering yes deletes it and everything in it.
+
 ## 0.14.1 — 2026-10-21
 
 Nothing changes in how you use the plugin. A hidden space strip still slides
