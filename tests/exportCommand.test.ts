@@ -5,7 +5,7 @@ import { buildFakeVault } from "./helpers/fakeVault";
 import { fakeExportSink, type FakeExportSink } from "./helpers/fakeExportSink";
 import { MANIFEST_FILENAME } from "../src/export/spaceManifest";
 import { blockedMessage } from "../src/export/exportCopy";
-import { type ExportContext, exportActiveSpace } from "../src/export/exportCommand";
+import { type ExportContext, exportSpace } from "../src/export/exportCommand";
 
 const space: SpaceDefinition = {
   id: "kitchen",
@@ -77,17 +77,17 @@ function harness(over: Partial<ExportContext> = {}, sinkOpts: { seed?: (s: FakeE
   return { ctx, notices, sinkRoots, confirmedPaths, sinks };
 }
 
-describe("exportActiveSpace: the guards, in order", () => {
+describe("exportSpace: the guards, in order", () => {
   it("refuses when no space is active", async () => {
     const h = harness({ space: null });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("no-space")]);
     expect(h.sinkRoots).toEqual([]);
   });
 
   it("refuses when the snapshot is not ready", async () => {
     const h = harness({ snapshot: null });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("indexing")]);
     expect(h.sinkRoots).toEqual([]);
   });
@@ -97,7 +97,7 @@ describe("exportActiveSpace: the guards, in order", () => {
     // the check above does not cover this. Without it the export ships
     // every note with none of its images and reports success.
     const h = harness({ parseProgress: () => 3 });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("indexing")]);
     expect(h.sinkRoots).toEqual([]);
   });
@@ -106,13 +106,13 @@ describe("exportActiveSpace: the guards, in order", () => {
     // null means the private API is not shaped as expected. Fail open, as
     // the rest of the plugin does with this signal.
     const h = harness({ parseProgress: () => null });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.sinkRoots).toHaveLength(1);
   });
 
   it("refuses a folder space whose root is missing", async () => {
     const h = harness({ rootMissing: true });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("missing-root")]);
     expect(h.sinkRoots).toEqual([]);
   });
@@ -121,25 +121,25 @@ describe("exportActiveSpace: the guards, in order", () => {
     // showOpenDialog yields filePaths[0] === undefined on cancel, not null.
     for (const v of [null, undefined, ""] as const) {
       const h = harness({ pickDir: async () => v });
-      await exportActiveSpace(h.ctx);
+      await exportSpace(h.ctx);
       expect(h.sinkRoots).toEqual([]);
       expect(h.notices).toEqual([]);
     }
   });
 });
 
-describe("exportActiveSpace: where it writes", () => {
+describe("exportSpace: where it writes", () => {
   it("roots the sink at the chosen folder plus the space's name", async () => {
     // Mis-wiring this to the chosen folder would delete everything the user
     // picked, and every other test here would stay green.
     const h = harness();
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.sinkRoots).toEqual(["C:/Users/x/Desktop/Kitchen"]);
   });
 
   it("sanitises the space name into the folder", async () => {
     const h = harness({ space: { ...space, name: "a/b" } });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.sinkRoots).toEqual(["C:/Users/x/Desktop/a-b"]);
   });
 
@@ -150,7 +150,7 @@ describe("exportActiveSpace: where it writes", () => {
       pickDir: async () => "C:/Notes",
       space: { ...space, name: "Vault" },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("inside-vault")]);
     expect(h.sinkRoots).toEqual([]);
   });
@@ -158,14 +158,14 @@ describe("exportActiveSpace: where it writes", () => {
   it("resolves links before judging the destination", async () => {
     // A junction pointing into the vault defeats a pure string compare.
     const h = harness({ realpath: async () => "C:/Notes/Vault/Exports" });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("inside-vault")]);
     expect(h.sinkRoots).toEqual([]);
   });
 
   it("refuses when the vault path is unknown", async () => {
     const h = harness({ vaultBasePath: null });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("unknown-vault")]);
     expect(h.sinkRoots).toEqual([]);
   });
@@ -183,7 +183,7 @@ describe("exportActiveSpace: where it writes", () => {
         }),
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("collision")]);
     // Refusing AFTER the destination was replaced would delete a previous
     // export and then decline to write a new one.
@@ -191,7 +191,7 @@ describe("exportActiveSpace: where it writes", () => {
   });
 });
 
-describe("exportActiveSpace: resolving the destination", () => {
+describe("exportSpace: resolving the destination", () => {
   it("resolves the EXPORT folder, not only the folder that was picked", async () => {
     // A junction at <chosen>/<SpaceName> is a different link from one on
     // its parent. Resolving only the parent left it able to point into the
@@ -200,7 +200,7 @@ describe("exportActiveSpace: resolving the destination", () => {
       realpath: async (p) =>
         p === "C:/Users/x/Desktop/Kitchen" ? "C:/Notes/Vault/sneaky" : p,
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("inside-vault")]);
     expect(h.sinkRoots).toEqual([]);
   });
@@ -213,7 +213,7 @@ describe("exportActiveSpace: resolving the destination", () => {
       vaultBasePath: "C:/VaultLink",
       realpath: async (p) => (p === "C:/VaultLink" ? "C:/Users/x/Desktop" : p),
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("inside-vault")]);
   });
 
@@ -225,7 +225,7 @@ describe("exportActiveSpace: resolving the destination", () => {
         return p;
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.sinkRoots).toEqual(["C:/Users/x/Desktop/Kitchen"]);
   });
 
@@ -233,12 +233,12 @@ describe("exportActiveSpace: resolving the destination", () => {
     const h = harness({
       realpath: async (p) => (p === "C:/Users/x/Desktop/Kitchen" ? "D:/real/Kitchen" : p),
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.sinkRoots).toEqual(["D:/real/Kitchen"]);
   });
 });
 
-describe("exportActiveSpace: what it hands the selector", () => {
+describe("exportSpace: what it hands the selector", () => {
   it("passes isIgnored through, so an ignored embed stays out", async () => {
     // Owner decision O7, wired. Replacing ctx.isIgnored with a constant
     // used to leave every test green.
@@ -247,7 +247,7 @@ describe("exportActiveSpace: what it hands the selector", () => {
       links: { "Reading/book.md": { "Private/x.png": 1 } },
       isIgnored: (p) => p.startsWith("Private/"),
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect([...(h.sinks[0]?.files.keys() ?? [])]).not.toContain("Private/x.png");
   });
 
@@ -256,7 +256,7 @@ describe("exportActiveSpace: what it hands the selector", () => {
       vault: buildFakeVault({ ...tree, "Attachments/x.png": "file" }),
       links: { "Reading/book.md": { "Attachments/x.png": 1 } },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect([...(h.sinks[0]?.files.keys() ?? [])]).toContain("Attachments/x.png");
   });
 
@@ -266,7 +266,7 @@ describe("exportActiveSpace: what it hands the selector", () => {
       links: { "Reading/book.md": { "Attachments/x.png": 1 } },
       isExcluded: (p) => p === "Attachments/x.png",
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect([...(h.sinks[0]?.files.keys() ?? [])]).not.toContain("Attachments/x.png");
   });
 
@@ -275,19 +275,34 @@ describe("exportActiveSpace: what it hands the selector", () => {
       order: { Reading: ["Reading/book.md"] },
       now: () => new Date("2031-01-02T03:04:05Z"),
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     const written = h.sinks[0]?.texts.get(MANIFEST_FILENAME) ?? "";
     expect(JSON.parse(written).space.order).toEqual({ Reading: ["Reading/book.md"] });
     expect(JSON.parse(written).exportedAt).toBe("2031-01-02T03:04:05.000Z");
   });
 });
 
-describe("exportActiveSpace: replacing", () => {
+describe("exportSpace: replacing", () => {
   it("does not ask when the destination does not exist", async () => {
     const h = harness();
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.confirmedPaths).toEqual([]);
     expect(h.sinks[0]?.removed).toEqual([]);
+  });
+
+  it("refuses an EMPTY folder that is already there", async () => {
+    // A folder the user made earlier is still a folder they made on
+    // purpose. The only destination written without a word is one that
+    // does not exist yet.
+    const h = harness({}, {
+      seed: (s) => {
+        void s.ensureDir("");
+      },
+    });
+    await exportSpace(h.ctx);
+    expect(h.notices).toEqual([blockedMessage("not-our-folder")]);
+    expect(h.confirmedPaths).toEqual([]);
+    expect(h.sinks[0]?.files.size).toBe(0);
   });
 
   it("refuses a non-empty folder that is not one of ours", async () => {
@@ -300,7 +315,7 @@ describe("exportActiveSpace: replacing", () => {
         void s.writeText("someone-elses-work.md", "mine");
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("not-our-folder")]);
     expect(h.confirmedPaths).toEqual([]);
     expect(h.sinks[0]?.removed).toEqual([]);
@@ -315,7 +330,7 @@ describe("exportActiveSpace: replacing", () => {
         void s.writeText(MANIFEST_FILENAME, OUR_MANIFEST);
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.sinks[0]?.removed).toEqual([]);
     expect(h.sinks[0]?.files.size).toBe(0);
   });
@@ -329,7 +344,7 @@ describe("exportActiveSpace: replacing", () => {
         void s.writeText(MANIFEST_FILENAME, OUR_MANIFEST);
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.sinks[0]?.removed).toEqual([""]);
     expect(h.sinks[0]?.files.has("Reading/book.md")).toBe(true);
   });
@@ -347,7 +362,7 @@ describe("exportActiveSpace: replacing", () => {
         void s.writeText(MANIFEST_FILENAME, OTHER_MANIFEST);
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("another-space")]);
     expect(h.confirmedPaths).toEqual([]);
     expect(h.sinks[0]?.removed).toEqual([]);
@@ -362,7 +377,7 @@ describe("exportActiveSpace: replacing", () => {
         void s.writeText(MANIFEST_FILENAME, "{ not json");
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices).toEqual([blockedMessage("not-our-folder")]);
     expect(h.sinks[0]?.removed).toEqual([]);
   });
@@ -376,15 +391,15 @@ describe("exportActiveSpace: replacing", () => {
         void s.writeText(MANIFEST_FILENAME, OUR_MANIFEST);
       },
     });
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.confirmedPaths[0]).toContain("C:/Users/x/Desktop/Kitchen");
   });
 });
 
-describe("exportActiveSpace: reporting", () => {
+describe("exportSpace: reporting", () => {
   it("reports what it copied", async () => {
     const h = harness();
-    await exportActiveSpace(h.ctx);
+    await exportSpace(h.ctx);
     expect(h.notices[0]).toContain("C:/Users/x/Desktop/Kitchen");
     expect(h.notices[0]).toContain("1");
   });
@@ -395,7 +410,7 @@ describe("exportActiveSpace: reporting", () => {
         throw new Error("ENOTDIR: not a directory");
       },
     });
-    await expect(exportActiveSpace(h.ctx)).resolves.toBeUndefined();
+    await expect(exportSpace(h.ctx)).resolves.toBeUndefined();
     expect(h.notices[0]).toContain("ENOTDIR");
   });
 
@@ -405,7 +420,7 @@ describe("exportActiveSpace: reporting", () => {
         throw new Error("ENOENT: no such file or directory");
       },
     });
-    await expect(exportActiveSpace(h.ctx)).resolves.toBeUndefined();
+    await expect(exportSpace(h.ctx)).resolves.toBeUndefined();
     expect(h.notices[0]).toContain("ENOENT");
   });
 });

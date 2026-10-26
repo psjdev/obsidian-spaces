@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -76,15 +76,6 @@ describe("createNodeExportSink against a real filesystem", () => {
     const sink = createNodeExportSink(root);
     await sink.ensureDir("a/b/c");
     expect((await stat(join(root, "a", "b", "c"))).isDirectory()).toBe(true);
-  });
-
-  it("reports an empty directory as empty, and a lone dotfile as not empty", async () => {
-    // "Not empty" has to include dotfiles: a folder holding only a
-    // .DS_Store is still someone's folder, and replacing it would be wrong.
-    const sink = createNodeExportSink(root);
-    expect(await sink.isEmptyDir("")).toBe(true);
-    await writeFile(join(root, ".DS_Store"), "x");
-    expect(await sink.isEmptyDir("")).toBe(false);
   });
 
   it("answers exists without throwing on a missing path", async () => {

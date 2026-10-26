@@ -2,7 +2,9 @@
 
 ## 0.15.0
 
-A space can now be exported to a folder. Run **Export space to a folder** from the command palette while you are in the space, then pick where to put it.
+A space can now be exported to a folder. Run **Export space to a folder** from the command palette while you are in the space, or click **Export** beside any space in Settings → Spaces, then pick where to put it.
+
+Archived spaces are not exported. Restore one first: restoring runs the repair window, which asks what to do about notes and folders that have moved or gone, and an export that skipped it would quietly leave them out.
 
 The export mirrors your vault's folder structure inside a folder named after the space, so two notes with the same name in different folders stay apart. It includes the notes and folders the space holds, and the images and notes they link to, so the exported notes still read correctly.
 

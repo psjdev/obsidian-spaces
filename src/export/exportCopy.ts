@@ -65,7 +65,7 @@ export function blockedMessage(reason: BlockedReason): string {
     case "collision":
       return "Two notes in this space have names that differ only in capitalization, so one would overwrite the other. Rename one, then export again.";
     case "not-our-folder":
-      return "That folder already holds something other than an export of this space. Pick an empty folder, or a different one.";
+      return "A folder of that name is already there and is not an export of this space. Pick a different folder, or move that one out of the way.";
     case "another-space":
       return "That folder holds an export of a different space. Rename this space, or pick a different folder.";
   }

@@ -17,8 +17,6 @@ export interface ExportSink {
   exists(rel: string): Promise<boolean>;
   /** The file's text, or null when it is absent or unreadable. */
   readText(rel: string): Promise<string | null>;
-  /** Anything at all counts, including a lone dotfile. */
-  isEmptyDir(rel: string): Promise<boolean>;
   /**
    * Only ever called on the export root itself, after the user has confirmed
    * a replace. Kept out of `runExport` on purpose, so no code path can reach

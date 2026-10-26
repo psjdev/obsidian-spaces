@@ -136,6 +136,20 @@ export class SpacesSettingTab extends PluginSettingTab {
     // The property index the Contents dialog draws counts from, reached
     // rather than built. This tab never asks it anything itself.
     private getPropertyIndex?: () => PropertyIndex | null,
+    /**
+     * Exports one space to a folder the user picks.
+     *
+     * A callback for the same reason the others are: this tab is built in
+     * `onload()`, before the controller the export needs exists. Absent in
+     * tests, and the button is then not drawn at all rather than drawn
+     * dead.
+     *
+     * Offered on ACTIVE rows only. An archived space can be broken, and
+     * restoring it runs a repair window that asks what to do about members
+     * whose notes have moved or gone; a button here would let someone skip
+     * that and get a quietly partial export.
+     */
+    private exportSpace?: (space: SpaceDefinition) => Promise<void>,
     // Injected so a test can set it. Asked fresh each time the rows are built.
     private hasHover: () => boolean = deviceHasHover
   ) {
@@ -717,6 +731,19 @@ export class SpacesSettingTab extends PluginSettingTab {
                     // unavailable, and says so here.
                     this.getPropertyIndex ?? ((): null => null)
                   ).open();
+                })
+            );
+          }
+
+          if (this.exportSpace) {
+            setting.addButton((b) =>
+              b
+                .setButtonText("Export")
+                .setTooltip(`Copy ${space.name} to a folder outside your vault`)
+                .onClick(() => {
+                  // The export reports its own outcome, success or failure,
+                  // through a notice of its own, so nothing is said here.
+                  void this.exportSpace?.(space);
                 })
             );
           }

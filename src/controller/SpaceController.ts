@@ -202,6 +202,44 @@ export class SpaceController {
   }
 
   /**
+   * A snapshot for ANY space, built the way `recompute` builds the active
+   * one, or null when the space cannot be resolved yet.
+   *
+   * The export needs this. `currentSnapshot` answers only for the space the
+   * user is in, and a per-space action, in Settings or on a space icon, has
+   * to answer for a space that is not.
+   *
+   * Null carries the same meaning here as it does for the active snapshot:
+   * this space resolves its members against an index that is not ready, so
+   * "no matches yet" would otherwise be published as "no matches". For an
+   * export that distinction is the difference between a folder holding a tag
+   * space's twenty notes and a folder holding two.
+   *
+   * Visitors are deliberately EMPTY. A visitor is a file showing because it
+   * is open in the active pane, which means nothing for another space, and
+   * every caller of this drops visitors anyway. One answer for every space
+   * keeps this to one code path rather than two.
+   *
+   * Nothing is stored: this does not touch `this.snapshot` and does not
+   * disturb what the pane is showing.
+   */
+  snapshotFor(space: SpaceDefinition): VisibilitySnapshot | null {
+    let asked: PropertyIndex | null | undefined;
+    const properties = (): PropertyIndex | null =>
+      (asked = asked === undefined ? this.propertiesFor(space) : asked);
+    if (watchesMetadata(space) && this.stillReading(space, properties)) return null;
+
+    const ignore = compileIgnore(this.defs.get().settings.globalIgnore);
+    return buildVisibilitySnapshot(
+      this.vault,
+      { ...space, members: [...this.membersForSnapshot(space, properties(), ignore)] },
+      new Set<string>(),
+      ignore,
+      new Set((space.exclude ?? []).map(canonicalPath))
+    );
+  }
+
+  /**
    * Run a layout job with the same serialization and the same `switching`
    * guard a switch gets.
    *

@@ -47,7 +47,7 @@ export interface ExportContext {
 }
 
 /**
- * Exports the active space.
+ * Exports one space.
  *
  * The order of the guards below IS the safety property, and each refuses
  * before the next runs:
@@ -77,7 +77,7 @@ async function resolveIfPresent(ctx: ExportContext, p: string): Promise<string> 
   }
 }
 
-export async function exportActiveSpace(ctx: ExportContext): Promise<void> {
+export async function exportSpace(ctx: ExportContext): Promise<void> {
   const { space, snapshot } = ctx;
   if (space === null) return ctx.notify(blockedMessage("no-space"));
   if (snapshot === null) return ctx.notify(blockedMessage("indexing"));
@@ -115,7 +115,12 @@ export async function exportActiveSpace(ctx: ExportContext): Promise<void> {
     if (plan.collisions.length > 0) return ctx.notify(blockedMessage("collision"));
 
     const sink = ctx.makeSink(realExportDir);
-    if ((await sink.exists("")) && !(await sink.isEmptyDir(""))) {
+    // ANY folder that is already there is flagged, empty or not. A folder
+    // the user made earlier is still a folder they made on purpose, and the
+    // only case worth writing into without a word is one that does not
+    // exist yet. An existing folder is then either ours, which the replace
+    // confirmation handles, or theirs, which is refused.
+    if (await sink.exists("")) {
       // Ours, or somebody's? The manifest's space id is the only honest
       // answer. Its mere presence is not: space names are not unique and
       // `safeFolderName` is lossy, so `Work/2026` and `Work-2026` share a

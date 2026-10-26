@@ -236,7 +236,7 @@ All available from the command palette, and bindable to hotkeys.
 | New note in active space | Creates a note, in the pinned folder if the space has one |
 | New folder in active space | Creates a folder, in the pinned folder if the space has one |
 | Add active file to space | Adds the file you are editing to a space you choose |
-| Export space to a folder | Copies the active space to a folder you pick, outside your vault |
+| Export space to a folder | Copies the active space to a folder you pick, outside your vault. Settings → Spaces has an **Export** button on every space, so you can export one you are not in |
 | Pause or resume space filtering | Releases the explorer entirely, showing Obsidian's own unfiltered tree |
 | Restore saved ordering | Returns to your own row order after switching to one of Obsidian's sort modes (see [Sorting](#sorting)) |
 | Move the space strip to the top / bottom / left / right | Repositions the space strip, the same as the Space strip position setting below |
@@ -279,7 +279,7 @@ Spaces, settings and saved row orders live in `data.json` inside the plugin's ow
 
 ### Writing outside your vault
 
-One command writes outside the vault: **Export space to a folder**. It needs to, because the point of it is handing a space to someone or keeping a copy somewhere else.
+One action writes outside the vault: **Export space to a folder**, from the command palette or the **Export** button beside each space in Settings → Spaces. It needs to, because the point of it is handing a space to someone or keeping a copy somewhere else.
 
 It writes only when you run it, and only inside the folder you pick in the dialog, in a subfolder named after the space. It reads the notes and folders the space holds, plus the images and notes those notes link to, and writes a small `.space-export.json` recording what the space was.
 

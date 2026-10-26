@@ -71,18 +71,6 @@ export function fakeExportSink(opts: { existing?: Set<string> } = {}): FakeExpor
     },
     readText: async (rel) => texts.get(rel) ?? null,
     exists: async (rel) => dirs.has(rel) || files.has(rel) || texts.has(rel),
-    isEmptyDir: async (rel) => {
-      // `fs.readdir` throws ENOENT on a directory that is not there, and
-      // the command relies on that: without this, dropping the `exists`
-      // check ahead of it would break every FIRST export and no test
-      // here would notice.
-      if (!dirs.has(rel)) throw new Error(`ENOENT: no such directory ${rel || "<root>"}`);
-      const prefix = rel === "" ? "" : `${rel}/`;
-      const held = [...files.keys(), ...texts.keys(), ...dirs].filter(
-        (p) => p !== rel && p.startsWith(prefix) && p !== ""
-      );
-      return held.length === 0;
-    },
     removeDir: async (rel) => {
       removed.push(rel);
       order.push(`rm:${rel}`);

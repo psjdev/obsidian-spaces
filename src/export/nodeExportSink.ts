@@ -69,12 +69,6 @@ export function createNodeExportSink(rootDir: string): ExportSink {
         return false;
       }
     },
-    isEmptyDir: async (rel) => {
-      // `readdir` counts dotfiles, which is what the design asks for: a
-      // folder holding only a .DS_Store is still someone's folder.
-      const held = await fs.readdir(at(rel));
-      return held.length === 0;
-    },
     removeDir: async (rel) => {
       await fs.rm(at(rel), { recursive: true, force: true });
     },
