@@ -1,5 +1,4 @@
 import {
-  FileSystemAdapter,
   FileView,
   Menu,
   Notice,
@@ -11,8 +10,6 @@ import {
   type TAbstractFile,
   type WorkspaceLeaf,
 } from "obsidian";
-import { remote } from "electron";
-import { promises as nodeFs } from "fs";
 import { DefinitionStore } from "./definitions/DefinitionStore";
 import { RuntimeStateStore } from "./runtime/RuntimeStateStore";
 import { SpaceController } from "./controller/SpaceController";
@@ -77,9 +74,6 @@ import {
   watchesMetadata,
 } from "./definitions/membership";
 import { canonicalPath, compileIgnore } from "./visibility/glob";
-import { exportSpace } from "./export/exportCommand";
-import { createNodeExportSink } from "./export/nodeExportSink";
-import { ConfirmModal } from "./ui/ConfirmModal";
 import { buildPreview } from "./ui/previewSeam";
 import { PublicApi } from "./api/PublicApi";
 import { MissingRootNotice } from "./ui/MissingRootNotice";
@@ -145,7 +139,6 @@ import { DragOrdering } from "./order/DragOrdering";
 import { livePathsFrom, type LeafProbe } from "./explorer/leafVisitors";
 import type {
   ActiveSelection,
-  SpaceDefinition,
   SpacesApi,
   SpacesDefinitions,
   SwitchOutcome,
@@ -664,13 +657,7 @@ export default class SpacesPlugin extends Plugin {
       // the same way the two accessors above are, so it is read when a
       // placement change actually happens rather than now.
       () => this.switcher?.cancelDrag(),
-      () => this.controller.drawnPropertyIndex(),
-      // Deferred for the same reason as everything above it: the
-      // controller the export needs does not exist in `onload()`. By id,
-      // so the space is re-read at click time rather than captured when
-      // the tab was built.
-      (id: string) =>
-        this.exportSpace(this.defs.get().spaces.find((s) => s.id === id) ?? null)
+      () => this.controller.drawnPropertyIndex()
     );
     this.addSettingTab(this.settingTab);
 
@@ -1186,69 +1173,6 @@ export default class SpacesPlugin extends Plugin {
    * and `controller`, and the controller does not exist until `start()` has
    * run.
    */
-  /**
-   * Builds the export's context out of the live app and runs it.
-   *
-   * Everything the export decides is in `exportCommand.ts`, which takes its
-   * collaborators as functions so the whole orchestration is testable
-   * without an Obsidian runtime. This method is where those functions are
-   * made out of the live app: it is the only place that reaches Electron,
-   * and the only place in the export that reaches the vault adapter.
-   * `nodeExportSink.ts` does the rest of the filesystem work, and
-   * `realpath` below is the one `fs` call outside it.
-   */
-  async exportSpace(space: SpaceDefinition | null): Promise<void> {
-    const settings = this.defs.get().settings;
-    const ignore = compileIgnore(settings.globalIgnore);
-    const excluded = new Set((space?.exclude ?? []).map(canonicalPath));
-    const adapter = this.app.vault.adapter;
-
-    await exportSpace({
-      space,
-      // Built for THIS space rather than read off the pane, so a Settings
-      // row can export a space the user is not in. Null still means the
-      // space resolves against an index that is not ready.
-      snapshot: space === null ? null : this.controller.snapshotFor(space),
-      vault: this.controller.vaultIndex(),
-      order: space ? this.defs.get().orders?.bySpaceId?.[space.id] : undefined,
-      links: this.app.metadataCache.resolvedLinks,
-      isIgnored: (path: string) => ignore.matches(path),
-      // The engine stores exclusions already folded, so the lookup folds too.
-      isExcluded: (path: string) => excluded.has(canonicalPath(path)),
-      // Null for anything but a real folder on disk, which `checkExportDir`
-      // turns into a refusal rather than letting the guard fail open.
-      vaultBasePath: adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null,
-      parseProgress: () => nativeParseProgress(this.app),
-      // The missing-root state the rest of the plugin means: a root is
-      // declared but is not a folder in the vault. `rootOf` alone is not
-      // enough, because it never consults the vault and answers null only
-      // for an empty or vault-root value, so a root that was deleted or
-      // renamed used to pass this guard, produce an empty plan, and export
-      // a folder holding nothing but a manifest.
-      rootMissing:
-        hasRoot(space) &&
-        (() => {
-          const root = rootOf(space);
-          return root === null || this.controller.vaultIndex().kindOf(root) !== "folder";
-        })(),
-      pickDir: async () => {
-        const picked = await remote.dialog.showOpenDialog({
-          title: "Export space to a folder",
-          properties: ["openDirectory", "createDirectory"],
-        });
-        return picked.canceled ? null : picked.filePaths[0];
-      },
-      realpath: (path) => nodeFs.realpath(path),
-      confirm: (prompt) => new ConfirmModal(this.app, prompt).ask(),
-      makeSink: (rootDir) => createNodeExportSink(rootDir),
-      readBinary: async (path: string) => new Uint8Array(await adapter.readBinary(path)),
-      notify: (message) => {
-        new Notice(message);
-      },
-      now: () => new Date(),
-    });
-  }
-
   private commandSpecs(): Command[] {
     const creationCtx = { defs: this.defs, controller: this.controller };
     return [
@@ -1256,11 +1180,6 @@ export default class SpacesPlugin extends Plugin {
         id: "switch-to-all",
         name: "Switch to All",
         callback: () => void this.controller.switchTo({ kind: "all" }),
-      },
-      {
-        id: "export-space",
-        name: "Export space to a folder",
-        callback: () => void this.exportSpace(this.controller.activeSpace()),
       },
       {
         id: "next-space",
